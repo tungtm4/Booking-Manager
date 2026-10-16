@@ -12,10 +12,21 @@ import {
   PlusCircle, 
   Database,
   Menu,
-  X
+  X,
+  Tag,
+  Bot,
+  Upload
 } from 'lucide-react';
 
-export type ActiveTab = 'dashboard' | 'kols' | 'sow' | 'recommend' | 'backup';
+export type ActiveTab = 
+  | 'dashboard' 
+  | 'kols' 
+  | 'price_update' 
+  | 'ai_extract' 
+  | 'import_data' 
+  | 'sow' 
+  | 'recommend' 
+  | 'backup';
 
 interface NavbarProps {
   activeTab: ActiveTab;
@@ -48,6 +59,25 @@ export const Navbar: React.FC<NavbarProps> = ({
       label: 'Danh sách KOL',
       icon: Users,
       badge: kolCount,
+    },
+    {
+      id: 'price_update' as ActiveTab,
+      label: 'Cập nhật giá',
+      icon: Tag,
+      badge: null,
+    },
+    {
+      id: 'ai_extract' as ActiveTab,
+      label: 'AI cập nhật giá',
+      icon: Bot,
+      badge: 'Gemini',
+      badgeColor: 'bg-purple-100 text-purple-700 font-bold',
+    },
+    {
+      id: 'import_data' as ActiveTab,
+      label: 'Import dữ liệu',
+      icon: Upload,
+      badge: null,
     },
     {
       id: 'sow' as ActiveTab,

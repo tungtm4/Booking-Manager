@@ -11,6 +11,9 @@ import { KolDetailModal } from './components/KolDetailModal';
 import { KolFormModal } from './components/KolFormModal';
 import { SowQuoteBuilder } from './components/SowQuoteBuilder';
 import { KolRecommendation } from './components/KolRecommendation';
+import { BulkPriceUpdate } from './components/BulkPriceUpdate';
+import { AiPriceExtractor } from './components/AiPriceExtractor';
+import { DataImportView } from './components/DataImportView';
 import { DataBackupModal } from './components/DataBackupModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { StorageService } from './services/storageService';
@@ -195,6 +198,27 @@ export default function App() {
             onOpenAddKol={handleOpenAddKol}
             onAddToSow={handleAddKolToSow}
             initialSearch={listSearchKeyword}
+          />
+        )}
+
+        {activeTab === 'price_update' && (
+          <BulkPriceUpdate
+            kols={kols}
+            onDataSaved={reloadData}
+          />
+        )}
+
+        {activeTab === 'ai_extract' && (
+          <AiPriceExtractor
+            kols={kols}
+            onDataSaved={reloadData}
+          />
+        )}
+
+        {activeTab === 'import_data' && (
+          <DataImportView
+            kols={kols}
+            onDataImported={reloadData}
           />
         )}
 

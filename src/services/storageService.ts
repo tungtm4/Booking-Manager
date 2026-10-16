@@ -146,6 +146,217 @@ export const StorageService = {
     return updatedKol;
   },
 
+  // Cập nhật bảng giá hàng loạt cho nhiều KOL (Feature 2.1)
+  bulkUpdatePrices(updates: Array<{ kolId: string; bangGia: KolProfile['bangGia'] }>): number {
+    const kols = this.getKols();
+    const now = new Date().toISOString();
+    let updatedCount = 0;
+
+    updates.forEach((up) => {
+      const idx = kols.findIndex((k) => k.id === up.kolId);
+      if (idx >= 0) {
+        kols[idx] = {
+          ...kols[idx],
+          bangGia: { ...kols[idx].bangGia, ...up.bangGia },
+          ngayCapNhat: now,
+        };
+        updatedCount++;
+      }
+    });
+
+    if (updatedCount > 0) {
+      localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(kols));
+      notifyChange(STORAGE_KEYS.KOLS);
+    }
+    return updatedCount;
+  },
+
+  // Cập nhật giá 1 format cho KOL (dùng cho AI trích xuất giá - Feature 2.2)
+  updateKolPriceFormat(kolId: string, format: keyof KolProfile['bangGia'], price: number | null): KolProfile | null {
+    const kol = this.getKolById(kolId);
+    if (!kol) return null;
+
+    const updatedKol: KolProfile = {
+      ...kol,
+      bangGia: {
+        ...(kol.bangGia || {
+          post: null,
+          video: null,
+          shorts: null,
+          livestream: null,
+          thamDuSuKien: null,
+          sdha: null,
+        }),
+        [format]: price,
+      },
+      ngayCapNhat: new Date().toISOString(),
+    };
+
+    return this.saveKol(updatedKol);
+  },
+
+  // Import hàng loạt từ Excel / Google Sheet (Feature 2.3)
+  importBatchKols(
+    items: Array<{
+      ten: string;
+      nenTang?: string;
+      linkProfile?: string;
+      soFollower?: number;
+      engagementRate?: number;
+      linhVuc?: string[];
+      bangGia?: Partial<KolProfile['bangGia']>;
+      tenNguoiLienHe?: string;
+      soDienThoai?: string;
+      emailZalo?: string;
+    }>,
+    matchKey: 'name' | 'link' = 'name',
+    overwriteEmpty: boolean = false
+  ): { created: number; updated: number } {
+    const kols = this.getKols();
+    const now = new Date().toISOString();
+    let createdCount = 0;
+    let updatedCount = 0;
+
+    const normalizeName = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
+    const normalizeUrl = (s: string) =>
+      s
+        .toLowerCase()
+        .trim()
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .split('?')[0]
+        .split('#')[0]
+        .replace(/\/+$/, '');
+
+    items.forEach((item) => {
+      if (!item.ten || !item.ten.trim()) return;
+
+      const normItemName = normalizeName(item.ten);
+      const normItemLink = item.linkProfile ? normalizeUrl(item.linkProfile) : '';
+
+      let matchedIndex = -1;
+
+      if (matchKey === 'link' && normItemLink) {
+        // Khớp theo link kênh
+        matchedIndex = kols.findIndex((k) =>
+          k.nenTang?.some((nt) => nt.linkProfile && normalizeUrl(nt.linkProfile) === normItemLink)
+        );
+      }
+
+      if (matchedIndex === -1) {
+        // Khớp theo tên
+        matchedIndex = kols.findIndex((k) => {
+          const normKName = normalizeName(k.ten);
+          return normKName === normItemName || normKName.includes(normItemName) || normItemName.includes(normKName);
+        });
+      }
+
+      if (matchedIndex >= 0) {
+        // CẬP NHẬT KOL ĐÃ CÓ
+        const existing = kols[matchedIndex];
+
+        // Ghi đè hoặc giữ nguyên tùy theo overwriteEmpty
+        const newBangGia = { ...existing.bangGia };
+        if (item.bangGia) {
+          (Object.keys(item.bangGia) as Array<keyof KolProfile['bangGia']>).forEach((key) => {
+            const val = item.bangGia![key];
+            if (val !== undefined && val !== null) {
+              newBangGia[key] = val;
+            } else if (overwriteEmpty) {
+              newBangGia[key] = null;
+            }
+          });
+        }
+
+        // Cập nhật nền tảng nếu có
+        let updatedNenTang = [...(existing.nenTang || [])];
+        if (item.nenTang && (item.linkProfile || item.soFollower)) {
+          const channelIdx = updatedNenTang.findIndex(
+            (nt) => nt.tenNenTang.toLowerCase() === item.nenTang?.toLowerCase()
+          );
+          if (channelIdx >= 0) {
+            updatedNenTang[channelIdx] = {
+              ...updatedNenTang[channelIdx],
+              linkProfile: item.linkProfile || updatedNenTang[channelIdx].linkProfile,
+              soFollower: item.soFollower ?? updatedNenTang[channelIdx].soFollower,
+            };
+          } else {
+            updatedNenTang.push({
+              id: `ch-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+              tenNenTang: (['TikTok', 'YouTube', 'Facebook', 'Instagram'].includes(item.nenTang)
+                ? item.nenTang
+                : 'Khác') as any,
+              linkProfile: item.linkProfile || '',
+              soFollower: item.soFollower || 0,
+            });
+          }
+        }
+
+        kols[matchedIndex] = {
+          ...existing,
+          ten: item.ten.trim() || existing.ten,
+          engagementRate: item.engagementRate !== undefined ? item.engagementRate : existing.engagementRate,
+          linhVuc:
+            item.linhVuc && item.linhVuc.length > 0
+              ? Array.from(new Set([...existing.linhVuc, ...item.linhVuc]))
+              : existing.linhVuc,
+          bangGia: newBangGia,
+          nenTang: updatedNenTang,
+          lienHe: {
+            tenNguoiLienHe: item.tenNguoiLienHe || (overwriteEmpty ? '' : existing.lienHe?.tenNguoiLienHe),
+            soDienThoai: item.soDienThoai || (overwriteEmpty ? '' : existing.lienHe?.soDienThoai),
+            emailZalo: item.emailZalo || (overwriteEmpty ? '' : existing.lienHe?.emailZalo),
+            ghiChu: existing.lienHe?.ghiChu,
+          },
+          ngayCapNhat: now,
+        };
+        updatedCount++;
+      } else {
+        // TẠO MỚI KOL
+        const newKol: KolProfile = {
+          id: `kol-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          ten: item.ten.trim(),
+          nenTang: [
+            {
+              id: `ch-${Date.now()}-1`,
+              tenNenTang: (item.nenTang && ['TikTok', 'YouTube', 'Facebook', 'Instagram'].includes(item.nenTang)
+                ? item.nenTang
+                : 'TikTok') as any,
+              linkProfile: item.linkProfile || '',
+              soFollower: item.soFollower || 0,
+            },
+          ],
+          engagementRate: item.engagementRate,
+          linhVuc: item.linhVuc && item.linhVuc.length > 0 ? item.linhVuc : ['Khác'],
+          bangGia: {
+            post: item.bangGia?.post ?? null,
+            video: item.bangGia?.video ?? null,
+            shorts: item.bangGia?.shorts ?? null,
+            livestream: item.bangGia?.livestream ?? null,
+            thamDuSuKien: item.bangGia?.thamDuSuKien ?? null,
+            sdha: item.bangGia?.sdha ?? null,
+          },
+          lienHe: {
+            tenNguoiLienHe: item.tenNguoiLienHe,
+            soDienThoai: item.soDienThoai,
+            emailZalo: item.emailZalo,
+          },
+          lichSuHopTac: [],
+          isSample: false,
+          ngayTao: now,
+          ngayCapNhat: now,
+        };
+        kols.unshift(newKol);
+        createdCount++;
+      }
+    });
+
+    localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(kols));
+    notifyChange(STORAGE_KEYS.KOLS);
+
+    return { created: createdCount, updated: updatedCount };
+  },
+
   // Xóa toàn bộ dữ liệu mẫu
   deleteSampleKols(): number {
     const kols = this.getKols();

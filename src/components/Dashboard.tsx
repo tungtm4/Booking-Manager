@@ -20,6 +20,16 @@ import {
   CheckCircle2,
   ArrowRight
 } from 'lucide-react';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer, 
+  Cell 
+} from 'recharts';
 import { KolProfile } from '../types/kol';
 import { formatFollowers, formatVND, getCategoryBadgeClass } from '../utils/formatters';
 import { ActiveTab } from './Navbar';
@@ -52,17 +62,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
   let youtubeCount = 0;
   let facebookCount = 0;
   let instagramCount = 0;
+  let otherCount = 0;
+  let tiktokFollowers = 0;
+  let youtubeFollowers = 0;
+  let facebookFollowers = 0;
+  let instagramFollowers = 0;
+  let otherFollowers = 0;
   let totalFollowers = 0;
   let totalEngagement = 0;
   let ratedCount = 0;
 
   kols.forEach((k) => {
     k.nenTang?.forEach((nt) => {
-      totalFollowers += nt.soFollower || 0;
-      if (nt.tenNenTang === 'TikTok') tiktokCount++;
-      if (nt.tenNenTang === 'YouTube') youtubeCount++;
-      if (nt.tenNenTang === 'Facebook') facebookCount++;
-      if (nt.tenNenTang === 'Instagram') instagramCount++;
+      const fol = nt.soFollower || 0;
+      totalFollowers += fol;
+      if (nt.tenNenTang === 'TikTok') {
+        tiktokCount++;
+        tiktokFollowers += fol;
+      } else if (nt.tenNenTang === 'YouTube') {
+        youtubeCount++;
+        youtubeFollowers += fol;
+      } else if (nt.tenNenTang === 'Facebook') {
+        facebookCount++;
+        facebookFollowers += fol;
+      } else if (nt.tenNenTang === 'Instagram') {
+        instagramCount++;
+        instagramFollowers += fol;
+      } else {
+        otherCount++;
+        otherFollowers += fol;
+      }
     });
     if (k.engagementRate && k.engagementRate > 0) {
       totalEngagement += k.engagementRate;
@@ -71,6 +100,43 @@ export const Dashboard: React.FC<DashboardProps> = ({
   });
 
   const avgEngagement = ratedCount > 0 ? (totalEngagement / ratedCount).toFixed(1) : '0';
+
+  // Dữ liệu cho biểu đồ Recharts BarChart
+  const platformChartData = [
+    {
+      name: 'TikTok',
+      soLuong: tiktokCount,
+      followers: tiktokFollowers,
+      color: '#111827',
+    },
+    {
+      name: 'YouTube',
+      soLuong: youtubeCount,
+      followers: youtubeFollowers,
+      color: '#ef4444',
+    },
+    {
+      name: 'Facebook',
+      soLuong: facebookCount,
+      followers: facebookFollowers,
+      color: '#2563eb',
+    },
+    {
+      name: 'Instagram',
+      soLuong: instagramCount,
+      followers: instagramFollowers,
+      color: '#e1306c',
+    },
+  ];
+
+  if (otherCount > 0) {
+    platformChartData.push({
+      name: 'Khác',
+      soLuong: otherCount,
+      followers: otherFollowers,
+      color: '#8b5cf6',
+    });
+  }
 
   // KOL mới cập nhật gần đây (sắp xếp theo ngayCapNhat hoặc ngayTao)
   const recentKols = [...kols]
@@ -284,6 +350,116 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="mt-2 text-xs text-slate-500">
             Đã lưu dữ liệu nghiệm thu & chi phí thực tế
           </div>
+        </div>
+      </div>
+
+      {/* Biểu Đồ Cột Recharts: Phân Bổ KOL Theo Từng Nền Tảng */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5 sm:p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
+          <div>
+            <h2 className="font-bold text-slate-900 text-base sm:text-lg flex items-center gap-2">
+              <Share2 className="w-5 h-5 text-indigo-600" />
+              <span>Phân Bổ KOL Theo Nền Tảng Mạng Xã Hội</span>
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Biểu đồ trực quan số lượng KOL và độ phủ sóng theo từng kênh truyền thông
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {platformChartData.map((p) => (
+              <span
+                key={p.name}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-700"
+              >
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
+                <span>{p.name}:</span>
+                <strong className="text-slate-900">{p.soLuong}</strong>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Chart Canvas */}
+        <div className="w-full h-72 pt-2">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={platformChartData}
+              margin={{ top: 20, right: 30, left: -10, bottom: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis
+                dataKey="name"
+                tick={{ fill: '#475569', fontSize: 13, fontWeight: 600 }}
+                axisLine={{ stroke: '#cbd5e1' }}
+                tickLine={false}
+              />
+              <YAxis
+                allowDecimals={false}
+                tick={{ fill: '#94a3b8', fontSize: 12 }}
+                axisLine={false}
+                tickLine={false}
+                domain={[0, (dataMax: number) => Math.max(dataMax + 1, 5)]}
+              />
+              <Tooltip
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    const data = payload[0].payload;
+                    const percent =
+                      totalKols > 0 ? Math.round((data.soLuong / totalKols) * 100) : 0;
+                    return (
+                      <div className="bg-slate-900/95 backdrop-blur-xs text-white p-3.5 rounded-xl shadow-xl border border-slate-700 text-xs space-y-1.5">
+                        <div className="flex items-center gap-2 font-bold text-sm">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full"
+                            style={{ backgroundColor: data.color }}
+                          />
+                          <span>Nền tảng {data.name}</span>
+                        </div>
+                        <div className="text-slate-300 pt-1">
+                          Số lượng KOL:{' '}
+                          <strong className="text-white font-bold">{data.soLuong} KOL</strong>{' '}
+                          <span className="text-indigo-300">({percent}% tổng hồ sơ)</span>
+                        </div>
+                        <div className="text-slate-400">
+                          Tổng lượt theo dõi:{' '}
+                          <strong className="text-amber-300 font-semibold">
+                            {formatFollowers(data.followers)} followers
+                          </strong>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+              <Bar dataKey="soLuong" radius={[8, 8, 0, 0]} maxBarSize={60}>
+                {platformChartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Thống kê chi tiết dưới biểu đồ */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-100 text-xs">
+          {platformChartData.map((item) => (
+            <div key={item.name} className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
+              <div className="flex items-center justify-between text-slate-500 mb-1">
+                <span className="font-semibold text-slate-700">{item.name}</span>
+                <span className="font-bold" style={{ color: item.color }}>
+                  {item.soLuong} KOL
+                </span>
+              </div>
+              <div className="text-slate-500 text-[11px] flex items-center justify-between">
+                <span>Followers:</span>
+                <span className="font-semibold text-slate-800">
+                  {formatFollowers(item.followers)}
+                </span>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
