@@ -95,7 +95,7 @@ export const DataBackupModal: React.FC<DataBackupModalProps> = ({
 
   const handleRestoreSample = () => {
     StorageService.restoreSampleKols();
-    setFeedback({ type: 'success', text: 'Đã khôi phục 5 hồ sơ KOL mẫu vào hệ thống!' });
+    setFeedback({ type: 'success', text: 'Đã khôi phục 20 hồ sơ KOL mẫu vào hệ thống!' });
     onDataChanged();
   };
 
@@ -212,7 +212,7 @@ export const DataBackupModal: React.FC<DataBackupModalProps> = ({
                 className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>Nạp lại 5 KOL mẫu</span>
+                <span>Nạp lại 20 KOL mẫu</span>
               </button>
             </div>
           </div>

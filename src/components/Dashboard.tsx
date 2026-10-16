@@ -28,7 +28,8 @@ import {
   CartesianGrid, 
   Tooltip, 
   ResponsiveContainer, 
-  Cell 
+  Cell,
+  LabelList 
 } from 'recharts';
 import { KolProfile } from '../types/kol';
 import { formatFollowers, formatVND, getCategoryBadgeClass } from '../utils/formatters';
@@ -368,14 +369,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           <div className="flex items-center gap-2 flex-wrap">
             {platformChartData.map((p) => (
-              <span
+              <button
                 key={p.name}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-700"
+                type="button"
+                onClick={() => {
+                  onQuickSearch(p.name);
+                  setActiveTab('kols');
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-slate-300 text-slate-700 transition-colors cursor-pointer"
+                title={`Lọc danh sách KOL ${p.name}`}
               >
                 <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
                 <span>{p.name}:</span>
                 <strong className="text-slate-900">{p.soLuong}</strong>
-              </span>
+              </button>
             ))}
           </div>
         </div>
@@ -399,7 +406,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 tick={{ fill: '#94a3b8', fontSize: 12 }}
                 axisLine={false}
                 tickLine={false}
-                domain={[0, (dataMax: number) => Math.max(dataMax + 1, 5)]}
+                domain={[0, (dataMax: number) => Math.max(dataMax + 3, 6)]}
               />
               <Tooltip
                 content={({ active, payload }) => {
@@ -427,15 +434,40 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             {formatFollowers(data.followers)} followers
                           </strong>
                         </div>
+                        <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-800 italic">
+                          Click để xem danh sách KOL {data.name}
+                        </div>
                       </div>
                     );
                   }
                   return null;
                 }}
               />
-              <Bar dataKey="soLuong" radius={[8, 8, 0, 0]} maxBarSize={60}>
+              <Bar 
+                dataKey="soLuong" 
+                radius={[8, 8, 0, 0]} 
+                maxBarSize={60}
+                onClick={(entry: any) => {
+                  if (entry && entry.name) {
+                    onQuickSearch(entry.name);
+                    setActiveTab('kols');
+                  }
+                }}
+                className="cursor-pointer"
+              >
+                <LabelList 
+                  dataKey="soLuong" 
+                  position="top" 
+                  offset={8}
+                  formatter={(val: any) => `${val} KOL`} 
+                  style={{ fill: '#334155', fontSize: 12, fontWeight: 700 }} 
+                />
                 {platformChartData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
+                  <Cell 
+                    key={`cell-${index}`} 
+                    fill={entry.color} 
+                    className="hover:opacity-85 transition-opacity cursor-pointer"
+                  />
                 ))}
               </Bar>
             </BarChart>
@@ -445,9 +477,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
         {/* Thống kê chi tiết dưới biểu đồ */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-100 text-xs">
           {platformChartData.map((item) => (
-            <div key={item.name} className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
+            <button
+              key={item.name}
+              type="button"
+              onClick={() => {
+                onQuickSearch(item.name);
+                setActiveTab('kols');
+              }}
+              className="p-2.5 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-100 hover:border-slate-300 transition-all text-left cursor-pointer group"
+              title={`Xem danh sách KOL ${item.name}`}
+            >
               <div className="flex items-center justify-between text-slate-500 mb-1">
-                <span className="font-semibold text-slate-700">{item.name}</span>
+                <span className="font-semibold text-slate-700 group-hover:text-indigo-600 transition-colors">
+                  {item.name}
+                </span>
                 <span className="font-bold" style={{ color: item.color }}>
                   {item.soLuong} KOL
                 </span>
@@ -458,7 +501,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   {formatFollowers(item.followers)}
                 </span>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </div>

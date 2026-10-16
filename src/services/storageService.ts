@@ -40,11 +40,25 @@ export const StorageService = {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.KOLS);
       if (!data) {
-        // Nạp 5 KOL mẫu lần đầu
+        // Nạp 20 KOL mẫu lần đầu
         localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(INITIAL_SAMPLE_KOLS));
         return INITIAL_SAMPLE_KOLS;
       }
-      return JSON.parse(data) as KolProfile[];
+      const parsed = JSON.parse(data) as KolProfile[];
+      if (Array.isArray(parsed)) {
+        const samplesCleared = localStorage.getItem('kol_booking_samples_cleared') === 'true';
+        if (!samplesCleared) {
+          const existingIds = new Set(parsed.map((k) => k.id));
+          const missingSamples = INITIAL_SAMPLE_KOLS.filter((s) => !existingIds.has(s.id));
+          if (missingSamples.length > 0) {
+            // Tự động bổ sung các KOL mẫu mới để đảm bảo đủ 20 KOL mẫu
+            const updated = [...parsed, ...missingSamples];
+            localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(updated));
+            return updated;
+          }
+        }
+      }
+      return parsed;
     } catch (e) {
       console.error('Lỗi khi đọc dữ liệu KOL từ localStorage:', e);
       return INITIAL_SAMPLE_KOLS;
@@ -363,14 +377,16 @@ export const StorageService = {
     const nonSample = kols.filter((k) => !k.isSample);
     const countRemoved = kols.length - nonSample.length;
     localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(nonSample));
+    localStorage.setItem('kol_booking_samples_cleared', 'true');
     notifyChange(STORAGE_KEYS.KOLS);
     return countRemoved;
   },
 
-  // Khôi phục 5 KOL mẫu
+  // Khôi phục 20 KOL mẫu
   restoreSampleKols(): void {
     const current = this.getKols().filter((k) => !k.isSample);
     const combined = [...INITIAL_SAMPLE_KOLS, ...current];
+    localStorage.removeItem('kol_booking_samples_cleared');
     localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(combined));
     notifyChange(STORAGE_KEYS.KOLS);
   },
