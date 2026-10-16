@@ -99,20 +99,48 @@ export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onData
     if (exact) return exact;
 
     // 2. Khớp chuỗi con (một bên chứa bên kia)
-    const substringMatch = kols.find((k) => {
+    const subMatches = kols.filter((k) => {
       const cleanK = k.ten.toLowerCase().trim();
-      return cleanK.includes(cleanRaw) || cleanRaw.includes(cleanK);
+      return cleanK.includes(cleanRaw) || (cleanRaw.length > 3 && cleanRaw.includes(cleanK));
     });
-    if (substringMatch) return substringMatch;
+    if (subMatches.length === 1) {
+      return subMatches[0];
+    }
+    if (subMatches.length > 1) {
+      const exactSub = subMatches.filter((k) => k.ten.toLowerCase().includes(cleanRaw));
+      if (exactSub.length > 0) {
+        return exactSub.sort((a, b) => a.ten.length - b.ten.length)[0];
+      }
+      return subMatches.sort((a, b) => a.ten.length - b.ten.length)[0];
+    }
 
-    // 3. Khớp từng từ nghệ danh (vd: "Mai Anh" trong "Trần Mai Anh (Mai Anh Skincare)")
-    const words = cleanRaw.split(' ').filter((w) => w.length > 1);
+    // 3. Khớp từng từ nghệ danh: ưu tiên KOL có số từ khớp nhiều nhất thay vì lấy KOL đầu tiên tìm thấy
+    const words = cleanRaw.split(/\s+/).filter((w) => w.length > 1);
     if (words.length > 0) {
-      const wordMatch = kols.find((k) => {
+      let bestKol: KolProfile | null = null;
+      let maxMatchedWords = 0;
+
+      kols.forEach((k) => {
         const cleanK = k.ten.toLowerCase();
-        return words.every((w) => cleanK.includes(w));
+        // Đếm số từ trong cleanRaw xuất hiện trong tên KOL
+        const matchedCount = words.filter((w) => cleanK.includes(w)).length;
+        if (matchedCount > maxMatchedWords) {
+          maxMatchedWords = matchedCount;
+          bestKol = k;
+        } else if (matchedCount === maxMatchedWords && matchedCount > 0 && bestKol) {
+          // Nếu bằng số từ, ưu tiên KOL có chứa cụm 2 từ liền nhau
+          const hasPairCur = words.some((_, i) => i < words.length - 1 && cleanK.includes(`${words[i]} ${words[i + 1]}`));
+          const bestCleanK = bestKol.ten.toLowerCase();
+          const hasPairBest = words.some((_, i) => i < words.length - 1 && bestCleanK.includes(`${words[i]} ${words[i + 1]}`));
+          if (hasPairCur && !hasPairBest) {
+            bestKol = k;
+          }
+        }
       });
-      if (wordMatch) return wordMatch;
+
+      if (bestKol && maxMatchedWords > 0) {
+        return bestKol;
+      }
     }
 
     return null;
@@ -154,30 +182,53 @@ export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onData
     const segments = text.split(/[,;\n\.]+/);
     let currentKolName = 'KOL';
 
-    // Tìm tên KOL trong văn bản trước
+    // Logic chấm điểm tìm KOL trong văn bản: duyệt 1 lượt rồi chọn điểm cao nhất (không ghi đè dần)
+    const textLower = text.toLowerCase();
+    let bestScore = 0;
+    let bestKolName = '';
+
     kols.forEach((k) => {
-      const cleanK = k.ten.toLowerCase();
-      // Thử cả tên đầy đủ hoặc phần trong ngoặc
-      if (text.toLowerCase().includes(cleanK)) {
-        currentKolName = k.ten;
+      let score = 0;
+      const cleanK = k.ten.toLowerCase().trim();
+
+      // - Tên đầy đủ của KOL xuất hiện trong text: 100 điểm
+      if (textLower.includes(cleanK)) {
+        score = 100;
       } else {
-        // Tách các từ riêng (ví dụ "Mai Anh", "Long Chun", "Quân")
-        const parts = k.ten.replace(/[()]/g, ' ').split(/\s+/).filter((p) => p.length > 2);
-        for (let i = 0; i < parts.length; i++) {
-          const single = parts[i].toLowerCase();
-          const pair = i < parts.length - 1 ? `${parts[i]} ${parts[i + 1]}`.toLowerCase() : '';
-          if (pair && text.toLowerCase().includes(pair)) {
-            currentKolName = k.ten;
+        // Tách các từ trong tên (loại bỏ dấu ngoặc đơn)
+        const parts = k.ten.replace(/[()]/g, ' ').split(/\s+/).filter((p) => p.length > 0);
+
+        // - Cụm 2 từ liên tiếp trong tên xuất hiện trong text: 50 điểm
+        let hasPair = false;
+        for (let i = 0; i < parts.length - 1; i++) {
+          const pair = `${parts[i]} ${parts[i + 1]}`.toLowerCase();
+          if (textLower.includes(pair)) {
+            hasPair = true;
             break;
-          } else if (single && text.toLowerCase().includes(single)) {
-            currentKolName = k.ten;
+          }
+        }
+
+        if (hasPair) {
+          score = 50;
+        } else {
+          // - 1 từ đơn (dài > 2 ký tự) xuất hiện: 10 điểm
+          const hasSingle = parts.some((p) => p.length > 2 && textLower.includes(p.toLowerCase()));
+          if (hasSingle) {
+            score = 10;
           }
         }
       }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestKolName = k.ten;
+      }
     });
 
-    // Nếu vẫn chưa tìm thấy trong kols, tìm tên đứng trước từ "báo giá", "báo", "gửi giá"
-    if (currentKolName === 'KOL') {
+    // - Không KOL nào trên 0 điểm thì giữ logic cũ (tìm tên đứng trước chữ "báo giá")
+    if (bestScore > 0 && bestKolName) {
+      currentKolName = bestKolName;
+    } else {
       const nameMatch = text.match(/([A-ZÀ-Ỹ][a-zà-ỹ]+(?:\s+[A-ZÀ-Ỹ][a-zà-ỹ]+)*)\s*(?:báo giá|báo|gửi giá|giá)/i);
       if (nameMatch && nameMatch[1]) {
         currentKolName = nameMatch[1].trim();
