@@ -1,0 +1,6 @@
+{
+  "name": "KOL Booking Manager",
+  "description": "Ứng dụng quản lý thông tin chi tiết KOL, lập báo giá SOW và đề xuất KOL thông minh phục vụ booking quảng cáo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
