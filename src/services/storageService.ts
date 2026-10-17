@@ -111,6 +111,20 @@ export const StorageService = {
     return false;
   },
 
+  // Xóa nhiều KOL cùng lúc
+  deleteMultipleKols(ids: string[]): number {
+    if (!ids || ids.length === 0) return 0;
+    const idSet = new Set(ids);
+    const kols = this.getKols();
+    const filtered = kols.filter((k) => !idSet.has(k.id));
+    const countRemoved = kols.length - filtered.length;
+    if (countRemoved > 0) {
+      localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(filtered));
+      notifyChange(STORAGE_KEYS.KOLS);
+    }
+    return countRemoved;
+  },
+
   // Thêm 1 mục lịch sử hợp tác vào KOL
   addCollaboration(kolId: string, item: Omit<CollaborationHistory, 'id'>): KolProfile | null {
     const kol = this.getKolById(kolId);
