@@ -102,13 +102,16 @@ export const StorageService = {
   // Xóa KOL
   deleteKol(id: string): boolean {
     const kols = this.getKols();
+    const target = kols.find((k) => k.id === id);
+    if (!target) return false;
+
     const filtered = kols.filter((k) => k.id !== id);
-    if (filtered.length !== kols.length) {
-      localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(filtered));
-      notifyChange(STORAGE_KEYS.KOLS);
-      return true;
+    localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(filtered));
+    if (target.isSample) {
+      localStorage.setItem('kol_booking_samples_cleared', 'true');
     }
-    return false;
+    notifyChange(STORAGE_KEYS.KOLS);
+    return true;
   },
 
   // Xóa nhiều KOL cùng lúc
@@ -116,13 +119,16 @@ export const StorageService = {
     if (!ids || ids.length === 0) return 0;
     const idSet = new Set(ids);
     const kols = this.getKols();
+    const removedKols = kols.filter((k) => idSet.has(k.id));
+    if (removedKols.length === 0) return 0;
+
     const filtered = kols.filter((k) => !idSet.has(k.id));
-    const countRemoved = kols.length - filtered.length;
-    if (countRemoved > 0) {
-      localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(filtered));
-      notifyChange(STORAGE_KEYS.KOLS);
+    localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(filtered));
+    if (removedKols.some((k) => k.isSample)) {
+      localStorage.setItem('kol_booking_samples_cleared', 'true');
     }
-    return countRemoved;
+    notifyChange(STORAGE_KEYS.KOLS);
+    return removedKols.length;
   },
 
   // Thêm 1 mục lịch sử hợp tác vào KOL
