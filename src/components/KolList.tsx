@@ -80,6 +80,10 @@ export const KolList: React.FC<KolListProps> = ({
   const [selectedQuoteId, setSelectedQuoteId] = useState<string>('');
   const [newCampaignName, setNewCampaignName] = useState('');
   const [newClientName, setNewClientName] = useState('');
+  const [rowFormats, setRowFormats] = useState<Record<string, PriceFormatKey>>({});
+  const [dialogCheckedIds, setDialogCheckedIds] = useState<string[]>([]);
+  const [batchApplyFormat, setBatchApplyFormat] = useState<PriceFormatKey>('video');
+  const [touchedFormats, setTouchedFormats] = useState<Set<string>>(new Set());
 
   // Modal Xóa Hàng Loạt
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
@@ -113,6 +117,14 @@ export const KolList: React.FC<KolListProps> = ({
     setSortBy('newest');
   };
 
+  // Đóng Modal Thêm vào Báo giá & reset state liên quan
+  const handleCloseAddToQuote = () => {
+    setIsAddToQuoteModalOpen(false);
+    setRowFormats({});
+    setDialogCheckedIds([]);
+    setTouchedFormats(new Set());
+  };
+
   // Xử lý mở Modal Thêm vào Báo giá
   const handleOpenAddToQuote = () => {
     const quotes = StorageService.getQuotes();
@@ -125,7 +137,35 @@ export const KolList: React.FC<KolListProps> = ({
     }
     setNewCampaignName('');
     setNewClientName('');
+
+    // Khởi tạo loại giá cho từng KOL và danh sách KOL được tick
+    const initialRowFormats: Record<string, PriceFormatKey> = {};
+    selectedKolIds.forEach((id) => {
+      initialRowFormats[id] = budgetFormat;
+    });
+    setRowFormats(initialRowFormats);
+    setDialogCheckedIds([...selectedKolIds]);
+    setBatchApplyFormat(budgetFormat);
+    setTouchedFormats(new Set());
     setIsAddToQuoteModalOpen(true);
+  };
+
+  // Áp dụng loại giá chung cho các KOL đang được tick trong dialog
+  const handleApplyBatchFormat = () => {
+    if (dialogCheckedIds.length === 0) return;
+    setRowFormats((prev) => {
+      const updated = { ...prev };
+      dialogCheckedIds.forEach((id) => {
+        updated[id] = batchApplyFormat;
+      });
+      return updated;
+    });
+    setTouchedFormats((prev) => {
+      const next = new Set(prev);
+      dialogCheckedIds.forEach((id) => next.add(id));
+      return next;
+    });
+    setDialogCheckedIds([]);
   };
 
   // Xác nhận thêm các KOL đã chọn vào báo giá
@@ -174,7 +214,8 @@ export const KolList: React.FC<KolListProps> = ({
       if (existingKolIds.has(kol.id)) {
         skippedCount++;
       } else {
-        const price = kol.bangGia ? kol.bangGia[budgetFormat] : null;
+        const format = rowFormats[kol.id] || budgetFormat;
+        const price = kol.bangGia ? kol.bangGia[format] : null;
         const donGia = price || 0;
         const laGiaTam = price === null || price === undefined || price === 0;
 
@@ -183,8 +224,8 @@ export const KolList: React.FC<KolListProps> = ({
           kolId: kol.id,
           kolName: kol.ten,
           kolAvatar: kol.anhDaiDien,
-          format: budgetFormat,
-          formatLabel: PRICE_FORMAT_LABELS[budgetFormat],
+          format,
+          formatLabel: PRICE_FORMAT_LABELS[format],
           soLuong: 1,
           donGia,
           laGiaTam,
@@ -219,7 +260,7 @@ export const KolList: React.FC<KolListProps> = ({
 
     showToast(msg, 'success');
     setSelectedKolIds([]);
-    setIsAddToQuoteModalOpen(false);
+    handleCloseAddToQuote();
   };
 
   // Mở modal xác nhận xóa hàng loạt
@@ -1027,19 +1068,14 @@ export const KolList: React.FC<KolListProps> = ({
                 <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
                   <FileSpreadsheet className="w-5 h-5" />
                 </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    Thêm {selectedKolIds.length} KOL vào Báo Giá SOW
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Format áp dụng: <span className="font-semibold text-indigo-600">{PRICE_FORMAT_LABELS[budgetFormat]}</span> (số lượng: 1)
-                  </p>
-                </div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Thêm {selectedKolIds.length} KOL vào Báo Giá SOW
+                </h3>
               </div>
               <button
                 type="button"
-                onClick={() => setIsAddToQuoteModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                onClick={handleCloseAddToQuote}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1170,23 +1206,95 @@ export const KolList: React.FC<KolListProps> = ({
               )}
 
               {/* Danh sách KOL sẽ được thêm */}
-              <div className="pt-2 border-t border-slate-100">
-                <label className="block text-slate-700 font-bold mb-2">
-                  Danh sách {selectedKolIds.length} KOL sẽ thêm:
-                </label>
-                <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+              <div className="pt-3 border-t border-slate-100 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-slate-800 font-bold">
+                    Danh sách {selectedKolIds.length} KOL sẽ thêm:
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (dialogCheckedIds.length === selectedKolIds.length) {
+                        setDialogCheckedIds([]);
+                      } else {
+                        setDialogCheckedIds([...selectedKolIds]);
+                      }
+                    }}
+                    className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+                  >
+                    {dialogCheckedIds.length === selectedKolIds.length ? 'Bỏ tick tất cả' : 'Tick tất cả'}
+                  </button>
+                </div>
+
+                {/* Thanh áp dụng hàng loạt */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-1 min-w-[180px]">
+                    <label htmlFor="batch-apply-format-select" className="text-xs font-semibold text-slate-700 shrink-0">
+                      Loại giá:
+                    </label>
+                    <select
+                      id="batch-apply-format-select"
+                      value={batchApplyFormat}
+                      onChange={(e) => setBatchApplyFormat(e.target.value as PriceFormatKey)}
+                      className="flex-1 px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                    >
+                      {(['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'] as PriceFormatKey[]).map((fmtKey) => (
+                        <option key={fmtKey} value={fmtKey}>
+                          {PRICE_FORMAT_LABELS[fmtKey]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleApplyBatchFormat}
+                    disabled={dialogCheckedIds.length === 0}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer shrink-0 ${
+                      dialogCheckedIds.length === 0
+                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                        : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
+                    }`}
+                  >
+                    Áp dụng cho {dialogCheckedIds.length} KOL đã tick
+                  </button>
+                </div>
+
+                {/* Danh sách các dòng KOL */}
+                <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
                   {kols
                     .filter((k) => selectedKolIds.includes(k.id))
                     .map((k) => {
-                      const price = k.bangGia ? k.bangGia[budgetFormat] : null;
+                      const isChecked = dialogCheckedIds.includes(k.id);
+                      const isTouched = touchedFormats.has(k.id);
+                      const currentFormat = rowFormats[k.id] || budgetFormat;
+                      const price = k.bangGia ? k.bangGia[currentFormat] : null;
                       const hasPrice = price !== null && price !== undefined && price > 0;
+
                       return (
                         <div
                           key={k.id}
-                          className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200"
+                          className={`p-2.5 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
+                            isTouched
+                              ? isChecked
+                                ? 'bg-amber-50 border-amber-300 ring-1 ring-amber-300'
+                                : 'bg-amber-50/70 border-amber-200'
+                              : isChecked
+                              ? 'bg-indigo-50/40 border-indigo-200'
+                              : 'bg-slate-50 border-slate-200'
+                          }`}
                         >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-6 h-6 rounded-full overflow-hidden bg-slate-200 shrink-0">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                setDialogCheckedIds((prev) =>
+                                  prev.includes(k.id) ? prev.filter((id) => id !== k.id) : [...prev, k.id]
+                                );
+                              }}
+                              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer shrink-0"
+                            />
+                            <div className="w-7 h-7 rounded-full overflow-hidden bg-slate-200 shrink-0">
                               {k.anhDaiDien ? (
                                 <img src={k.anhDaiDien} alt={k.ten} className="w-full h-full object-cover" />
                               ) : (
@@ -1195,17 +1303,46 @@ export const KolList: React.FC<KolListProps> = ({
                                 </div>
                               )}
                             </div>
-                            <span className="font-semibold text-slate-900 truncate">
-                              {k.ten}
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="font-semibold text-slate-900 truncate text-xs">
+                                {k.ten}
+                              </span>
+                              {isTouched && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 shrink-0">
+                                  Đã chỉnh
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0 pl-6 sm:pl-0">
+                            <select
+                              value={currentFormat}
+                              onChange={(e) => {
+                                const newFmt = e.target.value as PriceFormatKey;
+                                setRowFormats((prev) => ({ ...prev, [k.id]: newFmt }));
+                                setTouchedFormats((prev) => new Set(prev).add(k.id));
+                              }}
+                              className={`px-2 py-1 rounded-lg text-xs font-semibold focus:outline-none cursor-pointer max-w-[175px] transition-colors ${
+                                isTouched
+                                  ? 'bg-amber-50/60 border-2 border-amber-500 text-amber-950 ring-1 ring-amber-300 focus:ring-2 focus:ring-amber-500'
+                                  : 'bg-white border border-slate-300 text-slate-800 focus:ring-2 focus:ring-indigo-500'
+                              }`}
+                            >
+                              {(['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'] as PriceFormatKey[]).map((fmtKey) => (
+                                <option key={fmtKey} value={fmtKey}>
+                                  {PRICE_FORMAT_LABELS[fmtKey]}
+                                </option>
+                              ))}
+                            </select>
+                            <span
+                              className={`font-semibold text-xs shrink-0 text-right min-w-[85px] ${
+                                hasPrice ? 'text-indigo-600' : 'text-amber-600'
+                              }`}
+                            >
+                              {hasPrice ? formatVND(price) : '0đ (Giá tạm)'}
                             </span>
                           </div>
-                          <span
-                            className={`font-semibold text-xs shrink-0 ${
-                              hasPrice ? 'text-indigo-600' : 'text-amber-600'
-                            }`}
-                          >
-                            {hasPrice ? formatVND(price) : '0đ (Giá tạm)'}
-                          </span>
                         </div>
                       );
                     })}
@@ -1217,7 +1354,7 @@ export const KolList: React.FC<KolListProps> = ({
             <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
               <button
                 type="button"
-                onClick={() => setIsAddToQuoteModalOpen(false)}
+                onClick={handleCloseAddToQuote}
                 className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer"
               >
                 Hủy bỏ

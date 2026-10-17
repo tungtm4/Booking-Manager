@@ -125,3 +125,21 @@ export interface RecommendationScore {
   giaHienTai?: number | null;
   vuotNganSach: boolean;
 }
+
+// Lịch sử Import dữ liệu
+export interface ImportHistoryErrorDetail {
+  ten: string;
+  lyDo: string;
+}
+
+export interface ImportHistoryEntry {
+  id: string;
+  thoiGian: string; // ISO string
+  nguon: 'Google Sheet' | 'Excel';
+  tenNguon: string; // đường link sheet hoặc tên file Excel
+  tongDong: number;
+  taoMoi: number;
+  capNhat: number;
+  loi: number;
+  chiTietLoi: ImportHistoryErrorDetail[];
+}
