@@ -667,9 +667,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div
                   key={group.id}
                   onClick={() => onSelectKol(group.latestKol)}
-                  className="p-4 hover:bg-slate-50 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer group"
+                  className="p-4 hover:bg-slate-50 transition-colors flex flex-col md:flex-row md:items-center gap-4 cursor-pointer group"
                 >
-                  <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
                     {/* Avatar */}
                     <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-200 border border-slate-200 shrink-0">
                       {group.anhDaiDien ? (
@@ -752,7 +752,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </div>
 
                   {/* Tất cả giá đang có của nhóm - hiển thị rõ ràng từng format */}
-                  <div className="shrink-0 flex items-center flex-wrap gap-1.5 md:justify-end">
+                  <div className="min-w-0 md:max-w-[55%] flex flex-wrap items-center gap-1.5 md:justify-end">
                     {group.priceChips.length > 0 ? (
                       group.priceChips.map((chip) => (
                         <span
