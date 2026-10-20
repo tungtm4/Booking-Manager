@@ -205,10 +205,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
           if (!existing) {
             channelMap.set(key, { tenNenTang: ch.tenNenTang, soFollower: fol, linkProfile: ch.linkProfile });
           } else {
-            if ((!existing.soFollower || existing.soFollower === 0) && fol > 0) {
+            if (fol > existing.soFollower) {
               existing.soFollower = fol;
-            }
-            if (!existing.linkProfile && ch.linkProfile) {
+              if (ch.linkProfile) existing.linkProfile = ch.linkProfile;
+            } else if (!existing.linkProfile && ch.linkProfile) {
               existing.linkProfile = ch.linkProfile;
             }
           }

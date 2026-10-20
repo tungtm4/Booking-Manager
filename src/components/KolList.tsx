@@ -30,8 +30,18 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { KolProfile, PlatformType, PriceFormatKey, PRICE_FORMAT_LABELS, SowQuote, SowLineItem } from '../types/kol';
-import { formatFollowers, formatVND, getCategoryBadgeClass, POPULAR_CATEGORIES } from '../utils/formatters';
+import { formatFollowers, formatVND, formatNumberOnly, getCategoryBadgeClass, POPULAR_CATEGORIES } from '../utils/formatters';
 import { StorageService } from '../services/storageService';
+
+const PRICE_FORMAT_ORDER: PriceFormatKey[] = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
+const PRICE_SHORT_LABELS: Record<PriceFormatKey, string> = {
+  post: 'Post/Ảnh',
+  video: 'Video dài',
+  shorts: 'Video ngắn',
+  livestream: 'Livestream',
+  thamDuSuKien: 'Tham dự sự kiện',
+  sdha: 'SDHA',
+};
 
 interface KolListProps {
   kols: KolProfile[];
@@ -668,168 +678,182 @@ export const KolList: React.FC<KolListProps> = ({
           </div>
         </div>
       ) : viewMode === 'grid' ? (
-        /* Dạng Lưới Thẻ (Cards Grid) */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        /* Dạng Dải Ngang (Horizontal Strips) */
+        <div className="flex flex-col gap-3">
           {sortedKols.map((kol) => {
-            const topFollower = kol.nenTang?.reduce((max, p) => Math.max(max, p.soFollower || 0), 0) || 0;
-            const priceForFormat = kol.bangGia ? kol.bangGia[budgetFormat] : null;
+            const availablePrices = PRICE_FORMAT_ORDER.filter(
+              (fmt) => kol.bangGia && kol.bangGia[fmt] !== null && kol.bangGia[fmt] !== undefined && (kol.bangGia[fmt] as number) > 0
+            ).map((fmt) => ({
+              format: fmt,
+              label: PRICE_SHORT_LABELS[fmt],
+              price: kol.bangGia![fmt] as number,
+            }));
 
             return (
               <div
                 key={kol.id}
-                className="bg-white rounded-xl border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all p-5 flex flex-col justify-between group"
+                className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col md:flex-row md:items-center gap-4 hover:border-indigo-300 transition-colors"
               >
-                <div>
-                  {/* Card Header: Avatar + Tên + Đánh giá */}
-                  <div className="flex items-start gap-3">
-                    <div className="w-14 h-14 rounded-full overflow-hidden bg-slate-100 border border-slate-200 shrink-0">
-                      {kol.anhDaiDien ? (
-                        <img
-                          src={kol.anhDaiDien}
-                          alt={kol.ten}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                          onError={(e) => {
-                            (e.target as HTMLElement).style.display = 'none';
-                          }}
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-indigo-100 text-indigo-700 font-bold text-base">
-                          {kol.ten.slice(0, 2).toUpperCase()}
+                {/* Khối trái: flex items-start gap-3 min-w-0 flex-1 */}
+                <div className="flex items-start gap-3 min-w-0 flex-1">
+                  {/* Avatar: w-12 h-12 */}
+                  <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-100 border border-slate-200 shrink-0">
+                    {kol.anhDaiDien ? (
+                      <img
+                        src={kol.anhDaiDien}
+                        alt={kol.ten}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-indigo-100 text-indigo-700 font-bold text-sm">
+                        {kol.ten.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    {/* Tên KOL + badge Mẫu + Đánh giá sao & số job */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3
+                        onClick={() => onSelectKol(kol)}
+                        className="font-bold text-slate-900 text-sm sm:text-base truncate hover:text-indigo-600 cursor-pointer"
+                      >
+                        {kol.ten}
+                      </h3>
+                      {kol.isSample && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-slate-100 text-slate-500 font-medium border border-slate-200 shrink-0">
+                          Mẫu
+                        </span>
+                      )}
+                      {kol.danhGiaHieuQua?.diem ? (
+                        <div className="flex items-center gap-1 text-xs font-semibold text-amber-600">
+                          <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                          <span>{kol.danhGiaHieuQua.diem}★</span>
+                          <span className="text-slate-400 text-[11px] font-normal">
+                            ({kol.lichSuHopTac?.length || 0} job)
+                          </span>
                         </div>
+                      ) : (
+                        <span className="text-xs text-slate-400">Chưa có job</span>
                       )}
                     </div>
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-1">
-                        <h3
-                          onClick={() => onSelectKol(kol)}
-                          className="font-bold text-slate-900 text-base truncate hover:text-indigo-600 cursor-pointer"
-                        >
-                          {kol.ten}
-                        </h3>
-                        {kol.isSample && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-slate-100 text-slate-500 font-medium shrink-0">
-                            Mẫu
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Đánh giá sao */}
-                      <div className="flex items-center gap-2 mt-0.5">
-                        {kol.danhGiaHieuQua?.diem ? (
-                          <div className="flex items-center gap-1 text-xs font-semibold text-amber-600">
-                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
-                            <span>{kol.danhGiaHieuQua.diem}★</span>
-                            <span className="text-slate-400 text-[11px] font-normal">
-                              ({kol.lichSuHopTac?.length || 0} job)
+                    {/* Dòng thông tin: kênh, ER, lĩnh vực */}
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      {kol.nenTang && kol.nenTang.length > 0 ? (
+                        kol.nenTang.map((nt, idx) => (
+                          <React.Fragment key={nt.id || `${nt.tenNenTang}-${idx}`}>
+                            {idx > 0 && <span className="text-slate-300">•</span>}
+                            <span className="text-xs text-slate-500">
+                              {nt.tenNenTang}: <strong className="text-slate-700 font-medium">{formatFollowers(nt.soFollower)}</strong>
                             </span>
+                          </React.Fragment>
+                        ))
+                      ) : (
+                        <span className="text-xs text-slate-400">Chưa có kênh</span>
+                      )}
+                      <span className="text-slate-300">•</span>
+                      <span className="text-xs font-semibold text-emerald-600">
+                        ER: {kol.engagementRate ? `${kol.engagementRate}%` : 'N/A'}
+                      </span>
+                      {kol.linhVuc && kol.linhVuc.length > 0 && (
+                        <>
+                          <span className="text-slate-300 hidden sm:inline">•</span>
+                          <div className="hidden sm:flex items-center gap-1">
+                            {kol.linhVuc.slice(0, 2).map((cat) => (
+                              <span
+                                key={cat}
+                                className={`text-[10px] px-2 py-0.5 rounded-md font-medium ${getCategoryBadgeClass(cat)}`}
+                              >
+                                {cat}
+                              </span>
+                            ))}
+                            {kol.linhVuc.length > 2 && (
+                              <span className="text-[10px] text-slate-400">+{kol.linhVuc.length - 2}</span>
+                            )}
                           </div>
-                        ) : (
-                          <span className="text-xs text-slate-400">Chưa có job</span>
-                        )}
-
-                        <span className="text-slate-300">•</span>
-                        <span className="text-xs font-semibold text-emerald-600">
-                          ER: {kol.engagementRate ? `${kol.engagementRate}%` : 'N/A'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Kênh mạng xã hội badges */}
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {kol.nenTang?.map((nt) => (
-                      <a
-                        key={nt.id}
-                        href={nt.linkProfile || '#'}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-medium border border-slate-200 transition-colors"
-                        onClick={(e) => !nt.linkProfile && e.preventDefault()}
-                      >
-                        <span className="font-semibold text-slate-900">{nt.tenNenTang}:</span>
-                        <span>{formatFollowers(nt.soFollower)}</span>
-                        {nt.linkProfile && <ExternalLink className="w-2.5 h-2.5 text-slate-400" />}
-                      </a>
-                    ))}
-                  </div>
-
-                  {/* Tags Lĩnh Vực */}
-                  <div className="mt-3 flex flex-wrap gap-1">
-                    {kol.linhVuc.map((cat) => (
-                      <span
-                        key={cat}
-                        className={`text-[11px] px-2 py-0.5 rounded-md font-medium ${getCategoryBadgeClass(cat)}`}
-                      >
-                        {cat}
-                      </span>
-                    ))}
-                  </div>
-
-                  {/* Nhận xét sơ bộ */}
-                  {kol.reviewSoBo && (
-                    <p className="mt-3 text-xs text-slate-500 line-clamp-2 leading-relaxed italic">
-                      "{kol.reviewSoBo}"
-                    </p>
-                  )}
-
-                  {/* Bảng giá tóm tắt */}
-                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="text-slate-500 block">
-                        Giá {PRICE_FORMAT_LABELS[budgetFormat]}:
-                      </span>
-                      <span
-                        className={`font-bold text-sm ${
-                          priceForFormat ? 'text-indigo-600' : 'text-amber-600 font-medium text-xs'
-                        }`}
-                      >
-                        {formatVND(priceForFormat)}
-                      </span>
+                        </>
+                      )}
                     </div>
 
-                    <div className="text-right">
-                      <span className="text-slate-400 block text-[11px]">Followers cao nhất</span>
-                      <span className="font-semibold text-slate-800">{formatFollowers(topFollower)}</span>
-                    </div>
+                    {/* Nhận xét sơ bộ */}
+                    {kol.reviewSoBo && (
+                      <p className="mt-2 text-xs text-slate-500 line-clamp-2 leading-relaxed italic">
+                        "{kol.reviewSoBo}"
+                      </p>
+                    )}
                   </div>
                 </div>
 
-                {/* Card Actions Footer */}
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-1">
-                  <button
-                    onClick={() => onSelectKol(kol)}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>Chi tiết</span>
-                  </button>
+                {/* Khối phải: chip giá + nút thao tác */}
+                <div className="w-full md:w-auto md:max-w-[48%] flex flex-col gap-2.5 md:items-end justify-center min-w-0">
+                  {/* Hàng chip giá */}
+                  <div className="flex flex-wrap items-center gap-1.5 md:justify-end">
+                    {availablePrices.length > 0 ? (
+                      availablePrices.map((chip) => {
+                        const isSelectedFormat = chip.format === budgetFormat;
+                        return (
+                          <span
+                            key={chip.format}
+                            className={`inline-flex items-center text-xs px-2.5 py-1 rounded-md shadow-2xs whitespace-nowrap transition-colors ${
+                              isSelectedFormat
+                                ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                                : 'bg-indigo-50 text-indigo-700 border border-indigo-100 font-semibold'
+                            }`}
+                          >
+                            <span className={`font-medium mr-1 ${isSelectedFormat ? 'text-indigo-200' : 'text-indigo-500'}`}>
+                              {chip.label}:
+                            </span>
+                            {formatNumberOnly(chip.price)}đ
+                          </span>
+                        );
+                      })
+                    ) : (
+                      <span className="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                        Chưa có giá
+                      </span>
+                    )}
+                  </div>
 
-                  {onAddToSow && (
+                  {/* Hàng nút thao tác */}
+                  <div className="flex items-center gap-1.5 justify-end pt-1 md:pt-0">
                     <button
-                      onClick={() => onAddToSow(kol)}
-                      title="Đưa vào Báo giá SOW"
-                      className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg border border-transparent hover:border-emerald-200 transition-colors"
+                      onClick={() => onSelectKol(kol)}
+                      className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
                     >
-                      <FileSpreadsheet className="w-4 h-4" />
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Chi tiết</span>
                     </button>
-                  )}
 
-                  <button
-                    onClick={() => onEditKol(kol)}
-                    title="Chỉnh sửa hồ sơ"
-                    className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </button>
+                    {onAddToSow && (
+                      <button
+                        onClick={() => onAddToSow(kol)}
+                        title="Đưa vào Báo giá SOW"
+                        className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg border border-transparent hover:border-emerald-200 transition-colors"
+                      >
+                        <FileSpreadsheet className="w-4 h-4" />
+                      </button>
+                    )}
 
-                  <button
-                    onClick={() => onDeleteKol(kol)}
-                    title="Xóa hồ sơ"
-                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                    <button
+                      onClick={() => onEditKol(kol)}
+                      title="Chỉnh sửa hồ sơ"
+                      className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      onClick={() => onDeleteKol(kol)}
+                      title="Xóa hồ sơ"
+                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             );
