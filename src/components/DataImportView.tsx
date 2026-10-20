@@ -796,7 +796,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
 
-        const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: true });
+        const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: false });
         await processLoadedSheet(jsonRows);
       } catch (err: any) {
         setErrorMessage(`Lỗi đọc file Excel: ${err.message || 'File không hợp lệ'}`);
@@ -857,7 +857,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       // Parse CSV bằng XLSX
       const workbook = XLSX.read(csvText, { type: 'string', raw: true });
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonRows: any[] = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '', raw: true });
+      const jsonRows: any[] = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '', raw: false });
       await processLoadedSheet(jsonRows);
     } catch (err: any) {
       setErrorMessage(`Không thể nạp Google Sheet: ${err.message}`);

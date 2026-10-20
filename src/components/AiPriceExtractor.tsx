@@ -383,45 +383,68 @@ export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onData
     let updatedCount = 0;
     let createdCount = 0;
 
+    // 1. Cập nhật các mục đã có trong danh bạ (giữ nguyên)
     selectedItems.forEach((item) => {
       if (!item.format) return;
-
       if (item.action === 'update' && item.matchedKolId) {
-        // Cập nhật KOL đã có
         const res = StorageService.updateKolPriceFormat(item.matchedKolId, item.format, item.giaMoiVND);
         if (res) updatedCount++;
-      } else if (item.action === 'create_new') {
-        // Tạo hồ sơ KOL mới
-        const newKol: KolProfile = {
-          id: `kol-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-          ten: item.tenKOL_AI,
-          nenTang: [
-            {
-              id: `ch-${Date.now()}-1`,
-              tenNenTang: 'TikTok',
-              linkProfile: '',
-              soFollower: 0,
-            },
-          ],
-          linhVuc: ['Khác'],
-          bangGia: {
-            post: null,
-            video: null,
-            shorts: null,
-            livestream: null,
-            thamDuSuKien: null,
-            sdha: null,
-            [item.format]: item.giaMoiVND,
-          },
-          lienHe: {},
-          lichSuHopTac: [],
-          isSample: false,
-          ngayTao: new Date().toISOString(),
-          ngayCapNhat: new Date().toISOString(),
-        };
-        StorageService.saveKol(newKol);
-        createdCount++;
       }
+    });
+
+    // 2. GỘP các mục create_new theo tên KOL chuẩn hóa trước khi tạo hồ sơ mới
+    const normalizeName = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
+    const createItems = selectedItems.filter((item) => item.action === 'create_new' && item.format);
+    const createGroups = new Map<string, ExtractedPriceItem[]>();
+
+    createItems.forEach((item) => {
+      const normKey = normalizeName(item.tenKOL_AI || '');
+      if (!normKey) return;
+      const group = createGroups.get(normKey) || [];
+      group.push(item);
+      createGroups.set(normKey, group);
+    });
+
+    // Mỗi tên chuẩn hóa chỉ tạo ĐÚNG 1 hồ sơ mới, hợp nhất giá từ tất cả các mục
+    createGroups.forEach((items) => {
+      const displayName = items[0].tenKOL_AI.trim();
+      const mergedBangGia: Record<PriceFormatKey, number | null> = {
+        post: null,
+        video: null,
+        shorts: null,
+        livestream: null,
+        thamDuSuKien: null,
+        sdha: null,
+      };
+
+      items.forEach((item) => {
+        if (item.format && item.giaMoiVND !== undefined && item.giaMoiVND !== null) {
+          mergedBangGia[item.format] = item.giaMoiVND;
+        }
+      });
+
+      const newKol: KolProfile = {
+        id: `kol-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        ten: displayName,
+        nenTang: [
+          {
+            id: `ch-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+            tenNenTang: 'TikTok',
+            linkProfile: '',
+            soFollower: 0,
+          },
+        ],
+        linhVuc: ['Khác'],
+        bangGia: mergedBangGia,
+        lienHe: {},
+        lichSuHopTac: [],
+        isSample: false,
+        ngayTao: new Date().toISOString(),
+        ngayCapNhat: new Date().toISOString(),
+      };
+
+      StorageService.saveKol(newKol);
+      createdCount++;
     });
 
     onDataSaved();

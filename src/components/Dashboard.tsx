@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Users, 
   Sparkles, 
@@ -31,8 +31,8 @@ import {
   Cell,
   LabelList 
 } from 'recharts';
-import { KolProfile } from '../types/kol';
-import { formatFollowers, formatVND, getCategoryBadgeClass } from '../utils/formatters';
+import { KolProfile, PriceFormatKey } from '../types/kol';
+import { formatFollowers, formatVND, formatNumberOnly, formatDateVN, getCategoryBadgeClass } from '../utils/formatters';
 import { ActiveTab } from './Navbar';
 
 interface DashboardProps {
@@ -139,10 +139,143 @@ export const Dashboard: React.FC<DashboardProps> = ({
     });
   }
 
-  // KOL mới cập nhật gần đây (sắp xếp theo ngayCapNhat hoặc ngayTao)
-  const recentKols = [...kols]
-    .sort((a, b) => new Date(b.ngayCapNhat || b.ngayTao).getTime() - new Date(a.ngayCapNhat || a.ngayTao).getTime())
-    .slice(0, 5);
+  // Định nghĩa thứ tự và nhãn ngắn cho 6 format giá
+  const PRICE_FORMAT_ORDER: PriceFormatKey[] = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
+  const PRICE_SHORT_LABELS: Record<PriceFormatKey, string> = {
+    post: 'Post/Ảnh',
+    video: 'Video dài',
+    shorts: 'Video ngắn',
+    livestream: 'Livestream',
+    thamDuSuKien: 'Tham dự sự kiện',
+    sdha: 'SDHA',
+  };
+
+  const formatRelativeOrDate = (dateStr: string | undefined): string => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '';
+      const now = new Date();
+      const diffMs = now.getTime() - d.getTime();
+      if (diffMs < 0) return formatDateVN(dateStr);
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins < 1) return 'Vừa xong';
+      if (diffMins < 60) return `${diffMins} phút trước`;
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return `${diffHours} giờ trước`;
+      const diffDays = Math.floor(diffHours / 24);
+      if (diffDays <= 7) return `${diffDays} ngày trước`;
+      return formatDateVN(dateStr);
+    } catch {
+      return formatDateVN(dateStr);
+    }
+  };
+
+  // KOL mới cập nhật gần đây: GỘP các hồ sơ trùng tên trước khi lấy top 5
+  const recentKolGroups = useMemo(() => {
+    const normalizeName = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
+
+    const groupsMap = new Map<string, KolProfile[]>();
+    kols.forEach((k) => {
+      const normKey = normalizeName(k.ten || '');
+      if (!normKey) return;
+      const list = groupsMap.get(normKey) || [];
+      list.push(k);
+      groupsMap.set(normKey, list);
+    });
+
+    const groups = Array.from(groupsMap.values()).map((profiles) => {
+      // Sắp xếp các hồ sơ trong nhóm theo thời gian cập nhật mới nhất trước
+      profiles.sort((a, b) => {
+        const timeA = new Date(a.ngayCapNhat || a.ngayTao || 0).getTime();
+        const timeB = new Date(b.ngayCapNhat || b.ngayTao || 0).getTime();
+        return timeB - timeA;
+      });
+
+      const latestKol = profiles[0];
+      const latestUpdateTime = latestKol.ngayCapNhat || latestKol.ngayTao;
+
+      // Hợp nhất kênh mạng xã hội theo nền tảng (nếu trùng nền tảng, ưu tiên bản có số follow > 0)
+      const channelMap = new Map<string, { tenNenTang: string; soFollower: number; linkProfile?: string }>();
+      profiles.forEach((p) => {
+        p.nenTang?.forEach((ch) => {
+          const key = ch.tenNenTang;
+          const fol = ch.soFollower || 0;
+          const existing = channelMap.get(key);
+          if (!existing) {
+            channelMap.set(key, { tenNenTang: ch.tenNenTang, soFollower: fol, linkProfile: ch.linkProfile });
+          } else {
+            if ((!existing.soFollower || existing.soFollower === 0) && fol > 0) {
+              existing.soFollower = fol;
+            }
+            if (!existing.linkProfile && ch.linkProfile) {
+              existing.linkProfile = ch.linkProfile;
+            }
+          }
+        });
+      });
+      const mergedChannels = Array.from(channelMap.values());
+
+      // ER: lấy từ hồ sơ mới nhất có ER
+      const erProfile = profiles.find((p) => p.engagementRate !== undefined && p.engagementRate !== null && p.engagementRate > 0);
+      const er = erProfile?.engagementRate;
+
+      // Lĩnh vực: hợp nhất (union) các tag của cả nhóm
+      const tagSet = new Set<string>();
+      profiles.forEach((p) => {
+        p.linhVuc?.forEach((t) => {
+          if (t && t.trim()) tagSet.add(t.trim());
+        });
+      });
+      const mergedLinhVuc = Array.from(tagSet);
+
+      // Đánh giá hiệu quả (rating): lấy từ hồ sơ mới nhất có rating
+      const ratingProfile = profiles.find((p) => p.danhGiaHieuQua?.diem);
+      const rating = ratingProfile?.danhGiaHieuQua?.diem;
+
+      // Avatar: lấy từ hồ sơ mới nhất có ảnh
+      const avatarProfile = profiles.find((p) => p.anhDaiDien);
+      const anhDaiDien = avatarProfile?.anhDaiDien;
+
+      // Giá: với từng format trong 6 format của bangGia, lấy giá từ hồ sơ cập nhật mới nhất trong nhóm mà format đó khác null
+      const priceChips: Array<{ format: PriceFormatKey; label: string; price: number }> = [];
+      PRICE_FORMAT_ORDER.forEach((fmt) => {
+        const found = profiles.find((p) => {
+          const val = p.bangGia?.[fmt];
+          return val !== null && val !== undefined && val > 0;
+        });
+        if (found && found.bangGia?.[fmt]) {
+          priceChips.push({
+            format: fmt,
+            label: PRICE_SHORT_LABELS[fmt],
+            price: found.bangGia[fmt]!,
+          });
+        }
+      });
+
+      const relativeTime = formatRelativeOrDate(latestUpdateTime);
+
+      return {
+        id: latestKol.id,
+        ten: latestKol.ten,
+        isSample: profiles.some((p) => p.isSample),
+        latestKol,
+        latestUpdateTime,
+        latestUpdateTimeMs: new Date(latestUpdateTime || 0).getTime(),
+        relativeTime,
+        anhDaiDien,
+        mergedChannels,
+        er,
+        mergedLinhVuc,
+        rating,
+        priceChips,
+      };
+    });
+
+    // Thứ tự nhóm xếp theo thời gian cập nhật mới nhất trong nhóm, lấy 5 nhóm đầu
+    groups.sort((a, b) => b.latestUpdateTimeMs - a.latestUpdateTimeMs);
+    return groups.slice(0, 5);
+  }, [kols]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -523,29 +656,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         <div className="divide-y divide-slate-100">
-          {recentKols.length === 0 ? (
+          {recentKolGroups.length === 0 ? (
             <div className="p-8 text-center text-slate-400">
               <Users className="w-12 h-12 mx-auto stroke-1 opacity-50 mb-2" />
               <p>Chưa có KOL nào trong danh bạ</p>
             </div>
           ) : (
-            recentKols.map((kol) => {
-              const primaryFollower = kol.nenTang?.[0]?.soFollower || 0;
-              const primaryPlatform = kol.nenTang?.[0]?.tenNenTang || 'Kênh';
-
+            recentKolGroups.map((group) => {
               return (
                 <div
-                  key={kol.id}
-                  onClick={() => onSelectKol(kol)}
-                  className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between gap-4 cursor-pointer"
+                  key={group.id}
+                  onClick={() => onSelectKol(group.latestKol)}
+                  className="p-4 hover:bg-slate-50 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer group"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     {/* Avatar */}
                     <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-200 border border-slate-200 shrink-0">
-                      {kol.anhDaiDien ? (
+                      {group.anhDaiDien ? (
                         <img
-                          src={kol.anhDaiDien}
-                          alt={kol.ten}
+                          src={group.anhDaiDien}
+                          alt={group.ten}
                           className="w-full h-full object-cover"
                           onError={(e) => {
                             (e.target as HTMLElement).style.display = 'none';
@@ -553,62 +683,91 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center bg-indigo-100 text-indigo-700 font-bold text-sm">
-                          {kol.ten.slice(0, 2).toUpperCase()}
+                          {group.ten.slice(0, 2).toUpperCase()}
                         </div>
                       )}
                     </div>
 
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h4 className="font-bold text-slate-900 text-sm truncate hover:text-indigo-600">
-                          {kol.ten}
+                        <h4 className="font-bold text-slate-900 text-sm truncate group-hover:text-indigo-600 transition-colors">
+                          {group.ten}
                         </h4>
-                        {kol.isSample && (
+                        {group.isSample && (
                           <span className="px-1.5 py-0.2 text-[10px] bg-slate-100 text-slate-600 rounded-sm font-medium border border-slate-200">
                             Mẫu
                           </span>
                         )}
-                        {kol.danhGiaHieuQua?.diem && (
+                        {group.rating && (
                           <span className="flex items-center gap-0.5 text-xs text-amber-500 font-semibold">
                             <Star className="w-3.5 h-3.5 fill-amber-400" />
-                            {kol.danhGiaHieuQua.diem}
+                            {group.rating}
+                          </span>
+                        )}
+                        {group.relativeTime && (
+                          <span className="text-[11px] text-slate-400">
+                            • {group.relativeTime}
                           </span>
                         )}
                       </div>
 
                       {/* Tags & Platforms */}
                       <div className="flex items-center gap-2 mt-1 flex-wrap">
-                        <span className="text-xs text-slate-500">
-                          {primaryPlatform}: <strong className="text-slate-700">{formatFollowers(primaryFollower)}</strong>
-                        </span>
+                        {group.mergedChannels.length > 0 ? (
+                          group.mergedChannels.map((ch, idx) => (
+                            <React.Fragment key={ch.tenNenTang}>
+                              {idx > 0 && <span className="text-slate-300">•</span>}
+                              <span className="text-xs text-slate-500">
+                                {ch.tenNenTang}: <strong className="text-slate-700">{formatFollowers(ch.soFollower)}</strong>
+                              </span>
+                            </React.Fragment>
+                          ))
+                        ) : (
+                          <span className="text-xs text-slate-400">Chưa có kênh</span>
+                        )}
                         <span className="text-slate-300">•</span>
                         <span className="text-xs text-emerald-600 font-medium">
-                          ER: {kol.engagementRate ? `${kol.engagementRate}%` : 'N/A'}
+                          ER: {group.er ? `${group.er}%` : 'N/A'}
                         </span>
-                        <span className="text-slate-300 hidden sm:inline">•</span>
-                        <div className="hidden sm:flex items-center gap-1">
-                          {kol.linhVuc.slice(0, 2).map((tag) => (
-                            <span
-                              key={tag}
-                              className={`text-[10px] px-2 py-0.5 rounded-md font-medium ${getCategoryBadgeClass(tag)}`}
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                          {kol.linhVuc.length > 2 && (
-                            <span className="text-[10px] text-slate-400">+{kol.linhVuc.length - 2}</span>
-                          )}
-                        </div>
+                        {group.mergedLinhVuc.length > 0 && (
+                          <>
+                            <span className="text-slate-300 hidden sm:inline">•</span>
+                            <div className="hidden sm:flex items-center gap-1">
+                              {group.mergedLinhVuc.slice(0, 2).map((tag) => (
+                                <span
+                                  key={tag}
+                                  className={`text-[10px] px-2 py-0.5 rounded-md font-medium ${getCategoryBadgeClass(tag)}`}
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                              {group.mergedLinhVuc.length > 2 && (
+                                <span className="text-[10px] text-slate-400">+{group.mergedLinhVuc.length - 2}</span>
+                              )}
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
 
-                  {/* Giá tham khảo & Nút xem */}
-                  <div className="text-right shrink-0">
-                    <div className="text-xs text-slate-500">Giá video từ</div>
-                    <div className="text-sm font-bold text-indigo-600">
-                      {kol.bangGia?.video ? formatVND(kol.bangGia.video) : kol.bangGia?.shorts ? formatVND(kol.bangGia.shorts) : 'Liên hệ'}
-                    </div>
+                  {/* Tất cả giá đang có của nhóm - hiển thị rõ ràng từng format */}
+                  <div className="shrink-0 flex items-center flex-wrap gap-1.5 md:justify-end">
+                    {group.priceChips.length > 0 ? (
+                      group.priceChips.map((chip) => (
+                        <span
+                          key={chip.format}
+                          className="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-2xs whitespace-nowrap"
+                        >
+                          <span className="text-indigo-500 font-medium mr-1">{chip.label}:</span>
+                          {formatNumberOnly(chip.price)}đ
+                        </span>
+                      ))
+                    ) : (
+                      <span className="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                        Chưa có giá
+                      </span>
+                    )}
                   </div>
                 </div>
               );
