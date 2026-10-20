@@ -42,6 +42,14 @@ const PRICE_SHORT_LABELS: Record<PriceFormatKey, string> = {
   thamDuSuKien: 'Tham dự sự kiện',
   sdha: 'SDHA',
 };
+const PRICE_FORMAT_STYLES: Record<PriceFormatKey, string> = {
+  post: 'bg-sky-50 border-sky-200 text-sky-700',
+  video: 'bg-violet-50 border-violet-200 text-violet-700',
+  shorts: 'bg-rose-50 border-rose-200 text-rose-700',
+  livestream: 'bg-orange-50 border-orange-200 text-orange-700',
+  thamDuSuKien: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+  sdha: 'bg-amber-50 border-amber-200 text-amber-700',
+};
 
 interface KolListProps {
   kols: KolProfile[];
@@ -681,14 +689,6 @@ export const KolList: React.FC<KolListProps> = ({
         /* Dạng Dải Ngang (Horizontal Strips) */
         <div className="flex flex-col gap-3">
           {sortedKols.map((kol) => {
-            const availablePrices = PRICE_FORMAT_ORDER.filter(
-              (fmt) => kol.bangGia && kol.bangGia[fmt] !== null && kol.bangGia[fmt] !== undefined && (kol.bangGia[fmt] as number) > 0
-            ).map((fmt) => ({
-              format: fmt,
-              label: PRICE_SHORT_LABELS[fmt],
-              price: kol.bangGia![fmt] as number,
-            }));
-
             return (
               <div
                 key={kol.id}
@@ -788,38 +788,39 @@ export const KolList: React.FC<KolListProps> = ({
                   </div>
                 </div>
 
-                {/* Khối phải: chip giá + nút thao tác */}
-                <div className="w-full md:w-auto md:max-w-[48%] flex flex-col gap-2.5 md:items-end justify-center min-w-0">
-                  {/* Hàng chip giá */}
-                  <div className="flex flex-wrap items-center gap-1.5 md:justify-end">
-                    {availablePrices.length > 0 ? (
-                      availablePrices.map((chip) => {
-                        const isSelectedFormat = chip.format === budgetFormat;
-                        return (
-                          <span
-                            key={chip.format}
-                            className={`inline-flex items-center text-xs px-2.5 py-1 rounded-md shadow-2xs whitespace-nowrap transition-colors ${
-                              isSelectedFormat
-                                ? 'bg-indigo-600 text-white font-bold shadow-xs'
-                                : 'bg-indigo-50 text-indigo-700 border border-indigo-100 font-semibold'
-                            }`}
-                          >
-                            <span className={`font-medium mr-1 ${isSelectedFormat ? 'text-indigo-200' : 'text-indigo-500'}`}>
-                              {chip.label}:
+                {/* Khối phải: Bảng giá cố định 2 cột x 3 hàng + Hàng nút thao tác */}
+                <div className="w-full md:w-[430px] shrink-0 flex flex-col gap-2.5">
+                  {/* Bảng giá 2 cột x 3 hàng */}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {PRICE_FORMAT_ORDER.map((fmt) => {
+                      const val = kol.bangGia ? kol.bangGia[fmt] : null;
+                      const hasPrice = val !== null && val !== undefined && val > 0;
+                      const isSelectedFilter = fmt === budgetFormat;
+
+                      return (
+                        <div
+                          key={fmt}
+                          className={`text-xs px-2.5 py-1 rounded-md border truncate whitespace-nowrap transition-all ${
+                            hasPrice
+                              ? `${PRICE_FORMAT_STYLES[fmt]} ${isSelectedFilter ? 'ring-2 ring-slate-700/50' : ''}`
+                              : `bg-slate-50 border-slate-200 text-slate-400 ${isSelectedFilter ? 'ring-2 ring-slate-700/50' : ''}`
+                          }`}
+                        >
+                          <span className={hasPrice ? 'font-medium' : 'font-normal'}>{PRICE_SHORT_LABELS[fmt]}: </span>
+                          {hasPrice ? (
+                            <span className={isSelectedFilter ? 'font-extrabold' : 'font-bold'}>
+                              {formatNumberOnly(val)}đ
                             </span>
-                            {formatNumberOnly(chip.price)}đ
-                          </span>
-                        );
-                      })
-                    ) : (
-                      <span className="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
-                        Chưa có giá
-                      </span>
-                    )}
+                          ) : (
+                            <span>—</span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {/* Hàng nút thao tác */}
-                  <div className="flex items-center gap-1.5 justify-end pt-1 md:pt-0">
+                  <div className="flex items-center gap-1.5 justify-end">
                     <button
                       onClick={() => onSelectKol(kol)}
                       className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"

@@ -149,6 +149,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
     thamDuSuKien: 'Tham dự sự kiện',
     sdha: 'SDHA',
   };
+  const PRICE_FORMAT_STYLES: Record<PriceFormatKey, string> = {
+    post: 'bg-sky-50 border-sky-200 text-sky-700',
+    video: 'bg-violet-50 border-violet-200 text-violet-700',
+    shorts: 'bg-rose-50 border-rose-200 text-rose-700',
+    livestream: 'bg-orange-50 border-orange-200 text-orange-700',
+    thamDuSuKien: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+    sdha: 'bg-amber-50 border-amber-200 text-amber-700',
+  };
 
   const formatRelativeOrDate = (dateStr: string | undefined): string => {
     if (!dateStr) return '';
@@ -238,18 +246,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const anhDaiDien = avatarProfile?.anhDaiDien;
 
       // Giá: với từng format trong 6 format của bangGia, lấy giá từ hồ sơ cập nhật mới nhất trong nhóm mà format đó khác null
-      const priceChips: Array<{ format: PriceFormatKey; label: string; price: number }> = [];
+      const prices: Record<PriceFormatKey, number | null> = {
+        post: null,
+        video: null,
+        shorts: null,
+        livestream: null,
+        thamDuSuKien: null,
+        sdha: null,
+      };
       PRICE_FORMAT_ORDER.forEach((fmt) => {
         const found = profiles.find((p) => {
           const val = p.bangGia?.[fmt];
           return val !== null && val !== undefined && val > 0;
         });
         if (found && found.bangGia?.[fmt]) {
-          priceChips.push({
-            format: fmt,
-            label: PRICE_SHORT_LABELS[fmt],
-            price: found.bangGia[fmt]!,
-          });
+          prices[fmt] = found.bangGia[fmt]!;
         }
       });
 
@@ -268,7 +279,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         er,
         mergedLinhVuc,
         rating,
-        priceChips,
+        prices,
       };
     });
 
@@ -751,23 +762,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                   </div>
 
-                  {/* Tất cả giá đang có của nhóm - hiển thị rõ ràng từng format */}
-                  <div className="min-w-0 md:max-w-[55%] flex flex-wrap items-center gap-1.5 md:justify-end">
-                    {group.priceChips.length > 0 ? (
-                      group.priceChips.map((chip) => (
-                        <span
-                          key={chip.format}
-                          className="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-2xs whitespace-nowrap"
-                        >
-                          <span className="text-indigo-500 font-medium mr-1">{chip.label}:</span>
-                          {formatNumberOnly(chip.price)}đ
-                        </span>
-                      ))
-                    ) : (
-                      <span className="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
-                        Chưa có giá
-                      </span>
-                    )}
+                  {/* Bảng giá cố định 2 cột x 3 hàng */}
+                  <div className="w-full md:w-[430px] shrink-0">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {PRICE_FORMAT_ORDER.map((fmt) => {
+                        const val = group.prices[fmt];
+                        const hasPrice = val !== null && val !== undefined && val > 0;
+
+                        return (
+                          <div
+                            key={fmt}
+                            className={`text-xs px-2.5 py-1 rounded-md border truncate whitespace-nowrap transition-all ${
+                              hasPrice
+                                ? PRICE_FORMAT_STYLES[fmt]
+                                : 'bg-slate-50 border-slate-200 text-slate-400'
+                            }`}
+                          >
+                            <span className={hasPrice ? 'font-medium' : 'font-normal'}>{PRICE_SHORT_LABELS[fmt]}: </span>
+                            {hasPrice ? (
+                              <span className="font-bold">{formatNumberOnly(val)}đ</span>
+                            ) : (
+                              <span>—</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               );

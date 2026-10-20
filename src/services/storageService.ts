@@ -597,4 +597,274 @@ export const StorageService = {
     localStorage.removeItem(STORAGE_KEYS.IMPORT_HISTORY);
     notifyChange(STORAGE_KEYS.IMPORT_HISTORY);
   },
+
+  // Tự động GỘP HỒ SƠ TRÙNG TÊN hoàn toàn (chuẩn hóa tên: lowercase, trim, khoảng trắng đơn)
+  mergeDuplicateKols(): number {
+    const kols = this.getKols();
+    if (!kols || kols.length <= 1) return 0;
+
+    const normalizeName = (s: string) => (s || '').toLowerCase().trim().replace(/\s+/g, ' ');
+
+    // Nhóm theo tên chuẩn hóa
+    const groupsMap = new Map<string, KolProfile[]>();
+    kols.forEach((k) => {
+      const key = normalizeName(k.ten);
+      if (!key) return;
+      if (!groupsMap.has(key)) {
+        groupsMap.set(key, []);
+      }
+      groupsMap.get(key)!.push(k);
+    });
+
+    let hasDuplicates = false;
+    for (const [, group] of groupsMap) {
+      if (group.length >= 2) {
+        hasDuplicates = true;
+        break;
+      }
+    }
+
+    if (!hasDuplicates) {
+      return 0;
+    }
+
+    const PRICE_KEYS: (keyof KolProfile['bangGia'])[] = [
+      'post',
+      'video',
+      'shorts',
+      'livestream',
+      'thamDuSuKien',
+      'sdha',
+    ];
+    const contactKeys: (keyof KolProfile['lienHe'])[] = [
+      'tenNguoiLienHe',
+      'soDienThoai',
+      'emailZalo',
+      'ghiChu',
+    ];
+
+    const seenKeys = new Set<string>();
+    const mergedList: KolProfile[] = [];
+    const idRemap = new Map<string, string>();
+
+    kols.forEach((kol) => {
+      const key = normalizeName(kol.ten);
+      if (!key) {
+        mergedList.push(kol);
+        return;
+      }
+
+      if (seenKeys.has(key)) {
+        // Hồ sơ trùng từ vị trí thứ 2 trở đi trong nhóm - đã được gộp tại vị trí đầu tiên
+        return;
+      }
+      seenKeys.add(key);
+
+      const group = groupsMap.get(key)!;
+      if (group.length === 1) {
+        mergedList.push(kol);
+        return;
+      }
+
+      // Sắp xếp nhóm theo ngayCapNhat tăng dần (cũ nhất -> mới nhất)
+      const sortedGroup = [...group].sort((a, b) => {
+        const timeA = new Date(a.ngayCapNhat || a.ngayTao || 0).getTime();
+        const timeB = new Date(b.ngayCapNhat || b.ngayTao || 0).getTime();
+        return timeA - timeB;
+      });
+
+      const oldestKol = sortedGroup[0];
+      const newestKol = sortedGroup[sortedGroup.length - 1];
+
+      // Ghi nhận remap ID cho các hồ sơ bị gộp
+      sortedGroup.slice(1).forEach((dup) => {
+        idRemap.set(dup.id, oldestKol.id);
+      });
+
+      // ngayTao của hồ sơ CŨ NHẤT trong nhóm
+      const allCreationTimes = group
+        .map((k) => k.ngayTao)
+        .filter(Boolean)
+        .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+      const oldestNgayTao = allCreationTimes[0] || oldestKol.ngayTao || new Date().toISOString();
+
+      // ngayCapNhat là thời điểm MỚI NHẤT trong nhóm
+      const allUpdateTimes = group
+        .map((k) => k.ngayCapNhat || k.ngayTao)
+        .filter(Boolean)
+        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+      const newestNgayCapNhat = allUpdateTimes[0] || new Date().toISOString();
+
+      // bangGia: từng format trong 6 format - lấy giá từ hồ sơ MỚI NHẤT có giá khác null
+      const mergedBangGia: KolProfile['bangGia'] = {
+        post: null,
+        video: null,
+        shorts: null,
+        livestream: null,
+        thamDuSuKien: null,
+        sdha: null,
+      };
+
+      PRICE_KEYS.forEach((fmt) => {
+        for (let i = sortedGroup.length - 1; i >= 0; i--) {
+          const val = sortedGroup[i].bangGia?.[fmt];
+          if (val !== null && val !== undefined) {
+            mergedBangGia[fmt] = val;
+            break;
+          }
+        }
+      });
+
+      // nenTang: hợp nhất theo nền tảng - nếu trùng nền tảng:
+      // ưu tiên bản có linkProfile không rỗng, và soFollower lấy từ bản mới nhất có số > 0
+      const channelMap = new Map<string, { id: string; tenNenTang: any; linkProfile: string; soFollower: number }>();
+      sortedGroup.forEach((p) => {
+        p.nenTang?.forEach((ch) => {
+          const pKey = ch.tenNenTang;
+          const existing = channelMap.get(pKey);
+          if (!existing) {
+            channelMap.set(pKey, {
+              id: ch.id || `ch-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+              tenNenTang: ch.tenNenTang,
+              linkProfile: ch.linkProfile || '',
+              soFollower: ch.soFollower || 0,
+            });
+          } else {
+            // Ưu tiên bản có linkProfile không rỗng; nếu bản mới hơn có linkProfile không rỗng thì ghi đè
+            if (ch.linkProfile && ch.linkProfile.trim()) {
+              existing.linkProfile = ch.linkProfile.trim();
+            }
+            // soFollower lấy từ bản mới nhất có số > 0
+            if (ch.soFollower && ch.soFollower > 0) {
+              existing.soFollower = ch.soFollower;
+            }
+          }
+        });
+      });
+      const mergedNenTang = Array.from(channelMap.values());
+
+      // engagementRate: lấy giá trị mới nhất khác null/undefined
+      let mergedER: number | undefined = undefined;
+      for (let i = sortedGroup.length - 1; i >= 0; i--) {
+        const er = sortedGroup[i].engagementRate;
+        if (er !== null && er !== undefined && !isNaN(er)) {
+          mergedER = er;
+          break;
+        }
+      }
+
+      // linhVuc: hợp nhất (union), không trùng lặp
+      const tagSet = new Set<string>();
+      sortedGroup.forEach((p) => {
+        p.linhVuc?.forEach((t) => {
+          if (t && t.trim()) tagSet.add(t.trim());
+        });
+      });
+      const mergedLinhVuc = Array.from(tagSet);
+
+      // lienHe: từng trường lấy giá trị mới nhất không rỗng
+      const mergedLienHe: KolProfile['lienHe'] = {};
+      contactKeys.forEach((ck) => {
+        for (let i = sortedGroup.length - 1; i >= 0; i--) {
+          const val = sortedGroup[i].lienHe?.[ck];
+          if (val && typeof val === 'string' && val.trim() !== '') {
+            mergedLienHe[ck] = val.trim();
+            break;
+          }
+        }
+      });
+
+      // reviewSoBo, anhDaiDien, danhGiaHieuQua: lấy từ hồ sơ mới nhất có giá trị
+      let mergedReviewSoBo: string | undefined = undefined;
+      for (let i = sortedGroup.length - 1; i >= 0; i--) {
+        const r = sortedGroup[i].reviewSoBo;
+        if (r && r.trim()) {
+          mergedReviewSoBo = r.trim();
+          break;
+        }
+      }
+
+      let mergedAnhDaiDien: string | undefined = undefined;
+      for (let i = sortedGroup.length - 1; i >= 0; i--) {
+        const a = sortedGroup[i].anhDaiDien;
+        if (a && a.trim()) {
+          mergedAnhDaiDien = a.trim();
+          break;
+        }
+      }
+
+      let mergedDanhGia: KolProfile['danhGiaHieuQua'] = undefined;
+      for (let i = sortedGroup.length - 1; i >= 0; i--) {
+        const dg = sortedGroup[i].danhGiaHieuQua;
+        if (dg && (dg.diem !== undefined || (dg.nhanXet && dg.nhanXet.trim()))) {
+          mergedDanhGia = dg;
+          break;
+        }
+      }
+
+      // lichSuHopTac: nối tất cả lại
+      const mergedLichSuHopTac: KolProfile['lichSuHopTac'] = [];
+      const seenCollabIds = new Set<string>();
+      sortedGroup.forEach((p) => {
+        p.lichSuHopTac?.forEach((c) => {
+          if (c.id && seenCollabIds.has(c.id)) return;
+          if (c.id) seenCollabIds.add(c.id);
+          mergedLichSuHopTac.push(c);
+        });
+      });
+
+      // isSample chỉ là true khi mọi hồ sơ trong nhóm đều là mẫu
+      const isSample = group.every((k) => k.isSample === true);
+
+      // Hồ sơ gộp giữ id và ngayTao của hồ sơ CŨ NHẤT trong nhóm
+      const mergedKol: KolProfile = {
+        id: oldestKol.id,
+        ten: newestKol.ten?.trim() || oldestKol.ten,
+        anhDaiDien: mergedAnhDaiDien,
+        nenTang: mergedNenTang,
+        engagementRate: mergedER,
+        linhVuc: mergedLinhVuc,
+        reviewSoBo: mergedReviewSoBo,
+        bangGia: mergedBangGia,
+        lienHe: mergedLienHe,
+        lichSuHopTac: mergedLichSuHopTac,
+        danhGiaHieuQua: mergedDanhGia,
+        isSample,
+        ngayTao: oldestNgayTao,
+        ngayCapNhat: newestNgayCapNhat,
+      };
+
+      mergedList.push(mergedKol);
+    });
+
+    const removedCount = kols.length - mergedList.length;
+    if (removedCount > 0) {
+      // Cập nhật SOW quotes nếu có line item trỏ tới ID bị gộp
+      try {
+        const quotesData = localStorage.getItem(STORAGE_KEYS.SOW_QUOTES);
+        if (quotesData) {
+          const quotes: SowQuote[] = JSON.parse(quotesData);
+          let quotesModified = false;
+          quotes.forEach((q) => {
+            q.items?.forEach((it) => {
+              if (idRemap.has(it.kolId)) {
+                it.kolId = idRemap.get(it.kolId)!;
+                quotesModified = true;
+              }
+            });
+          });
+          if (quotesModified) {
+            localStorage.setItem(STORAGE_KEYS.SOW_QUOTES, JSON.stringify(quotes));
+            notifyChange(STORAGE_KEYS.SOW_QUOTES);
+          }
+        }
+      } catch (err) {
+        console.error('Lỗi cập nhật tham chiếu SOW khi gộp KOL:', err);
+      }
+
+      localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(mergedList));
+      notifyChange(STORAGE_KEYS.KOLS);
+    }
+    return removedCount;
+  },
 };

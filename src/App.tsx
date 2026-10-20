@@ -67,6 +67,11 @@ export default function App() {
     };
   }, [reloadData]);
 
+  // Tự động gộp hồ sơ trùng tên một lần duy nhất khi app khởi động
+  useEffect(() => {
+    StorageService.mergeDuplicateKols();
+  }, []);
+
   // Open Form for Adding New KOL
   const handleOpenAddKol = () => {
     setKolToEdit(null);
