@@ -208,6 +208,129 @@ app.get('/api/sheets/fetch-csv', async (req, res) => {
 });
 
 // ----------------------------------------------------------------------------
+// API: Phân tích cấu trúc bảng & phân loại cột bằng AI (Feature 2.3)
+// ----------------------------------------------------------------------------
+app.post('/api/import/classify-columns', async (req, res) => {
+  try {
+    const { rows, fields } = req.body;
+
+    if (!rows || !Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Vui lòng cung cấp mảng dữ liệu các dòng đầu của bảng tính.',
+      });
+    }
+
+    if (!aiClient) {
+      return res.json({
+        success: false,
+        useFallback: true,
+        message: 'Chưa cấu hình GEMINI_API_KEY trên server. Chuyển sang nhận diện cục bộ.',
+      });
+    }
+
+    const systemInstruction = `Bạn là chuyên gia AI phân tích cấu trúc bảng tính Excel / Google Sheet để nhập danh bạ KOL / Influencer tại Việt Nam.
+
+NHIỆM VỤ CỦA BẠN:
+Nhận dữ liệu thô tối đa 12 dòng đầu tiên của bảng tính (có thể chứa các dòng tiêu đề trang trí/báo cáo phía trên):
+1. Xác định DÒNG TIÊU ĐỀ THẬT (headerRowIndex, chỉ số 0-based trong mảng rows):
+   - Bỏ qua các dòng tiêu đề trang trí, tên chiến dịch, tổng số lượng/tổng chi phí phía trên (ví dụ: "DANH SÁCH KOL/KOC CHIẾN DỊCH HÈ 2026", "Tổng số: 50 KOL", dòng ngày tháng...).
+   - Dòng tiêu đề thật là dòng chứa tên các cột dữ liệu chính (ví dụ: "STT", "Họ và tên", "KOL", "Kênh", "Link", "Follower", "Báo giá Video", "Số điện thoại", "YOUTUBE"...).
+   - Nếu bảng bắt đầu ngay bằng dòng tiêu đề các cột thì headerRowIndex = 0.
+
+2. Với MỖI CỘT dữ liệu (căn cứ vào tên cột tại dòng tiêu đề + các dòng dữ liệu mẫu bên dưới):
+   Phân loại thành một trong các giá trị sau:
+   - Một 'key' phù hợp từ danh sách fields được gửi (ví dụ: 'ten', 'linhVuc', 'engagementRate', 'giaVideo', 'giaShorts', 'soDienThoai', 'emailZalo', 'tenNguoiLienHe'...).
+   - HOẶC 'platform:YouTube', 'platform:TikTok', 'platform:Facebook', 'platform:Instagram': nếu cột đó chứa thông tin kênh của nền tảng đó — có thể là link URL, hoặc định dạng gộp "Tên kênh | Số follow" (ví dụ: "Khánh Vy OFFICIAL | 2.21M", "Schanel | 3.5M"), hoặc tên handle.
+   - HOẶC 'ignore': nếu cột không liên quan đến hồ sơ KOL (ví dụ: cột STT, ngày nhập, mã code nội bộ, cột rỗng).
+   - Mỗi cột bao gồm:
+     + columnIndex: số thứ tự cột (0-based)
+     + field: key trường hoặc platform:X hoặc ignore
+     + confidence: 'cao', 'trung bình', hoặc 'thấp'
+     + lyDo: giải thích ngắn gọn bằng tiếng Việt DỰA TRÊN NỘI DUNG Ô (ví dụ: "chứa URL tiktok.com", "các ô có dạng 'Tên kênh | 2.21M'", "chứa số tiền báo giá từ 8tr-25tr", "chứa số điện thoại di động").`;
+
+    const prompt = `DANH SÁCH TRƯỜNG THÔNG TIN HỢP LỆ (fields):
+${JSON.stringify(fields || [], null, 2)}
+
+DỮ LIỆU CÁC DÒNG ĐẦU TIÊN CỦA BẢNG TÍNH:
+${JSON.stringify(rows, null, 2)}
+
+Hãy tìm headerRowIndex và phân loại từng cột theo đúng định dạng JSON được yêu cầu.`;
+
+    const response = await aiClient.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: [prompt],
+      config: {
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            headerRowIndex: {
+              type: Type.INTEGER,
+              description: 'Chỉ số 0-based của dòng tiêu đề thật',
+            },
+            columns: {
+              type: Type.ARRAY,
+              description: 'Danh sách phân loại từng cột dữ liệu',
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  columnIndex: {
+                    type: Type.INTEGER,
+                    description: 'Chỉ số cột (0-based)',
+                  },
+                  field: {
+                    type: Type.STRING,
+                    description:
+                      'Key của trường tương ứng trong fields, hoặc platform:YouTube / platform:TikTok / platform:Facebook / platform:Instagram, hoặc ignore',
+                  },
+                  confidence: {
+                    type: Type.STRING,
+                    description: 'Độ tin cậy: cao, trung bình, hoặc thấp',
+                  },
+                  lyDo: {
+                    type: Type.STRING,
+                    description: 'Giải thích ngắn gọn bằng tiếng Việt dựa trên nội dung ô',
+                  },
+                },
+                required: ['columnIndex', 'field', 'confidence', 'lyDo'],
+              },
+            },
+          },
+          required: ['headerRowIndex', 'columns'],
+        },
+      },
+    });
+
+    const outputText = response.text || '{}';
+    let parsedData: any = {};
+    try {
+      parsedData = JSON.parse(outputText);
+    } catch {
+      const cleanJson = outputText.replace(/```json/g, '').replace(/```/g, '').trim();
+      parsedData = JSON.parse(cleanJson);
+    }
+
+    if (typeof parsedData.headerRowIndex !== 'number' || !Array.isArray(parsedData.columns)) {
+      throw new Error('Dữ liệu AI trả về không đúng cấu trúc');
+    }
+
+    return res.json({
+      success: true,
+      data: parsedData,
+    });
+  } catch (err: any) {
+    console.error('Lỗi khi gọi AI phân loại cấu trúc bảng:', err);
+    return res.json({
+      success: false,
+      useFallback: true,
+      error: err.message || 'Lỗi khi gọi AI phân loại cột',
+    });
+  }
+});
+
+// ----------------------------------------------------------------------------
 // Mount Vite Middleware cho Dev hoặc Static Files cho Production
 // ----------------------------------------------------------------------------
 async function startServer() {

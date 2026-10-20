@@ -24,11 +24,39 @@ import {
   ChevronDown,
   ChevronUp,
   Trash2,
-  Sparkles
+  Sparkles,
+  RotateCcw
 } from 'lucide-react';
-import { KolProfile, PriceFormatKey, ImportHistoryEntry } from '../types/kol';
+import { KolProfile, PriceFormatKey, PRICE_FORMAT_LABELS, ImportHistoryEntry } from '../types/kol';
 import { formatVND } from '../utils/formatters';
 import { StorageService } from '../services/storageService';
+
+export interface ConflictItem {
+  id: string;
+  type: 'price' | 'channel_link' | 'channel_follower' | 'engagementRate' | 'contact';
+  subKey: string;
+  label: string;
+  oldValue: any;
+  newValue: any;
+  displayOld: string;
+  displayNew: string;
+}
+
+export interface AutoAddItem {
+  id: string;
+  kolName: string;
+  description: string;
+}
+
+export interface KolDiff {
+  rowIndex: number;
+  kolName: string;
+  matchedKol: KolProfile;
+  kolData: any;
+  isFuzzy: boolean;
+  conflicts: ConflictItem[];
+  autoAdditions: AutoAddItem[];
+}
 
 interface DataImportViewProps {
   kols: KolProfile[];
@@ -113,11 +141,14 @@ export const parseNumberWithSuffix = (val: any): number | undefined => {
     if (!isNaN(num)) return Math.round(num * 1000000000);
   }
 
-  // Số có định dạng có dấu phân cách: "1,500,000" hoặc "1.500.000"
-  const digitsOnly = clean.replace(/[^0-9]/g, '');
-  if (digitsOnly.length > 0) {
-    const n = parseInt(digitsOnly, 10);
-    return isNaN(n) ? undefined : n;
+  // Số có định dạng có dấu phân cách: "1,500,000" hoặc "1.500.000" hoặc "377.000"
+  // Chỉ chấp nhận chuỗi thuần chữ số và các ký tự phân cách ., khoảng trắng
+  if (/^[\d\s.,]+$/.test(clean)) {
+    const digitsOnly = clean.replace(/[^0-9]/g, '');
+    if (digitsOnly.length > 0) {
+      const n = parseInt(digitsOnly, 10);
+      return isNaN(n) ? undefined : n;
+    }
   }
 
   return undefined;
@@ -136,6 +167,28 @@ export const parsePercentageValue = (val: any): number | undefined => {
   if (isNaN(num)) return undefined;
   if (num > 0 && num < 0.5 && String(val).includes('%')) return Math.round(num * 1000) / 10;
   return Math.round(num * 100) / 100;
+};
+
+// Helper tách ô gộp kênh nếu có dấu '|' (Ví dụ: "Khánh Vy OFFICIAL | 2.21M")
+export const parseChannelCell = (raw: any): { linkOrName: string; followers?: number } => {
+  if (raw === null || raw === undefined) return { linkOrName: '' };
+  const str = String(raw).trim();
+  if (!str) return { linkOrName: '' };
+
+  if (str.includes('|')) {
+    const parts = str.split('|').map((s) => s.trim());
+    const textPart = parts[0] || '';
+    const numPart = parts.slice(1).join(' ');
+    const followers = parseNumberWithSuffix(numPart);
+    return {
+      linkOrName: textPart,
+      followers,
+    };
+  }
+
+  return {
+    linkOrName: str,
+  };
 };
 
 // Thuật toán nhận diện kiểu cột DỰA VÀO NỘI DUNG (Content-based detection) + Tên cột
@@ -240,34 +293,45 @@ export const smartDetectColumns = (headers: string[], rawRows: any[]): Record<st
 
     // 2. NHẬN DIỆN CỘT FOLLOWERS / SUB
     if (
+      !mappedCols.has(h) &&
       (hClean.includes('follow') || hClean.includes('sub') || hClean.includes('theo dõi')) &&
       !hClean.includes('giá') &&
       !hClean.includes('chi phí')
     ) {
-      if ((hClean.includes('tiktok') || hClean.includes('tik tok')) && !mapping['followerTikTok']) {
-        mapping['followerTikTok'] = h;
-        mappedCols.add(h);
-        return;
-      }
-      if ((hClean.includes('youtube') || hClean.includes('ytb') || hClean.includes('sub')) && !mapping['followerYouTube']) {
-        mapping['followerYouTube'] = h;
-        mappedCols.add(h);
-        return;
-      }
-      if ((hClean.includes('facebook') || hClean.includes('fb') || hClean.includes('fanpage')) && !mapping['followerFacebook']) {
-        mapping['followerFacebook'] = h;
-        mappedCols.add(h);
-        return;
-      }
-      if ((hClean.includes('instagram') || hClean.includes('ig') || hClean.includes('insta')) && !mapping['followerInstagram']) {
-        mapping['followerInstagram'] = h;
-        mappedCols.add(h);
-        return;
-      }
-      if (!mapping['soFollower']) {
-        mapping['soFollower'] = h;
-        mappedCols.add(h);
-        return;
+      // Bắt buộc cả 2 điều kiện:
+      // (a) Đa số ô mẫu của cột phải parse được thành số hợp lệ qua parseNumberWithSuffix
+      // (b) Cột chưa nằm trong mappedCols
+      const validNumbers = samples
+        .map(parseNumberWithSuffix)
+        .filter((n): n is number => n !== undefined);
+      const isNumericCol = validNumbers.length >= Math.max(1, Math.floor(samples.length * 0.4));
+
+      if (isNumericCol) {
+        if ((hClean.includes('tiktok') || hClean.includes('tik tok')) && !mapping['followerTikTok']) {
+          mapping['followerTikTok'] = h;
+          mappedCols.add(h);
+          return;
+        }
+        if ((hClean.includes('youtube') || hClean.includes('ytb') || hClean.includes('yt')) && !mapping['followerYouTube']) {
+          mapping['followerYouTube'] = h;
+          mappedCols.add(h);
+          return;
+        }
+        if ((hClean.includes('facebook') || hClean.includes('fb') || hClean.includes('fanpage')) && !mapping['followerFacebook']) {
+          mapping['followerFacebook'] = h;
+          mappedCols.add(h);
+          return;
+        }
+        if ((hClean.includes('instagram') || hClean.includes('ig') || hClean.includes('insta')) && !mapping['followerInstagram']) {
+          mapping['followerInstagram'] = h;
+          mappedCols.add(h);
+          return;
+        }
+        if (!mapping['soFollower']) {
+          mapping['soFollower'] = h;
+          mappedCols.add(h);
+          return;
+        }
       }
     }
 
@@ -413,6 +477,9 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
   const [sourceName, setSourceName] = useState('');
   const [googleSheetUrl, setGoogleSheetUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
+  const [aiColumnNotes, setAiColumnNotes] = useState<Record<string, { lyDo: string; confidence: string }>>({});
+  const [rawSourceSheetRows, setRawSourceSheetRows] = useState<any[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -445,6 +512,20 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
 
   // Trạng thái từng dòng preview: checked
   const [selectedRowIndices, setSelectedRowIndices] = useState<number[]>([]);
+
+  // State cho bảng xác minh cập nhật trùng lặp (Feature: Xác minh xung đột)
+  const [isVerificationModalOpen, setIsVerificationModalOpen] = useState(false);
+  const [verificationDiffs, setVerificationDiffs] = useState<KolDiff[]>([]);
+  const [kolResolutions, setKolResolutions] = useState<
+    Record<
+      number,
+      {
+        skipped: boolean;
+        choices: Record<string, 'keep_old' | 'take_new'>;
+      }
+    >
+  >({});
+  const [showAutoAdditions, setShowAutoAdditions] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -547,10 +628,154 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     showToast('Đã tải xuống file Excel mẫu chuẩn format!');
   };
 
-  // Tự động nhận diện map cột (gọi smartDetectColumns)
-  const autoDetectColumnMapping = (headers: string[], rows: any[] = rawRows) => {
-    const newMapping = smartDetectColumns(headers, rows);
-    setColumnMapping(newMapping);
+  // Xử lý dữ liệu bảng: gọi AI phân tích cấu trúc bảng & dòng tiêu đề (với fallback heuristic)
+  const processLoadedSheet = async (allJsonRows: any[]) => {
+    setRawSourceSheetRows(allJsonRows);
+
+    if (allJsonRows.length < 2) {
+      setErrorMessage('Bảng tính không có dữ liệu hoặc chỉ có 1 dòng.');
+      setIsLoading(false);
+      return;
+    }
+
+    setIsAiAnalyzing(true);
+
+    // Lấy tối đa 12 dòng đầu thô
+    const sampleRows = allJsonRows
+      .slice(0, 12)
+      .map((row: any) =>
+        Array.isArray(row)
+          ? row.map((c: any) => (c !== null && c !== undefined ? String(c).trim() : ''))
+          : []
+      );
+
+    const fieldsPayload = KOL_FIELD_DEFINITIONS.map((f) => ({
+      key: f.key,
+      label: f.label,
+    }));
+
+    let aiSucceeded = false;
+
+    try {
+      const res = await fetch('/api/import/classify-columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rows: sampleRows,
+          fields: fieldsPayload,
+        }),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (
+          json.success &&
+          json.data &&
+          typeof json.data.headerRowIndex === 'number' &&
+          Array.isArray(json.data.columns)
+        ) {
+          const { headerRowIndex, columns } = json.data;
+
+          // Xác thực headerRowIndex (0-based)
+          const validHeaderIdx =
+            headerRowIndex >= 0 && headerRowIndex < allJsonRows.length - 1
+              ? headerRowIndex
+              : 0;
+
+          const rawHeaderRow = (allJsonRows[validHeaderIdx] as any[]) || [];
+          const headers = rawHeaderRow.map((h: any, i: number) => {
+            const str = String(h || '').trim();
+            return str || `Cột ${i + 1}`;
+          });
+
+          const dataRows = allJsonRows
+            .slice(validHeaderIdx + 1)
+            .filter((row: any) =>
+              Array.isArray(row) &&
+              row.some((cell: any) => cell !== '' && cell !== null && cell !== undefined)
+            );
+
+          const newMapping: Record<string, string> = {};
+          const notes: Record<string, { lyDo: string; confidence: string }> = {};
+
+          columns.forEach((col: any) => {
+            const headerName = headers[col.columnIndex];
+            if (!headerName || col.field === 'ignore') return;
+
+            if (typeof col.field === 'string' && col.field.startsWith('platform:')) {
+              const platform = col.field.split(':')[1]?.trim();
+              if (platform) {
+                const linkKey = `link${platform}`;
+                const followerKey = `follower${platform}`;
+                newMapping[linkKey] = headerName;
+                notes[linkKey] = { lyDo: col.lyDo, confidence: col.confidence };
+
+                // Chỉ map followerKey nếu cột này thực sự chứa thông tin follower (dạng gộp 'Kênh | Follower' hoặc các ô là số)
+                const colIdx = col.columnIndex;
+                const samples = (dataRows || [])
+                  .map((r: any) => r[colIdx])
+                  .filter((v: any) => v !== null && v !== undefined && String(v).trim() !== '')
+                  .slice(0, 10);
+                const hasPipe = samples.some((s: any) => String(s).includes('|'));
+                const validNumbers = samples.filter((s: any) => parseNumberWithSuffix(s) !== undefined);
+                const hasNumbers = validNumbers.length >= Math.max(1, Math.floor(samples.length * 0.4));
+
+                if (hasPipe || hasNumbers) {
+                  newMapping[followerKey] = headerName;
+                  notes[followerKey] = { lyDo: col.lyDo, confidence: col.confidence };
+                }
+              }
+            } else {
+              newMapping[col.field] = headerName;
+              notes[col.field] = { lyDo: col.lyDo, confidence: col.confidence };
+            }
+          });
+
+          // Nếu trường bắt buộc 'ten' chưa được map, fallback tìm bằng smartDetectColumns
+          if (!newMapping['ten']) {
+            const fallbackMap = smartDetectColumns(headers, dataRows);
+            if (fallbackMap['ten']) newMapping['ten'] = fallbackMap['ten'];
+          }
+
+          setFileHeaders(headers);
+          setRawRows(dataRows);
+          setColumnMapping(newMapping);
+          setAiColumnNotes(notes);
+          setSelectedRowIndices(dataRows.map((_, i) => i));
+          aiSucceeded = true;
+          showToast(
+            `AI đã nhận diện dòng tiêu đề (Dòng ${validHeaderIdx + 1}) và khớp ${Object.keys(newMapping).length} trường!`
+          );
+        }
+      }
+    } catch (err) {
+      console.warn('Lỗi gọi API AI phân loại bảng, chuyển sang heuristic cục bộ:', err);
+    } finally {
+      setIsAiAnalyzing(false);
+    }
+
+    // Fallback: nếu AI thất bại hoặc không có API key
+    if (!aiSucceeded) {
+      const rawHeaderRow = (allJsonRows[0] as any[]) || [];
+      const headers = rawHeaderRow.map((h: any, i: number) => {
+        const str = String(h || '').trim();
+        return str || `Cột ${i + 1}`;
+      });
+      const dataRows = allJsonRows
+        .slice(1)
+        .filter((row: any) =>
+          Array.isArray(row) &&
+          row.some((cell: any) => cell !== '' && cell !== null && cell !== undefined)
+        );
+
+      setFileHeaders(headers);
+      setRawRows(dataRows);
+      const detected = smartDetectColumns(headers, dataRows);
+      setColumnMapping(detected);
+      setAiColumnNotes({});
+      setSelectedRowIndices(dataRows.map((_, i) => i));
+      showToast(`Đã nhận diện các cột từ ${dataRows.length} dòng dữ liệu (Heuristic)!`);
+    }
   };
 
   // Đọc file Excel từ máy tính
@@ -564,30 +789,15 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     setIsLoading(true);
     const reader = new FileReader();
 
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const data = new Uint8Array(event.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
+        const workbook = XLSX.read(data, { type: 'array', raw: true });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
 
-        const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-
-        if (jsonRows.length < 2) {
-          setErrorMessage('File Excel không có dữ liệu hoặc chỉ có 1 dòng tiêu đề.');
-          setIsLoading(false);
-          return;
-        }
-
-        const headers = (jsonRows[0] as string[]).map((h) => String(h || '').trim()).filter(Boolean);
-        const dataRows = jsonRows.slice(1).filter((row) => row.some((cell: any) => cell !== ''));
-
-        setFileHeaders(headers);
-        setRawRows(dataRows);
-        const detected = smartDetectColumns(headers, dataRows);
-        setColumnMapping(detected);
-        setSelectedRowIndices(dataRows.map((_, i) => i));
-        showToast(`Đã nhận diện thông minh các cột từ ${dataRows.length} dòng dữ liệu!`);
+        const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: true });
+        await processLoadedSheet(jsonRows);
       } catch (err: any) {
         setErrorMessage(`Lỗi đọc file Excel: ${err.message || 'File không hợp lệ'}`);
       } finally {
@@ -645,25 +855,10 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       }
 
       // Parse CSV bằng XLSX
-      const workbook = XLSX.read(csvText, { type: 'string' });
+      const workbook = XLSX.read(csvText, { type: 'string', raw: true });
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonRows: any[] = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' });
-
-      if (jsonRows.length < 2) {
-        setErrorMessage('Google Sheet không có dữ liệu hoặc chỉ có dòng tiêu đề.');
-        setIsLoading(false);
-        return;
-      }
-
-      const headers = (jsonRows[0] as string[]).map((h) => String(h || '').trim()).filter(Boolean);
-      const dataRows = jsonRows.slice(1).filter((row) => row.some((cell: any) => cell !== ''));
-
-      setFileHeaders(headers);
-      setRawRows(dataRows);
-      const detected = smartDetectColumns(headers, dataRows);
-      setColumnMapping(detected);
-      setSelectedRowIndices(dataRows.map((_, i) => i));
-      showToast(`Đã nhận diện thông minh các cột từ ${dataRows.length} dòng Google Sheet!`);
+      const jsonRows: any[] = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '', raw: true });
+      await processLoadedSheet(jsonRows);
     } catch (err: any) {
       setErrorMessage(`Không thể nạp Google Sheet: ${err.message}`);
     } finally {
@@ -733,8 +928,12 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       }> = [];
 
       // 1. TikTok
-      const linkTT = String(getVal('linkTikTok') || '').trim();
-      const flTT = parseNumberWithSuffix(getVal('followerTikTok'));
+      const rawLinkTT = getVal('linkTikTok');
+      const rawFlTT = getVal('followerTikTok');
+      const parsedLinkTT = parseChannelCell(rawLinkTT);
+      const parsedFlTT = parseChannelCell(rawFlTT);
+      const linkTT = parsedLinkTT.linkOrName;
+      const flTT = parseNumberWithSuffix(rawFlTT) ?? parsedLinkTT.followers ?? parsedFlTT.followers;
       if (linkTT || flTT) {
         channels.push({
           tenNenTang: 'TikTok',
@@ -744,8 +943,12 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       }
 
       // 2. YouTube
-      const linkYT = String(getVal('linkYouTube') || '').trim();
-      const flYT = parseNumberWithSuffix(getVal('followerYouTube'));
+      const rawLinkYT = getVal('linkYouTube');
+      const rawFlYT = getVal('followerYouTube');
+      const parsedLinkYT = parseChannelCell(rawLinkYT);
+      const parsedFlYT = parseChannelCell(rawFlYT);
+      const linkYT = parsedLinkYT.linkOrName;
+      const flYT = parseNumberWithSuffix(rawFlYT) ?? parsedLinkYT.followers ?? parsedFlYT.followers;
       if (linkYT || flYT) {
         channels.push({
           tenNenTang: 'YouTube',
@@ -755,8 +958,12 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       }
 
       // 3. Facebook
-      const linkFB = String(getVal('linkFacebook') || '').trim();
-      const flFB = parseNumberWithSuffix(getVal('followerFacebook'));
+      const rawLinkFB = getVal('linkFacebook');
+      const rawFlFB = getVal('followerFacebook');
+      const parsedLinkFB = parseChannelCell(rawLinkFB);
+      const parsedFlFB = parseChannelCell(rawFlFB);
+      const linkFB = parsedLinkFB.linkOrName;
+      const flFB = parseNumberWithSuffix(rawFlFB) ?? parsedLinkFB.followers ?? parsedFlFB.followers;
       if (linkFB || flFB) {
         channels.push({
           tenNenTang: 'Facebook',
@@ -766,8 +973,12 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       }
 
       // 4. Instagram
-      const linkIG = String(getVal('linkInstagram') || '').trim();
-      const flIG = parseNumberWithSuffix(getVal('followerInstagram'));
+      const rawLinkIG = getVal('linkInstagram');
+      const rawFlIG = getVal('followerInstagram');
+      const parsedLinkIG = parseChannelCell(rawLinkIG);
+      const parsedFlIG = parseChannelCell(rawFlIG);
+      const linkIG = parsedLinkIG.linkOrName;
+      const flIG = parseNumberWithSuffix(rawFlIG) ?? parsedLinkIG.followers ?? parsedFlIG.followers;
       if (linkIG || flIG) {
         channels.push({
           tenNenTang: 'Instagram',
@@ -777,9 +988,15 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       }
 
       // 5. Kênh chung (linkProfile / soFollower / nenTang)
-      const genericLink = String(getVal('linkProfile') || '').trim();
-      const genericFollower = parseNumberWithSuffix(getVal('soFollower'));
+      const rawGenericLink = getVal('linkProfile');
+      const rawGenericFollower = getVal('soFollower');
       const genericPlatform = String(getVal('nenTang') || '').trim();
+
+      const parsedGenLink = parseChannelCell(rawGenericLink);
+      const parsedGenFl = parseChannelCell(rawGenericFollower);
+      const genericLink = parsedGenLink.linkOrName;
+      const genericFollower =
+        parseNumberWithSuffix(rawGenericFollower) ?? parsedGenLink.followers ?? parsedGenFl.followers;
 
       if (genericLink || genericFollower || genericPlatform) {
         let pName: 'TikTok' | 'YouTube' | 'Facebook' | 'Instagram' | 'Khác' = 'TikTok';
@@ -933,17 +1150,343 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     );
   };
 
-  // Thực thi Import các dòng đã chọn
-  const handleExecuteImport = () => {
+  // Thuật toán so sánh chênh lệch giữa dữ liệu file import và KOL đã có trong hệ thống (Yêu cầu 1)
+  const computeKolDiff = (row: (typeof parsedPreviewRows)[0]): KolDiff | null => {
+    if (row.status !== 'update' || !row.matchedKol || !row.kolData) return null;
+    const oldKol = row.matchedKol;
+    const newKol = row.kolData;
+    const conflicts: ConflictItem[] = [];
+    const autoAdditions: AutoAddItem[] = [];
+    const kolName = newKol.ten || oldKol.ten;
+
+    // a. Giá: 6 key của bangGia (post, video, shorts, livestream, thamDuSuKien, sdha)
+    const priceKeys: PriceFormatKey[] = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
+    priceKeys.forEach((key) => {
+      const oldPrice = oldKol.bangGia?.[key];
+      const newPrice = newKol.bangGia?.[key];
+      const hasOld = oldPrice !== null && oldPrice !== undefined && oldPrice > 0;
+      const hasNew = newPrice !== null && newPrice !== undefined && newPrice > 0;
+
+      if (hasOld && hasNew) {
+        if (oldPrice !== newPrice) {
+          conflicts.push({
+            id: `price_${key}`,
+            type: 'price',
+            subKey: key,
+            label: `Giá ${PRICE_FORMAT_LABELS[key]}`,
+            oldValue: oldPrice,
+            newValue: newPrice,
+            displayOld: `${oldPrice.toLocaleString('vi-VN')}đ`,
+            displayNew: `${newPrice.toLocaleString('vi-VN')}đ`,
+          });
+        }
+      } else if (!hasOld && hasNew) {
+        autoAdditions.push({
+          id: `price_${key}`,
+          kolName,
+          description: `${kolName}: thêm giá ${PRICE_FORMAT_LABELS[key]} ${newPrice.toLocaleString('vi-VN')}đ`,
+        });
+      }
+    });
+
+    // b. Kênh: so sánh linkProfile và soFollower cho mỗi nền tảng
+    const newChannels = newKol.channels || [];
+    const oldChannels = oldKol.nenTang || [];
+
+    newChannels.forEach((newCh) => {
+      const oldCh = oldChannels.find(
+        (c) => c.tenNenTang.toLowerCase() === newCh.tenNenTang.toLowerCase()
+      );
+
+      if (oldCh) {
+        // 1. So sánh linkProfile
+        const oldLink = (oldCh.linkProfile || '').trim();
+        const newLink = (newCh.linkProfile || '').trim();
+        const hasOldLink = Boolean(oldLink);
+        const hasNewLink = Boolean(newLink);
+
+        if (hasOldLink && hasNewLink) {
+          if (normalizeUrl(oldLink) !== normalizeUrl(newLink)) {
+            conflicts.push({
+              id: `channel_link_${newCh.tenNenTang}`,
+              type: 'channel_link',
+              subKey: newCh.tenNenTang,
+              label: `Link kênh ${newCh.tenNenTang}`,
+              oldValue: oldLink,
+              newValue: newLink,
+              displayOld: oldLink,
+              displayNew: newLink,
+            });
+          }
+        } else if (!hasOldLink && hasNewLink) {
+          autoAdditions.push({
+            id: `channel_link_${newCh.tenNenTang}`,
+            kolName,
+            description: `${kolName}: thêm link kênh ${newCh.tenNenTang}`,
+          });
+        }
+
+        // 2. So sánh soFollower
+        const oldFl = oldCh.soFollower || 0;
+        const newFl = newCh.soFollower || 0;
+        const hasOldFl = oldFl > 0;
+        const hasNewFl = newFl > 0;
+
+        if (hasOldFl && hasNewFl) {
+          if (oldFl !== newFl) {
+            conflicts.push({
+              id: `channel_fl_${newCh.tenNenTang}`,
+              type: 'channel_follower',
+              subKey: newCh.tenNenTang,
+              label: `Follower kênh ${newCh.tenNenTang}`,
+              oldValue: oldFl,
+              newValue: newFl,
+              displayOld: `${oldFl.toLocaleString('vi-VN')}`,
+              displayNew: `${newFl.toLocaleString('vi-VN')}`,
+            });
+          }
+        } else if (!hasOldFl && hasNewFl) {
+          autoAdditions.push({
+            id: `channel_fl_${newCh.tenNenTang}`,
+            kolName,
+            description: `${kolName}: thêm follower ${newCh.tenNenTang} (${newFl.toLocaleString('vi-VN')})`,
+          });
+        }
+      } else {
+        // Nền tảng hoàn toàn mới
+        if (newCh.linkProfile || (newCh.soFollower && newCh.soFollower > 0)) {
+          autoAdditions.push({
+            id: `channel_new_${newCh.tenNenTang}`,
+            kolName,
+            description: `${kolName}: thêm kênh mới ${newCh.tenNenTang}${
+              newCh.soFollower ? ` (${newCh.soFollower.toLocaleString('vi-VN')} follower)` : ''
+            }`,
+          });
+        }
+      }
+    });
+
+    // c. engagementRate
+    const oldER = oldKol.engagementRate;
+    const newER = newKol.engagementRate;
+    const hasOldER = oldER !== undefined && oldER !== null && oldER > 0;
+    const hasNewER = newER !== undefined && newER !== null && newER > 0;
+
+    if (hasOldER && hasNewER) {
+      if (oldER !== newER) {
+        conflicts.push({
+          id: 'er',
+          type: 'engagementRate',
+          subKey: 'engagementRate',
+          label: 'Tỷ lệ tương tác (ER)',
+          oldValue: oldER,
+          newValue: newER,
+          displayOld: `${oldER}%`,
+          displayNew: `${newER}%`,
+        });
+      }
+    } else if (!hasOldER && hasNewER) {
+      autoAdditions.push({
+        id: 'er',
+        kolName,
+        description: `${kolName}: thêm tỷ lệ tương tác ${newER}%`,
+      });
+    }
+
+    // d. Liên hệ: tenNguoiLienHe, soDienThoai, emailZalo
+    const contactFields: Array<{
+      key: 'tenNguoiLienHe' | 'soDienThoai' | 'emailZalo';
+      label: string;
+      isEqual: (a: string, b: string) => boolean;
+    }> = [
+      {
+        key: 'tenNguoiLienHe',
+        label: 'Tên người liên hệ',
+        isEqual: (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase(),
+      },
+      {
+        key: 'soDienThoai',
+        label: 'Số điện thoại',
+        isEqual: (a, b) => a.replace(/[\s.-]/g, '') === b.replace(/[\s.-]/g, ''),
+      },
+      {
+        key: 'emailZalo',
+        label: 'Email / Zalo',
+        isEqual: (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase(),
+      },
+    ];
+
+    contactFields.forEach(({ key, label, isEqual }) => {
+      const oldVal = (oldKol.lienHe?.[key] || '').trim();
+      const newVal = (newKol[key] || '').trim();
+      const hasOld = Boolean(oldVal);
+      const hasNew = Boolean(newVal);
+
+      if (hasOld && hasNew) {
+        if (!isEqual(oldVal, newVal)) {
+          conflicts.push({
+            id: `contact_${key}`,
+            type: 'contact',
+            subKey: key,
+            label,
+            oldValue: oldVal,
+            newValue: newVal,
+            displayOld: oldVal,
+            displayNew: newVal,
+          });
+        }
+      } else if (!hasOld && hasNew) {
+        autoAdditions.push({
+          id: `contact_${key}`,
+          kolName,
+          description: `${kolName}: thêm ${label.toLowerCase()} (${newVal})`,
+        });
+      }
+    });
+
+    // e. Lĩnh vực (chỉ liệt kê vào nhóm TỰ BỔ SUNG khi có lĩnh vực mới)
+    const oldLinhVuc = oldKol.linhVuc || [];
+    const newLinhVuc = (newKol.linhVuc || []).filter(
+      (l) => !oldLinhVuc.some((old) => old.toLowerCase() === l.toLowerCase())
+    );
+    if (newLinhVuc.length > 0) {
+      autoAdditions.push({
+        id: 'linhVuc',
+        kolName,
+        description: `${kolName}: bổ sung thêm lĩnh vực (${newLinhVuc.join(', ')})`,
+      });
+    }
+
+    return {
+      rowIndex: row.index,
+      kolName,
+      matchedKol: oldKol,
+      kolData: newKol,
+      isFuzzy: row.isFuzzy,
+      conflicts,
+      autoAdditions,
+    };
+  };
+
+  // Tính số lượng tạo mới và cập nhật trong bảng xác minh (tính động theo các KOL bị bỏ qua)
+  const verificationCounts = useMemo(() => {
     const validSelected = parsedPreviewRows.filter(
       (r) => selectedRowIndices.includes(r.index) && r.status !== 'error' && r.kolData
     );
 
-    if (validSelected.length === 0) {
-      showToast('Vui lòng chọn ít nhất 1 dòng hợp lệ để import!');
-      return;
-    }
+    const createCount = validSelected.filter((r) => r.status === 'create').length;
 
+    // Cập nhật không có xung đột
+    const nonConflictingUpdateCount = validSelected.filter(
+      (r) => r.status === 'update' && !verificationDiffs.some((d) => d.rowIndex === r.index)
+    ).length;
+
+    // Cập nhật có xung đột nhưng KHÔNG bị tick "Bỏ qua KOL này"
+    const activeConflictingUpdateCount = verificationDiffs.filter(
+      (d) => !kolResolutions[d.rowIndex]?.skipped
+    ).length;
+
+    const totalUpdateCount = nonConflictingUpdateCount + activeConflictingUpdateCount;
+
+    return {
+      createCount,
+      updateCount: totalUpdateCount,
+    };
+  }, [parsedPreviewRows, selectedRowIndices, verificationDiffs, kolResolutions]);
+
+  // Gom toàn bộ danh sách tự bổ sung của các KOL được cập nhật
+  const allAutoAdditions = useMemo(() => {
+    const validSelected = parsedPreviewRows.filter(
+      (r) => selectedRowIndices.includes(r.index) && r.status !== 'error' && r.kolData
+    );
+    const items: AutoAddItem[] = [];
+    validSelected.forEach((r) => {
+      if (r.status === 'update') {
+        const diff = computeKolDiff(r);
+        if (diff && diff.autoAdditions.length > 0) {
+          items.push(...diff.autoAdditions);
+        }
+      }
+    });
+    return items;
+  }, [parsedPreviewRows, selectedRowIndices]);
+
+  // Xử lý chọn nhanh toàn cục: "Tất cả giữ cũ" hoặc "Tất cả lấy mới"
+  const handleSetAllGlobal = (choice: 'keep_old' | 'take_new') => {
+    setKolResolutions((prev) => {
+      const next = { ...prev };
+      verificationDiffs.forEach((d) => {
+        const currentKol = next[d.rowIndex] || { skipped: false, choices: {} };
+        const updatedChoices = { ...currentKol.choices };
+        d.conflicts.forEach((c) => {
+          updatedChoices[c.id] = choice;
+        });
+        next[d.rowIndex] = {
+          ...currentKol,
+          choices: updatedChoices,
+        };
+      });
+      return next;
+    });
+  };
+
+  // Xử lý chọn nhanh cho riêng một KOL: tất cả giữ cũ / tất cả lấy mới
+  const handleSetKolChoice = (rowIndex: number, choice: 'keep_old' | 'take_new') => {
+    const diff = verificationDiffs.find((d) => d.rowIndex === rowIndex);
+    if (!diff) return;
+    setKolResolutions((prev) => {
+      const currentKol = prev[rowIndex] || { skipped: false, choices: {} };
+      const updatedChoices = { ...currentKol.choices };
+      diff.conflicts.forEach((c) => {
+        updatedChoices[c.id] = choice;
+      });
+      return {
+        ...prev,
+        [rowIndex]: {
+          ...currentKol,
+          choices: updatedChoices,
+        },
+      };
+    });
+  };
+
+  // Đổi lựa chọn radio cho từng mục xung đột
+  const handleToggleConflictChoice = (
+    rowIndex: number,
+    conflictId: string,
+    choice: 'keep_old' | 'take_new'
+  ) => {
+    setKolResolutions((prev) => {
+      const currentKol = prev[rowIndex] || { skipped: false, choices: {} };
+      return {
+        ...prev,
+        [rowIndex]: {
+          ...currentKol,
+          choices: {
+            ...currentKol.choices,
+            [conflictId]: choice,
+          },
+        },
+      };
+    });
+  };
+
+  // Toggle checkbox "Bỏ qua KOL này"
+  const handleToggleSkipKol = (rowIndex: number, skipped: boolean) => {
+    setKolResolutions((prev) => {
+      const currentKol = prev[rowIndex] || { skipped: false, choices: {} };
+      return {
+        ...prev,
+        [rowIndex]: {
+          ...currentKol,
+          skipped,
+        },
+      };
+    });
+  };
+
+  // Thực thi Import trực tiếp khi KHÔNG có xung đột nào
+  const executeDirectImport = (validSelected: typeof parsedPreviewRows) => {
     const payload = validSelected.map((r) => r.kolData!);
     const result = StorageService.importBatchKols(payload, matchKey, overwriteEmpty);
 
@@ -986,6 +1529,180 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
 
     onDataImported();
     showToast(`Import hoàn tất! Đã tạo mới ${result.created} KOL, cập nhật ${result.updated} KOL.`);
+  };
+
+  // Khi bấm nút Import trên giao diện (Yêu cầu 1 & 2)
+  const handleExecuteImport = () => {
+    const validSelected = parsedPreviewRows.filter(
+      (r) => selectedRowIndices.includes(r.index) && r.status !== 'error' && r.kolData
+    );
+
+    if (validSelected.length === 0) {
+      showToast('Vui lòng chọn ít nhất 1 dòng hợp lệ để import!');
+      return;
+    }
+
+    // Tính toán chênh lệch cho các dòng update
+    const updateRows = validSelected.filter((r) => r.status === 'update' && r.matchedKol);
+    const diffs: KolDiff[] = [];
+    updateRows.forEach((r) => {
+      const diff = computeKolDiff(r);
+      if (diff && diff.conflicts.length > 0) {
+        diffs.push(diff);
+      }
+    });
+
+    // Nếu có ít nhất 1 XUNG ĐỘT -> mở bảng xác minh
+    if (diffs.length > 0) {
+      setVerificationDiffs(diffs);
+      const initialResolutions: Record<
+        number,
+        { skipped: boolean; choices: Record<string, 'keep_old' | 'take_new'> }
+      > = {};
+      diffs.forEach((d) => {
+        const choices: Record<string, 'keep_old' | 'take_new'> = {};
+        d.conflicts.forEach((c) => {
+          choices[c.id] = 'take_new'; // Mặc định chọn sẵn "Lấy mới"
+        });
+        initialResolutions[d.rowIndex] = {
+          skipped: false, // Mặc định không bỏ qua
+          choices,
+        };
+      });
+      setKolResolutions(initialResolutions);
+      setIsVerificationModalOpen(true);
+      return;
+    }
+
+    // Nếu KHÔNG có xung đột nào -> import luôn như hiện tại
+    executeDirectImport(validSelected);
+  };
+
+  // Áp dụng lựa chọn khi bấm "Xác nhận import" trong bảng xác minh (Yêu cầu 3)
+  const handleConfirmVerification = () => {
+    const validSelected = parsedPreviewRows.filter(
+      (r) => selectedRowIndices.includes(r.index) && r.status !== 'error' && r.kolData
+    );
+
+    // 1. Dựng payload đã xử lý cho các dòng đã qua xác minh
+    const verifiedPayload: any[] = [];
+
+    verificationDiffs.forEach((diff) => {
+      const resolution = kolResolutions[diff.rowIndex];
+      // KOL bị tick "Bỏ qua KOL này" -> loại khỏi cả hai payload
+      if (resolution?.skipped) {
+        return;
+      }
+
+      // Clone kolData để không sửa dữ liệu gốc
+      const kolData = JSON.parse(JSON.stringify(diff.kolData));
+
+      // Với mỗi mục XUNG ĐỘT mà người dùng chọn "Giữ cũ", loại giá trị mới tương ứng khỏi kolData trước khi gửi đi:
+      diff.conflicts.forEach((conflict) => {
+        const choice = resolution?.choices[conflict.id] || 'take_new';
+        if (choice === 'keep_old') {
+          if (conflict.type === 'price') {
+            // Giá -> bỏ key đó khỏi bangGia (đặt undefined)
+            if (kolData.bangGia) {
+              delete kolData.bangGia[conflict.subKey];
+            }
+          } else if (conflict.type === 'channel_follower') {
+            // Follow của một kênh -> đặt soFollower của kênh đó = 0
+            const ch = kolData.channels?.find(
+              (c: any) => c.tenNenTang.toLowerCase() === conflict.subKey.toLowerCase()
+            );
+            if (ch) ch.soFollower = 0;
+            // Nếu là kênh chính của dòng thì áp dụng tương tự cho field cấp cao nhất
+            if (kolData.nenTang?.toLowerCase() === conflict.subKey.toLowerCase()) {
+              kolData.soFollower = 0;
+            }
+          } else if (conflict.type === 'channel_link') {
+            // Link của một kênh -> đặt linkProfile của kênh đó = ''
+            const ch = kolData.channels?.find(
+              (c: any) => c.tenNenTang.toLowerCase() === conflict.subKey.toLowerCase()
+            );
+            if (ch) ch.linkProfile = '';
+            // Nếu là kênh chính của dòng thì áp dụng tương tự cho field cấp cao nhất
+            if (kolData.nenTang?.toLowerCase() === conflict.subKey.toLowerCase()) {
+              kolData.linkProfile = '';
+            }
+          } else if (conflict.type === 'engagementRate') {
+            // ER -> đặt engagementRate = undefined
+            kolData.engagementRate = undefined;
+          } else if (conflict.type === 'contact') {
+            // Liên hệ -> đặt trường đó = ''
+            kolData[conflict.subKey] = '';
+          }
+        }
+      });
+
+      verifiedPayload.push(kolData);
+    });
+
+    // 2. Các dòng còn lại (tạo mới + cập nhật không qua xác minh)
+    const remainingSelected = validSelected.filter((r) => {
+      const isConflicting = verificationDiffs.some((d) => d.rowIndex === r.index);
+      return !isConflicting;
+    });
+
+    const remainingPayload = remainingSelected.map((r) => r.kolData!);
+
+    // 3. Thực thi import:
+    // Các dòng đã qua xác minh: gọi StorageService.importBatchKols với overwriteEmpty = false
+    const verifiedResult =
+      verifiedPayload.length > 0
+        ? StorageService.importBatchKols(verifiedPayload, matchKey, false)
+        : { created: 0, updated: 0 };
+
+    // Các dòng còn lại: gọi riêng với overwriteEmpty như hiện tại
+    const remainingResult =
+      remainingPayload.length > 0
+        ? StorageService.importBatchKols(remainingPayload, matchKey, overwriteEmpty)
+        : { created: 0, updated: 0 };
+
+    const totalCreated = verifiedResult.created + remainingResult.created;
+    const totalUpdated = verifiedResult.updated + remainingResult.updated;
+
+    // 4. Cập nhật kết quả & ghi lịch sử import
+    const errorRows = parsedPreviewRows.filter((r) => r.status === 'error');
+    const chiTietLoi = errorRows.map((r) => {
+      const colIdx = columnMapping['ten'] ? fileHeaders.indexOf(columnMapping['ten']) : -1;
+      const rawTen = colIdx >= 0 && rawRows[r.index] ? String(rawRows[r.index][colIdx] || '').trim() : '';
+      return {
+        ten: rawTen || `Dòng ${r.index + 1}`,
+        lyDo: r.reason || 'Lỗi không xác định',
+      };
+    });
+
+    const totalSelectedCount = verifiedPayload.length + remainingPayload.length;
+    const resultSummary = {
+      tongDong: rawRows.length,
+      daChon: totalSelectedCount,
+      taoMoi: totalCreated,
+      capNhat: totalUpdated,
+      loi: errorRows.length,
+      chiTietLoi,
+    };
+
+    setImportResult(resultSummary);
+
+    const historyEntry: ImportHistoryEntry = {
+      id: `import-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      thoiGian: new Date().toISOString(),
+      nguon: sourceType === 'google_sheet' ? 'Google Sheet' : 'Excel',
+      tenNguon: sourceName || (sourceType === 'google_sheet' ? 'Google Sheet' : 'File Excel'),
+      tongDong: rawRows.length,
+      taoMoi: totalCreated,
+      capNhat: totalUpdated,
+      loi: errorRows.length,
+      chiTietLoi,
+    };
+    StorageService.saveImportHistoryEntry(historyEntry);
+    setImportHistory(StorageService.getImportHistory());
+
+    setIsVerificationModalOpen(false);
+    onDataImported();
+    showToast(`Import hoàn tất! Đã tạo mới ${totalCreated} KOL, cập nhật ${totalUpdated} KOL.`);
   };
 
   // Đóng panel kết quả import và dọn bảng xem trước
@@ -1752,6 +2469,262 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
           </div>
         )}
       </div>
+
+      {/* MODAL XÁC MINH CẬP NHẬT TRÙNG LẶP (Yêu cầu 2) */}
+      {isVerificationModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Tiêu đề & Chọn nhanh toàn cục */}
+            <div className="px-6 py-5 border-b border-slate-200 bg-white flex flex-col gap-3">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 rounded-lg bg-amber-100 text-amber-700">
+                      <AlertTriangle className="w-5 h-5" />
+                    </span>
+                    <h2 className="text-lg font-bold text-slate-900">
+                      Xác minh cập nhật KOL đã có
+                    </h2>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Phát hiện <strong className="text-slate-800">{verificationDiffs.length} KOL</strong> bị trùng trong hệ thống có thông tin khác với dữ liệu trong file import. Vui lòng xác minh để giữ thông tin cũ hoặc lấy thông tin mới.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsVerificationModalOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                  title="Đóng"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* 2 Nút chọn nhanh toàn cục */}
+              <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-100 flex-wrap">
+                <span className="text-xs font-medium text-slate-600">
+                  Thao tác nhanh cho toàn bộ danh sách xung đột:
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSetAllGlobal('keep_old')}
+                    className="px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Tất cả giữ cũ</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetAllGlobal('take_new')}
+                    className="px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Tất cả lấy mới</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Nội dung danh sách các KOL có xung đột */}
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-5 flex-1 bg-slate-50/60">
+              {verificationDiffs.map((diff) => {
+                const resolution = kolResolutions[diff.rowIndex] || { skipped: false, choices: {} };
+                const isSkipped = resolution.skipped;
+
+                return (
+                  <div
+                    key={diff.rowIndex}
+                    className={`rounded-xl border transition-all ${
+                      isSkipped
+                        ? 'bg-slate-100/70 border-slate-200 opacity-60'
+                        : 'bg-white border-slate-200 shadow-xs'
+                    }`}
+                  >
+                    {/* Header Khối KOL */}
+                    <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/40">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-slate-900 text-sm sm:text-base">
+                          {diff.kolName}
+                        </span>
+                        {diff.isFuzzy && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                            Khớp mờ theo tên — kiểm tra đúng người chưa
+                          </span>
+                        )}
+                        {isSkipped && (
+                          <span className="text-[11px] font-semibold text-slate-500 bg-slate-200 px-2 py-0.5 rounded">
+                            (Đã bỏ qua, không cập nhật)
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-1.5 text-xs text-slate-700 hover:text-slate-900 cursor-pointer font-medium select-none">
+                          <input
+                            type="checkbox"
+                            checked={isSkipped}
+                            onChange={(e) => handleToggleSkipKol(diff.rowIndex, e.target.checked)}
+                            className="rounded border-slate-300 text-red-600 focus:ring-red-500 w-4 h-4 cursor-pointer"
+                          />
+                          <span className={isSkipped ? 'text-red-600 font-semibold' : ''}>
+                            Bỏ qua KOL này
+                          </span>
+                        </label>
+
+                        {!isSkipped && (
+                          <div className="flex items-center gap-1 border-l border-slate-200 pl-3">
+                            <button
+                              type="button"
+                              onClick={() => handleSetKolChoice(diff.rowIndex, 'keep_old')}
+                              className="text-[11px] text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded transition-colors cursor-pointer"
+                            >
+                              KOL này: tất cả giữ cũ
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSetKolChoice(diff.rowIndex, 'take_new')}
+                              className="text-[11px] text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded font-medium transition-colors cursor-pointer"
+                            >
+                              KOL này: tất cả lấy mới
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Bảng các mục xung đột của KOL */}
+                    {!isSkipped && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] font-bold border-b border-slate-100">
+                            <tr>
+                              <th className="px-4 py-2.5 text-left w-2/6">Trường</th>
+                              <th className="px-3 py-2.5 text-left w-2/6">Đang có (hệ thống)</th>
+                              <th className="px-3 py-2.5 text-left w-2/6">Trong file import</th>
+                              <th className="px-4 py-2.5 text-center w-36 whitespace-nowrap">Chọn</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {diff.conflicts.map((conflict) => {
+                              const currentChoice = resolution.choices[conflict.id] || 'take_new';
+                              return (
+                                <tr key={conflict.id} className="hover:bg-slate-50/50">
+                                  <td className="px-4 py-3 font-medium text-slate-800">
+                                    {conflict.label}
+                                  </td>
+                                  <td className="px-3 py-3 text-slate-600 font-mono text-[11px]">
+                                    <span className="bg-slate-100 px-2.5 py-1 rounded-md inline-block border border-slate-200">
+                                      {conflict.displayOld}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-3 text-indigo-700 font-mono text-[11px] font-semibold">
+                                    <span className="bg-indigo-50 text-indigo-800 px-2.5 py-1 rounded-md inline-block border border-indigo-100">
+                                      {conflict.displayNew}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-center whitespace-nowrap">
+                                    <div className="inline-flex items-center gap-3">
+                                      <label className="flex items-center gap-1.5 cursor-pointer text-xs text-slate-700 hover:text-slate-900">
+                                        <input
+                                          type="radio"
+                                          name={`choice_${diff.rowIndex}_${conflict.id}`}
+                                          checked={currentChoice === 'keep_old'}
+                                          onChange={() =>
+                                            handleToggleConflictChoice(diff.rowIndex, conflict.id, 'keep_old')
+                                          }
+                                          className="text-slate-600 focus:ring-slate-500 cursor-pointer"
+                                        />
+                                        <span>Giữ cũ</span>
+                                      </label>
+                                      <label className="flex items-center gap-1.5 cursor-pointer text-xs text-indigo-700 hover:text-indigo-900 font-medium">
+                                        <input
+                                          type="radio"
+                                          name={`choice_${diff.rowIndex}_${conflict.id}`}
+                                          checked={currentChoice === 'take_new'}
+                                          onChange={() =>
+                                            handleToggleConflictChoice(diff.rowIndex, conflict.id, 'take_new')
+                                          }
+                                          className="text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                        />
+                                        <span>Lấy mới</span>
+                                      </label>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Mục có thể thu gọn: Sẽ tự động bổ sung (không xung đột) */}
+              {allAutoAdditions.length > 0 && (
+                <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-xs">
+                  <button
+                    type="button"
+                    onClick={() => setShowAutoAdditions(!showAutoAdditions)}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 text-left transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-800">
+                      <Sparkles className="w-4 h-4 text-emerald-600" />
+                      <span>Sẽ tự động bổ sung (không xung đột)</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-800 font-bold">
+                        {allAutoAdditions.length} mục
+                      </span>
+                    </div>
+                    <div className="text-slate-400">
+                      {showAutoAdditions ? (
+                        <ChevronUp className="w-4 h-4" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4" />
+                      )}
+                    </div>
+                  </button>
+                  {showAutoAdditions && (
+                    <div className="p-4 border-t border-slate-100 text-xs space-y-2 max-h-56 overflow-y-auto bg-white">
+                      {allAutoAdditions.map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-2 text-slate-700">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          <span>{item.description}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 bg-white border-t border-slate-200 flex items-center justify-between gap-4">
+              <button
+                type="button"
+                onClick={() => setIsVerificationModalOpen(false)}
+                className="px-4 py-2.5 text-xs font-semibold text-slate-700 hover:text-slate-900 border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer"
+              >
+                Quay lại
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmVerification}
+                disabled={verificationCounts.createCount === 0 && verificationCounts.updateCount === 0}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>
+                  Xác nhận import ({verificationCounts.createCount} tạo mới, {verificationCounts.updateCount} cập nhật)
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
