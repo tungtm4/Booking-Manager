@@ -66,8 +66,8 @@ interface DataImportViewProps {
 // Danh sách các trường dữ liệu của KOL (hỗ trợ đầy đủ nhiều nền tảng trên cùng 1 dòng)
 export const KOL_FIELD_DEFINITIONS = [
   // 1. Thông tin cơ bản
-  { key: 'ten', label: 'Tên KOL / Nghệ Danh', group: 'basic', required: true, aliases: ['tên', 'tên kol', 'nghệ danh', 'name', 'kol', 'họ và tên', 'họ tên'] },
-  { key: 'linhVuc', label: 'Lĩnh Vực (ngăn bằng ;)', group: 'basic', required: false, aliases: ['lĩnh vực', 'chủ đề', 'category', 'tags', 'tag', 'ngành hàng', 'chuyên mục'] },
+  { key: 'ten', label: 'Tên KOL / Nghệ Danh', group: 'basic', required: true, aliases: ['tên', 'tên kol', 'nghệ danh', 'name', 'kol', 'họ và tên', 'họ tên', 'creator', 'tác giả'] },
+  { key: 'linhVuc', label: 'Lĩnh Vực (ngăn bằng ;)', group: 'basic', required: false, aliases: ['lĩnh vực', 'chủ đề', 'category', 'tags', 'tag', 'ngành hàng', 'chuyên mục', 'nhóm nội dung', 'nội dung'] },
   { key: 'engagementRate', label: 'Tỷ Lệ Tương Tác (ER %)', group: 'basic', required: false, aliases: ['engagement', 'tương tác', 'er', 'er %', 'tỷ lệ tương tác', 'er rate'] },
 
   // 2. Kênh & Link chuyên biệt cho từng nền tảng
@@ -207,43 +207,137 @@ export const smartDetectColumns = (headers: string[], rawRows: any[]): Record<st
 
   const norm = (s: string) => s.toLowerCase().trim().replace(/[()_\-%]/g, '');
 
+  // Helper nhận diện chuỗi là khoảng giá trị (dạng "100K–500K", "100 - 200", "1.5M - 2M", "10tr–20tr")
+  const isRangeValue = (str: string): boolean => {
+    if (!str) return false;
+    return /(?:\d+[kmbtr\s]*|[0-9.,]+)\s*[-–—~]\s*(?:\d+[kmbtr\s]*|[0-9.,]+)/i.test(str.trim());
+  };
+
+  // Helper nhận diện URL hợp lệ
+  const isUrlString = (s: string): boolean => {
+    if (!s) return false;
+    const str = s.trim();
+    return (
+      /^https?:\/\//i.test(str) ||
+      /^(?:www\.)?(?:tiktok\.com|youtube\.com|youtu\.be|facebook\.com|fb\.com|fb\.watch|instagram\.com|instagr\.am)/i.test(str) ||
+      /(?:tiktok|youtube|youtu\.be|facebook|fb\.com|instagram)\.com/i.test(str)
+    );
+  };
+
+  // 1. Kiểm tra cột URL
+  const isValidUrlCol = (samples: string[]): boolean => {
+    if (samples.length === 0) return false;
+    const urlCount = samples.filter(isUrlString).length;
+    return urlCount >= Math.max(1, Math.ceil(samples.length * 0.5));
+  };
+
+  // 2. Kiểm tra cột giá: đa số ô mẫu phải parse được thành số, VÀ không được là khoảng giá trị
+  const isValidPriceCol = (samples: string[]): boolean => {
+    if (samples.length === 0) return false;
+    if (samples.some(isRangeValue)) return false;
+    const validNumbers = samples
+      .map(parseNumberWithSuffix)
+      .filter((n): n is number => n !== undefined && !isNaN(n) && n > 0);
+    return validNumbers.length >= Math.max(1, Math.ceil(samples.length * 0.5));
+  };
+
+  // 3. Kiểm tra cột follower: đa số ô mẫu phải parse được thành số (và không phải URL, không phải range)
+  const isValidFollowerCol = (samples: string[]): boolean => {
+    if (samples.length === 0) return false;
+    if (samples.some(isRangeValue)) return false;
+    if (isValidUrlCol(samples)) return false;
+    const validNumbers = samples
+      .map(parseNumberWithSuffix)
+      .filter((n): n is number => n !== undefined && !isNaN(n) && n >= 0);
+    return validNumbers.length >= Math.max(1, Math.ceil(samples.length * 0.5));
+  };
+
+  // 4. Kiểm tra cột ER (%): đa số ô mẫu phải parse được thành số % hợp lệ
+  const isValidERCol = (samples: string[]): boolean => {
+    if (samples.length === 0) return false;
+    const validERs = samples
+      .map(parsePercentageValue)
+      .filter((n): n is number => n !== undefined && !isNaN(n) && n > 0 && n <= 100);
+    return validERs.length >= Math.max(1, Math.ceil(samples.length * 0.5));
+  };
+
+  // 5. Kiểm tra dạng tên: chữ người/kênh, không phải số thuần (STT), không phải URL/email/range
+  const isNameLike = (s: string): boolean => {
+    if (!s) return false;
+    const str = s.trim();
+    if (str.length < 2) return false;
+    if (/^[\d\s.,\-–_#]+$/.test(str)) return false;
+    if (isUrlString(str) || /^https?:\/\/|www\.|\.(?:com|vn|net|org|io|ai)\b/i.test(str)) return false;
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(str)) return false;
+    if (isRangeValue(str)) return false;
+    return /[a-zA-Z\u00C0-\u024F\u1EA0-\u1EF9]/.test(str);
+  };
+
+  const isValidNameCol = (samples: string[]): boolean => {
+    if (samples.length === 0) return false;
+    const nameCount = samples.filter(isNameLike).length;
+    return nameCount >= Math.max(1, Math.ceil(samples.length * 0.5));
+  };
+
+  // 6. Kiểm tra SĐT & Email
+  const isValidPhoneCol = (samples: string[]): boolean => {
+    if (samples.length === 0) return false;
+    const phoneCount = samples.filter((s) =>
+      /^(?:\+?84|0)[3|5|7|8|9][\d\s.-]{8,11}$/.test(s.replace(/[\s.-]/g, ''))
+    ).length;
+    return phoneCount >= Math.max(1, Math.ceil(samples.length * 0.4));
+  };
+
+  const isValidEmailCol = (samples: string[]): boolean => {
+    if (samples.length === 0) return false;
+    const emailCount = samples.filter((s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(s.trim())).length;
+    return emailCount >= Math.max(1, Math.ceil(samples.length * 0.4));
+  };
+
+  // Bộ kiểm tra nội dung tổng quát theo từng field key
+  const validateFieldContent = (fieldKey: string, samples: string[]): boolean => {
+    if (['giaPost', 'giaVideo', 'giaShorts', 'giaLivestream', 'giaThamDuSK', 'giaSdha'].includes(fieldKey)) {
+      return isValidPriceCol(samples);
+    }
+    if (['followerTikTok', 'followerYouTube', 'followerFacebook', 'followerInstagram', 'soFollower'].includes(fieldKey)) {
+      return isValidFollowerCol(samples);
+    }
+    if (fieldKey === 'engagementRate') {
+      return isValidERCol(samples);
+    }
+    if (['linkTikTok', 'linkYouTube', 'linkFacebook', 'linkInstagram', 'linkProfile'].includes(fieldKey)) {
+      return isValidUrlCol(samples);
+    }
+    if (fieldKey === 'ten') {
+      return isValidNameCol(samples);
+    }
+    if (fieldKey === 'soDienThoai') {
+      return isValidPhoneCol(samples);
+    }
+    if (fieldKey === 'emailZalo') {
+      return (
+        isValidEmailCol(samples) ||
+        isValidPhoneCol(samples) ||
+        samples.some((s) => /@|zalo|phone|sđt|contact|0\d{9}/i.test(s))
+      );
+    }
+    if (['linhVuc', 'tenNguoiLienHe', 'nenTang'].includes(fieldKey)) {
+      const isUrl = isValidUrlCol(samples);
+      const isPureNumber = samples.every((s) => /^[\d\s.,\-–]+$/.test(s.trim()));
+      return !isUrl && !isPureNumber;
+    }
+    return true;
+  };
+
+  // VÒNG QUÉT CHÍNH: Phân tích tiêu đề kết hợp NỘI DUNG Ô
   headers.forEach((h, colIdx) => {
     const hClean = norm(h);
     const samples = getColSamples(colIdx);
     if (samples.length === 0) return;
 
-    // Phân tích đặc trưng các mẫu ô
-    const urlSamples = samples.filter(
-      (s) => /^https?:\/\//i.test(s) || /(?:tiktok|youtube|youtu\.be|facebook|fb\.com|instagram)\.com/i.test(s)
-    );
-    const isUrlCol = urlSamples.length >= Math.max(1, Math.floor(samples.length * 0.4));
-
-    const emailSamples = samples.filter((s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(s));
-    const isEmailCol = emailSamples.length >= Math.max(1, Math.floor(samples.length * 0.4));
-
-    const phoneSamples = samples.filter((s) => /^(?:\+?84|0)[3|5|7|8|9][\d\s.-]{8,11}$/.test(s.replace(/[\s.-]/g, '')));
-    const isPhoneCol = phoneSamples.length >= Math.max(1, Math.floor(samples.length * 0.4));
-
-    const percentSamples = samples.filter(
-      (s) =>
-        s.includes('%') ||
-        (parseFloat(s.replace(',', '.')) > 0 &&
-          parseFloat(s.replace(',', '.')) <= 40 &&
-          (hClean.includes('er') || hClean.includes('tương tác')))
-    );
-    const isPercentCol =
-      percentSamples.length >= Math.max(1, Math.floor(samples.length * 0.4)) ||
-      hClean.includes('er') ||
-      hClean.includes('engagement');
-
-    const numbers = samples.map(parseNumberWithSuffix).filter((n): n is number => n !== undefined);
-    const highNumbers = numbers.filter((n) => n >= 50000);
-    const isPriceRange =
-      highNumbers.length >= Math.max(1, Math.floor(samples.length * 0.4)) ||
-      samples.some((s) => /(?:tr|triệu|k|vnd|vnđ|đ)$/i.test(s));
-
-    // 1. NHẬN DIỆN CỘT LINK / PROFILE
-    if (isUrlCol || hClean.includes('link') || hClean.includes('url') || hClean.includes('kênh')) {
+    // 1. NHẬN DIỆN CỘT LINK / PROFILE (Bắt buộc nội dung phải là URL)
+    if (isValidUrlCol(samples)) {
+      const urlSamples = samples.filter(isUrlString);
       const hasTikTok =
         hClean.includes('tiktok') ||
         hClean.includes('tik tok') ||
@@ -291,56 +385,50 @@ export const smartDetectColumns = (headers: string[], rawRows: any[]): Record<st
       }
     }
 
-    // 2. NHẬN DIỆN CỘT FOLLOWERS / SUB
+    // 2. NHẬN DIỆN CỘT FOLLOWERS / SUB (Bắt buộc đa số ô là số, không là URL, không là range)
     if (
       !mappedCols.has(h) &&
+      isValidFollowerCol(samples) &&
       (hClean.includes('follow') || hClean.includes('sub') || hClean.includes('theo dõi')) &&
       !hClean.includes('giá') &&
       !hClean.includes('chi phí')
     ) {
-      // Bắt buộc cả 2 điều kiện:
-      // (a) Đa số ô mẫu của cột phải parse được thành số hợp lệ qua parseNumberWithSuffix
-      // (b) Cột chưa nằm trong mappedCols
-      const validNumbers = samples
-        .map(parseNumberWithSuffix)
-        .filter((n): n is number => n !== undefined);
-      const isNumericCol = validNumbers.length >= Math.max(1, Math.floor(samples.length * 0.4));
-
-      if (isNumericCol) {
-        if ((hClean.includes('tiktok') || hClean.includes('tik tok')) && !mapping['followerTikTok']) {
-          mapping['followerTikTok'] = h;
-          mappedCols.add(h);
-          return;
-        }
-        if ((hClean.includes('youtube') || hClean.includes('ytb') || hClean.includes('yt')) && !mapping['followerYouTube']) {
-          mapping['followerYouTube'] = h;
-          mappedCols.add(h);
-          return;
-        }
-        if ((hClean.includes('facebook') || hClean.includes('fb') || hClean.includes('fanpage')) && !mapping['followerFacebook']) {
-          mapping['followerFacebook'] = h;
-          mappedCols.add(h);
-          return;
-        }
-        if ((hClean.includes('instagram') || hClean.includes('ig') || hClean.includes('insta')) && !mapping['followerInstagram']) {
-          mapping['followerInstagram'] = h;
-          mappedCols.add(h);
-          return;
-        }
-        if (!mapping['soFollower']) {
-          mapping['soFollower'] = h;
-          mappedCols.add(h);
-          return;
-        }
+      if ((hClean.includes('tiktok') || hClean.includes('tik tok')) && !mapping['followerTikTok']) {
+        mapping['followerTikTok'] = h;
+        mappedCols.add(h);
+        return;
+      }
+      if ((hClean.includes('youtube') || hClean.includes('ytb') || hClean.includes('yt')) && !mapping['followerYouTube']) {
+        mapping['followerYouTube'] = h;
+        mappedCols.add(h);
+        return;
+      }
+      if ((hClean.includes('facebook') || hClean.includes('fb') || hClean.includes('fanpage')) && !mapping['followerFacebook']) {
+        mapping['followerFacebook'] = h;
+        mappedCols.add(h);
+        return;
+      }
+      if ((hClean.includes('instagram') || hClean.includes('ig') || hClean.includes('insta')) && !mapping['followerInstagram']) {
+        mapping['followerInstagram'] = h;
+        mappedCols.add(h);
+        return;
+      }
+      if (!mapping['soFollower']) {
+        mapping['soFollower'] = h;
+        mappedCols.add(h);
+        return;
       }
     }
 
-    // 3. NHẬN DIỆN CỘT GIÁ (POST / VIDEO / SHORTS / LIVE / SK / SDHA)
+    // 3. NHẬN DIỆN CỘT GIÁ (Bắt buộc ô mẫu là số đơn, không phải khoảng giá trị)
     if (
-      hClean.includes('giá') ||
-      hClean.includes('cost') ||
-      hClean.includes('báo giá') ||
-      (isPriceRange && !hClean.includes('follow') && !hClean.includes('sđt') && !hClean.includes('phone'))
+      !mappedCols.has(h) &&
+      isValidPriceCol(samples) &&
+      (hClean.includes('giá') ||
+        hClean.includes('cost') ||
+        hClean.includes('báo giá') ||
+        hClean.includes('rate') ||
+        samples.some((s) => /(?:tr|triệu|vnd|vnđ|đ)$/i.test(s)))
     ) {
       if ((hClean.includes('post') || hClean.includes('bài') || hClean.includes('ảnh')) && !mapping['giaPost']) {
         mapping['giaPost'] = h;
@@ -372,23 +460,23 @@ export const smartDetectColumns = (headers: string[], rawRows: any[]): Record<st
         mappedCols.add(h);
         return;
       }
-      if (!mapping['giaVideo']) {
-        mapping['giaVideo'] = h;
+      // GỠ BỎ LỐI TẮT 1: Không mặc định gán vào giaVideo nếu không rõ format
+    }
+
+    // 4. NHẬN DIỆN CỘT ER (%) (Bắt buộc parse được thành % hợp lệ)
+    if (!mappedCols.has(h) && isValidERCol(samples) && !mapping['engagementRate']) {
+      if (hClean.includes('er') || hClean.includes('tương tác') || hClean.includes('engagement') || samples.some((s) => s.includes('%'))) {
+        mapping['engagementRate'] = h;
         mappedCols.add(h);
         return;
       }
     }
 
-    // 4. NHẬN DIỆN CỘT ER (%)
-    if (isPercentCol && !mapping['engagementRate']) {
-      mapping['engagementRate'] = h;
-      mappedCols.add(h);
-      return;
-    }
-
     // 5. NHẬN DIỆN SỐ ĐIỆN THOẠI
     if (
-      (isPhoneCol || hClean.includes('sđt') || hClean.includes('phone') || hClean.includes('điện thoại')) &&
+      !mappedCols.has(h) &&
+      isValidPhoneCol(samples) &&
+      (hClean.includes('sđt') || hClean.includes('phone') || hClean.includes('điện thoại') || hClean.includes('hotline')) &&
       !mapping['soDienThoai']
     ) {
       mapping['soDienThoai'] = h;
@@ -396,19 +484,28 @@ export const smartDetectColumns = (headers: string[], rawRows: any[]): Record<st
       return;
     }
 
-    // 6. NHẬN DIỆN EMAIL / ZALO
+    // 6. NHẬN DIỆN EMAIL / ZALO / LIÊN HỆ
     if (
-      (isEmailCol || hClean.includes('email') || hClean.includes('mail') || hClean.includes('zalo')) &&
+      !mappedCols.has(h) &&
+      (isValidEmailCol(samples) || hClean.includes('email') || hClean.includes('mail') || hClean.includes('zalo') || hClean.includes('liên hệ')) &&
       !mapping['emailZalo']
     ) {
-      mapping['emailZalo'] = h;
-      mappedCols.add(h);
-      return;
+      const hasContactContent =
+        isValidEmailCol(samples) ||
+        isValidPhoneCol(samples) ||
+        samples.some((s) => /@|zalo|phone|sđt|contact|0\d{9}/i.test(s));
+      if (hasContactContent) {
+        mapping['emailZalo'] = h;
+        mappedCols.add(h);
+        return;
+      }
     }
 
-    // 7. NHẬN DIỆN TÊN LIÊN HỆ
+    // 7. NHẬN DIỆN TÊN LIÊN HỆ (Bắt buộc là tên người, không phải email/sđt)
     if (
-      (hClean.includes('liên hệ') || hClean.includes('quản lý') || hClean.includes('contact')) &&
+      !mappedCols.has(h) &&
+      isValidNameCol(samples) &&
+      (hClean.includes('người liên hệ') || hClean.includes('tên liên hệ') || hClean.includes('quản lý') || hClean.includes('contact')) &&
       !hClean.includes('sđt') &&
       !hClean.includes('email') &&
       !mapping['tenNguoiLienHe']
@@ -420,7 +517,8 @@ export const smartDetectColumns = (headers: string[], rawRows: any[]): Record<st
 
     // 8. NHẬN DIỆN LĨNH VỰC
     if (
-      (hClean.includes('lĩnh vực') || hClean.includes('chủ đề') || hClean.includes('category') || hClean.includes('tag')) &&
+      !mappedCols.has(h) &&
+      (hClean.includes('lĩnh vực') || hClean.includes('chủ đề') || hClean.includes('category') || hClean.includes('tag') || hClean.includes('nhóm nội dung')) &&
       !mapping['linhVuc']
     ) {
       mapping['linhVuc'] = h;
@@ -429,15 +527,17 @@ export const smartDetectColumns = (headers: string[], rawRows: any[]): Record<st
     }
 
     // 9. NHẬN DIỆN NỀN TẢNG (CHỮ NỀN TẢNG ĐƠN)
-    if ((hClean.includes('nền tảng') || hClean.includes('platform')) && !mapping['nenTang']) {
+    if (!mappedCols.has(h) && (hClean.includes('nền tảng') || hClean.includes('platform')) && !mapping['nenTang']) {
       mapping['nenTang'] = h;
       mappedCols.add(h);
       return;
     }
 
-    // 10. NHẬN DIỆN TÊN KOL
+    // 10. NHẬN DIỆN TÊN KOL (Bắt buộc nội dung ô đạt chuẩn dạng tên, không phải số STT)
     if (
-      (hClean.includes('tên') || hClean.includes('kol') || hClean.includes('name') || hClean.includes('nghệ danh')) &&
+      !mappedCols.has(h) &&
+      isValidNameCol(samples) &&
+      (hClean.includes('tên') || hClean.includes('kol') || hClean.includes('name') || hClean.includes('nghệ danh') || hClean.includes('creator')) &&
       !mapping['ten']
     ) {
       mapping['ten'] = h;
@@ -446,13 +546,16 @@ export const smartDetectColumns = (headers: string[], rawRows: any[]): Record<st
     }
   });
 
-  // Fallback: nếu còn trường chưa map và cột chưa được dùng, duyệt theo aliases chuẩn
+  // Fallback: nếu còn trường chưa map và cột chưa được dùng, duyệt theo aliases chuẩn kèm KIỂM TRA NỘI DUNG
   KOL_FIELD_DEFINITIONS.forEach((field) => {
     if (mapping[field.key]) return;
-    const foundHeader = headers.find((h) => {
+    const foundHeader = headers.find((h, colIdx) => {
       if (mappedCols.has(h)) return false;
       const cleanH = norm(h);
-      return field.aliases.some((alias) => cleanH.includes(alias) || alias.includes(cleanH));
+      const isMatch = field.aliases.some((alias) => cleanH.includes(alias) || alias.includes(cleanH));
+      if (!isMatch) return false;
+      const samples = getColSamples(colIdx);
+      return validateFieldContent(field.key, samples);
     });
     if (foundHeader) {
       mapping[field.key] = foundHeader;
@@ -460,12 +563,16 @@ export const smartDetectColumns = (headers: string[], rawRows: any[]): Record<st
     }
   });
 
-  // Fallback đặc biệt cho Tên KOL: nếu vẫn chưa có, lấy cột đầu tiên chưa được map
+  // GỠ BỎ LỐI TẮT 2: Fallback đặc biệt cho Tên KOL: chỉ lấy cột chưa map đầu tiên NẾU nội dung là dạng tên hợp lệ
   if (!mapping['ten']) {
-    const firstFree = headers.find((h) => !mappedCols.has(h));
-    if (firstFree) {
-      mapping['ten'] = firstFree;
-      mappedCols.add(firstFree);
+    const candidateCol = headers.find((h, colIdx) => {
+      if (mappedCols.has(h)) return false;
+      const samples = getColSamples(colIdx);
+      return isValidNameCol(samples);
+    });
+    if (candidateCol) {
+      mapping['ten'] = candidateCol;
+      mappedCols.add(candidateCol);
     }
   }
 
