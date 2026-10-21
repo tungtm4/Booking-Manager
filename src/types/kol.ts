@@ -113,6 +113,7 @@ export interface RecommendationFilter {
   followerToiThieu?: number;
   soLuongCan: number;
   mucTieu?: string;
+  goiHangMuc?: { format: PriceFormatKey; soLuong: number }[];
 }
 
 export interface RecommendedKolSowItem {

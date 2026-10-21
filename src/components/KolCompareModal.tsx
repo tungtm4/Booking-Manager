@@ -570,12 +570,12 @@ export const KolCompareModal: React.FC<KolCompareModalProps> = ({
                                       {isLowest && (
                                         <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-sm bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-0.5">
                                           <Sparkles className="w-2.5 h-2.5" />
-                                          Tối ưu nhất
+                                          Giá thấp nhất
                                         </span>
                                       )}
                                     </div>
                                   ) : (
-                                    <span className="text-slate-400 font-mono text-xs italic">
+                                    <span className="text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-200 font-mono text-xs italic inline-block">
                                       Chưa có giá
                                     </span>
                                   )}

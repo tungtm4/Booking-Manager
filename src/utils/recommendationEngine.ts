@@ -65,42 +65,117 @@ export function calculateKolRecommendation(
   }
 
   // 2. CHẤM ĐIỂM GIÁ FORMAT & NGÂN SÁCH (Max 30 điểm)
-  const formatKey: PriceFormatKey = filter.formatNganSach || 'video';
-  const formatLabel = PRICE_FORMAT_LABELS[formatKey] || formatKey;
-  const currentPrice = kol.bangGia ? kol.bangGia[formatKey] : null;
+  const activeGoiHangMuc = (filter.goiHangMuc || []).filter((item) => item.soLuong > 0);
+  const hasGoiHangMuc = activeGoiHangMuc.length > 0;
+  let giaHienTaiCalculated: number | null = null;
 
-  if (filter.nganSachToiDa && filter.nganSachToiDa > 0) {
-    if (currentPrice === null || currentPrice === undefined || currentPrice === 0) {
+  if (hasGoiHangMuc && filter.nganSachToiDa && filter.nganSachToiDa > 0) {
+    const isMissingAnyPrice = activeGoiHangMuc.some((item) => {
+      const p = kol.bangGia ? kol.bangGia[item.format] : null;
+      return p === null || p === undefined || p === 0;
+    });
+
+    if (isMissingAnyPrice) {
       diemGia = 8;
-      lyDo.push(`Chưa có báo giá cho ${formatLabel} (cần deal giá riêng)`);
-    } else if (currentPrice <= filter.nganSachToiDa) {
-      diemGia = 30;
-      const tietKiem = filter.nganSachToiDa - currentPrice;
-      if (tietKiem > 0) {
-        lyDo.push(`Giá ${formatLabel} ${formatVND(currentPrice)} thấp hơn ngân sách (tiết kiệm ${formatVND(tietKiem)})`);
-      } else {
-        lyDo.push(`Giá ${formatLabel} ${formatVND(currentPrice)} vừa vặn với ngân sách`);
-      }
-    } else if (currentPrice <= filter.nganSachToiDa * 1.2) {
-      // Vượt ngân sách <= 20%
-      diemGia = 15;
-      vuotNganSach = true;
-      const phuTroi = currentPrice - filter.nganSachToiDa;
-      lyDo.push(`Giá ${formatLabel} ${formatVND(currentPrice)} vượt ngân sách nhẹ ${formatVND(phuTroi)} (+${Math.round((phuTroi / filter.nganSachToiDa) * 100)}%)`);
+      lyDo.push('Chưa đủ giá để tính tổng chi phí SOW');
     } else {
-      // Vượt quá 20%
-      diemGia = 0;
-      vuotNganSach = true;
-      lyDo.push(`Giá ${formatLabel} ${formatVND(currentPrice)} cao hơn ngân sách ${formatVND(filter.nganSachToiDa)}`);
+      let tongChiPhi = 0;
+      const itemsDescParts: string[] = [];
+      activeGoiHangMuc.forEach((item) => {
+        const unitPrice = kol.bangGia![item.format]!;
+        tongChiPhi += unitPrice * item.soLuong;
+        const label = PRICE_FORMAT_LABELS[item.format] || item.format;
+        const qtyStr = Number.isInteger(item.soLuong) ? `${item.soLuong}` : `${Number(item.soLuong.toFixed(1))}`;
+        itemsDescParts.push(`${qtyStr} ${label}`);
+      });
+      giaHienTaiCalculated = tongChiPhi;
+      const itemsDesc = itemsDescParts.join(', ');
+
+      if (tongChiPhi <= filter.nganSachToiDa) {
+        diemGia = 30;
+        const tietKiem = filter.nganSachToiDa - tongChiPhi;
+        if (tietKiem > 0) {
+          lyDo.push(`Tổng chi phí SOW ước tính ${formatVND(tongChiPhi)} (${itemsDesc}) thấp hơn ngân sách (tiết kiệm ${formatVND(tietKiem)})`);
+        } else {
+          lyDo.push(`Tổng chi phí SOW ước tính ${formatVND(tongChiPhi)} (${itemsDesc}) vừa vặn với ngân sách`);
+        }
+      } else if (tongChiPhi <= filter.nganSachToiDa * 1.2) {
+        // Vượt ngân sách <= 20%
+        diemGia = 15;
+        vuotNganSach = true;
+        const phuTroi = tongChiPhi - filter.nganSachToiDa;
+        lyDo.push(`Tổng chi phí SOW ước tính ${formatVND(tongChiPhi)} (${itemsDesc}) vượt ngân sách nhẹ ${formatVND(phuTroi)} (+${Math.round((phuTroi / filter.nganSachToiDa) * 100)}%)`);
+      } else {
+        // Vượt quá 20%
+        diemGia = 0;
+        vuotNganSach = true;
+        lyDo.push(`Tổng chi phí SOW ước tính ${formatVND(tongChiPhi)} (${itemsDesc}) cao hơn ngân sách ${formatVND(filter.nganSachToiDa)}`);
+      }
+    }
+  } else if (hasGoiHangMuc) {
+    // Có gói hạng mục nhưng không có giới hạn ngân sách tối đa
+    const isMissingAnyPrice = activeGoiHangMuc.some((item) => {
+      const p = kol.bangGia ? kol.bangGia[item.format] : null;
+      return p === null || p === undefined || p === 0;
+    });
+
+    if (isMissingAnyPrice) {
+      diemGia = 15;
+      lyDo.push('Chưa đủ giá để tính tổng chi phí SOW');
+    } else {
+      let tongChiPhi = 0;
+      const itemsDescParts: string[] = [];
+      activeGoiHangMuc.forEach((item) => {
+        const unitPrice = kol.bangGia![item.format]!;
+        tongChiPhi += unitPrice * item.soLuong;
+        const label = PRICE_FORMAT_LABELS[item.format] || item.format;
+        const qtyStr = Number.isInteger(item.soLuong) ? `${item.soLuong}` : `${Number(item.soLuong.toFixed(1))}`;
+        itemsDescParts.push(`${qtyStr} ${label}`);
+      });
+      giaHienTaiCalculated = tongChiPhi;
+      diemGia = 30;
+      lyDo.push(`Tổng chi phí SOW ước tính ${formatVND(tongChiPhi)} (${itemsDescParts.join(', ')})`);
     }
   } else {
-    // Không giới hạn ngân sách
-    if (currentPrice) {
-      diemGia = 30;
-      lyDo.push(`Có sẵn báo giá ${formatLabel}: ${formatVND(currentPrice)}`);
+    // Không có gói hạng mục: giữ nguyên cách chấm theo 1 format hiện tại
+    const formatKey: PriceFormatKey = filter.formatNganSach || 'video';
+    const formatLabel = PRICE_FORMAT_LABELS[formatKey] || formatKey;
+    const currentPrice = kol.bangGia ? kol.bangGia[formatKey] : null;
+    giaHienTaiCalculated = currentPrice;
+
+    if (filter.nganSachToiDa && filter.nganSachToiDa > 0) {
+      if (currentPrice === null || currentPrice === undefined || currentPrice === 0) {
+        diemGia = 8;
+        lyDo.push(`Chưa có báo giá cho ${formatLabel} (cần deal giá riêng)`);
+      } else if (currentPrice <= filter.nganSachToiDa) {
+        diemGia = 30;
+        const tietKiem = filter.nganSachToiDa - currentPrice;
+        if (tietKiem > 0) {
+          lyDo.push(`Giá ${formatLabel} ${formatVND(currentPrice)} thấp hơn ngân sách (tiết kiệm ${formatVND(tietKiem)})`);
+        } else {
+          lyDo.push(`Giá ${formatLabel} ${formatVND(currentPrice)} vừa vặn với ngân sách`);
+        }
+      } else if (currentPrice <= filter.nganSachToiDa * 1.2) {
+        // Vượt ngân sách <= 20%
+        diemGia = 15;
+        vuotNganSach = true;
+        const phuTroi = currentPrice - filter.nganSachToiDa;
+        lyDo.push(`Giá ${formatLabel} ${formatVND(currentPrice)} vượt ngân sách nhẹ ${formatVND(phuTroi)} (+${Math.round((phuTroi / filter.nganSachToiDa) * 100)}%)`);
+      } else {
+        // Vượt quá 20%
+        diemGia = 0;
+        vuotNganSach = true;
+        lyDo.push(`Giá ${formatLabel} ${formatVND(currentPrice)} cao hơn ngân sách ${formatVND(filter.nganSachToiDa)}`);
+      }
     } else {
-      diemGia = 15;
-      lyDo.push(`Chưa cập nhật giá ${formatLabel}`);
+      // Không giới hạn ngân sách
+      if (currentPrice) {
+        diemGia = 30;
+        lyDo.push(`Có sẵn báo giá ${formatLabel}: ${formatVND(currentPrice)}`);
+      } else {
+        diemGia = 15;
+        lyDo.push(`Chưa cập nhật giá ${formatLabel}`);
+      }
     }
   }
 
@@ -160,7 +235,7 @@ export function calculateKolRecommendation(
     diemEngagement,
     diemHopTac,
     lyDo,
-    giaHienTai: currentPrice,
+    giaHienTai: giaHienTaiCalculated,
     vuotNganSach,
   };
 }
