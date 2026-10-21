@@ -628,6 +628,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       number,
       {
         skipped: boolean;
+        fuzzyAction?: 'create_new' | 'merge_existing';
         choices: Record<string, 'keep_old' | 'take_new'>;
       }
     >
@@ -1475,25 +1476,38 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     };
   };
 
-  // Tính số lượng tạo mới và cập nhật trong bảng xác minh (tính động theo các KOL bị bỏ qua)
+  // Tính số lượng tạo mới và cập nhật trong bảng xác minh (tính động theo các KOL bị bỏ qua và lựa chọn khớp mờ)
   const verificationCounts = useMemo(() => {
     const validSelected = parsedPreviewRows.filter(
       (r) => selectedRowIndices.includes(r.index) && r.status !== 'error' && r.kolData
     );
 
-    const createCount = validSelected.filter((r) => r.status === 'create').length;
+    // 1. Số lượng tạo mới ban đầu (các dòng có status === 'create')
+    let createCount = validSelected.filter((r) => r.status === 'create').length;
 
-    // Cập nhật không có xung đột
-    const nonConflictingUpdateCount = validSelected.filter(
+    // Cộng thêm các dòng khớp mờ trong verificationDiffs được chọn "Tạo hồ sơ mới" (mặc định) và không bị bỏ qua
+    verificationDiffs.forEach((d) => {
+      const res = kolResolutions[d.rowIndex];
+      if (!res?.skipped && d.isFuzzy && (res?.fuzzyAction === 'create_new' || !res?.fuzzyAction)) {
+        createCount++;
+      }
+    });
+
+    // 2. Số lượng cập nhật:
+    // Các dòng cập nhật không nằm trong verificationDiffs (khớp chính xác, không có xung đột)
+    const nonVerificationUpdateCount = validSelected.filter(
       (r) => r.status === 'update' && !verificationDiffs.some((d) => d.rowIndex === r.index)
     ).length;
 
-    // Cập nhật có xung đột nhưng KHÔNG bị tick "Bỏ qua KOL này"
-    const activeConflictingUpdateCount = verificationDiffs.filter(
-      (d) => !kolResolutions[d.rowIndex]?.skipped
-    ).length;
+    // Các dòng cập nhật trong verificationDiffs (không bị bỏ qua, và nếu khớp mờ thì phải được chọn 'merge_existing')
+    const activeVerifiedUpdateCount = verificationDiffs.filter((d) => {
+      const res = kolResolutions[d.rowIndex];
+      if (res?.skipped) return false;
+      if (d.isFuzzy && res?.fuzzyAction !== 'merge_existing') return false;
+      return true;
+    }).length;
 
-    const totalUpdateCount = nonConflictingUpdateCount + activeConflictingUpdateCount;
+    const totalUpdateCount = nonVerificationUpdateCount + activeVerifiedUpdateCount;
 
     return {
       createCount,
@@ -1578,6 +1592,23 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     });
   };
 
+  // Đổi lựa chọn riêng cho dòng khớp mờ: Tạo hồ sơ mới vs Gộp vào hồ sơ cũ
+  const handleToggleFuzzyAction = (
+    rowIndex: number,
+    fuzzyAction: 'create_new' | 'merge_existing'
+  ) => {
+    setKolResolutions((prev) => {
+      const currentKol = prev[rowIndex] || { skipped: false, choices: {} };
+      return {
+        ...prev,
+        [rowIndex]: {
+          ...currentKol,
+          fuzzyAction,
+        },
+      };
+    });
+  };
+
   // Toggle checkbox "Bỏ qua KOL này"
   const handleToggleSkipKol = (rowIndex: number, skipped: boolean) => {
     setKolResolutions((prev) => {
@@ -1638,7 +1669,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     showToast(`Import hoàn tất! Đã tạo mới ${result.created} KOL, cập nhật ${result.updated} KOL.`);
   };
 
-  // Khi bấm nút Import trên giao diện (Yêu cầu 1 & 2)
+  // Khi bấm nút Import trên giao diện (Yêu cầu 1 & 2 & Phần C)
   const handleExecuteImport = () => {
     const validSelected = parsedPreviewRows.filter(
       (r) => selectedRowIndices.includes(r.index) && r.status !== 'error' && r.kolData
@@ -1654,17 +1685,22 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     const diffs: KolDiff[] = [];
     updateRows.forEach((r) => {
       const diff = computeKolDiff(r);
-      if (diff && diff.conflicts.length > 0) {
+      // MỌI dòng có xung đột dữ liệu HOẶC là dòng khớp mờ (r.isFuzzy = true) đều BẮT BUỘC đi qua xác minh
+      if (diff && (diff.conflicts.length > 0 || r.isFuzzy)) {
         diffs.push(diff);
       }
     });
 
-    // Nếu có ít nhất 1 XUNG ĐỘT -> mở bảng xác minh
+    // Nếu có ít nhất 1 XUNG ĐỘT hoặc có dòng KHỚP MỜ -> mở bảng xác minh
     if (diffs.length > 0) {
       setVerificationDiffs(diffs);
       const initialResolutions: Record<
         number,
-        { skipped: boolean; choices: Record<string, 'keep_old' | 'take_new'> }
+        {
+          skipped: boolean;
+          fuzzyAction?: 'create_new' | 'merge_existing';
+          choices: Record<string, 'keep_old' | 'take_new'>;
+        }
       > = {};
       diffs.forEach((d) => {
         const choices: Record<string, 'keep_old' | 'take_new'> = {};
@@ -1673,6 +1709,8 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         });
         initialResolutions[d.rowIndex] = {
           skipped: false, // Mặc định không bỏ qua
+          // Dòng khớp mờ: mặc định chọn "Tạo hồ sơ mới" (phương án an toàn)
+          fuzzyAction: d.isFuzzy ? 'create_new' : 'merge_existing',
           choices,
         };
       });
@@ -1681,18 +1719,19 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       return;
     }
 
-    // Nếu KHÔNG có xung đột nào -> import luôn như hiện tại
+    // Nếu KHÔNG có xung đột nào VÀ KHÔNG có dòng khớp mờ nào -> import trực tiếp
     executeDirectImport(validSelected);
   };
 
-  // Áp dụng lựa chọn khi bấm "Xác nhận import" trong bảng xác minh (Yêu cầu 3)
+  // Áp dụng lựa chọn khi bấm "Xác nhận import" trong bảng xác minh (Yêu cầu 3 & Phần C)
   const handleConfirmVerification = () => {
     const validSelected = parsedPreviewRows.filter(
       (r) => selectedRowIndices.includes(r.index) && r.status !== 'error' && r.kolData
     );
 
     // 1. Dựng payload đã xử lý cho các dòng đã qua xác minh
-    const verifiedPayload: any[] = [];
+    const verifiedUpdatePayload: any[] = [];
+    const verifiedCreatePayload: any[] = [];
 
     verificationDiffs.forEach((diff) => {
       const resolution = kolResolutions[diff.rowIndex];
@@ -1703,6 +1742,16 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
 
       // Clone kolData để không sửa dữ liệu gốc
       const kolData = JSON.parse(JSON.stringify(diff.kolData));
+
+      // Nếu là dòng khớp mờ VÀ người dùng chọn "Tạo hồ sơ mới" (hoặc mặc định an toàn):
+      if (diff.isFuzzy && (resolution?.fuzzyAction === 'create_new' || !resolution?.fuzzyAction)) {
+        kolData.forceCreate = true;
+        verifiedCreatePayload.push(kolData);
+        return;
+      }
+
+      // Ngược lại: Gộp vào hồ sơ cũ (chỉ định targetKolId để cập nhật đúng hồ sơ)
+      kolData.targetKolId = diff.matchedKol.id;
 
       // Với mỗi mục XUNG ĐỘT mà người dùng chọn "Giữ cũ", loại giá trị mới tương ứng khỏi kolData trước khi gửi đi:
       diff.conflicts.forEach((conflict) => {
@@ -1743,22 +1792,28 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         }
       });
 
-      verifiedPayload.push(kolData);
+      verifiedUpdatePayload.push(kolData);
     });
 
-    // 2. Các dòng còn lại (tạo mới + cập nhật không qua xác minh)
+    // 2. Các dòng còn lại (tạo mới ban đầu + cập nhật khớp chính xác không qua xác minh)
     const remainingSelected = validSelected.filter((r) => {
-      const isConflicting = verificationDiffs.some((d) => d.rowIndex === r.index);
-      return !isConflicting;
+      const isHandledInDiffs = verificationDiffs.some((d) => d.rowIndex === r.index);
+      return !isHandledInDiffs;
     });
 
     const remainingPayload = remainingSelected.map((r) => r.kolData!);
 
     // 3. Thực thi import:
-    // Các dòng đã qua xác minh: gọi StorageService.importBatchKols với overwriteEmpty = false
-    const verifiedResult =
-      verifiedPayload.length > 0
-        ? StorageService.importBatchKols(verifiedPayload, matchKey, false)
+    // Các dòng cập nhật đã qua xác minh: gọi StorageService.importBatchKols với overwriteEmpty = false
+    const verifiedUpdateResult =
+      verifiedUpdatePayload.length > 0
+        ? StorageService.importBatchKols(verifiedUpdatePayload, matchKey, false)
+        : { created: 0, updated: 0 };
+
+    // Các dòng tạo mới từ khớp mờ: gọi importBatchKols với forceCreate = true
+    const verifiedCreateResult =
+      verifiedCreatePayload.length > 0
+        ? StorageService.importBatchKols(verifiedCreatePayload, matchKey, false)
         : { created: 0, updated: 0 };
 
     // Các dòng còn lại: gọi riêng với overwriteEmpty như hiện tại
@@ -1767,8 +1822,8 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         ? StorageService.importBatchKols(remainingPayload, matchKey, overwriteEmpty)
         : { created: 0, updated: 0 };
 
-    const totalCreated = verifiedResult.created + remainingResult.created;
-    const totalUpdated = verifiedResult.updated + remainingResult.updated;
+    const totalCreated = verifiedUpdateResult.created + verifiedCreateResult.created + remainingResult.created;
+    const totalUpdated = verifiedUpdateResult.updated + verifiedCreateResult.updated + remainingResult.updated;
 
     // 4. Cập nhật kết quả & ghi lịch sử import
     const errorRows = parsedPreviewRows.filter((r) => r.status === 'error');
@@ -1781,7 +1836,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       };
     });
 
-    const totalSelectedCount = verifiedPayload.length + remainingPayload.length;
+    const totalSelectedCount = verifiedUpdatePayload.length + verifiedCreatePayload.length + remainingPayload.length;
     const resultSummary = {
       tongDong: rawRows.length,
       daChon: totalSelectedCount,
@@ -2594,7 +2649,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
                     </h2>
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
-                    Phát hiện <strong className="text-slate-800">{verificationDiffs.length} KOL</strong> bị trùng trong hệ thống có thông tin khác với dữ liệu trong file import. Vui lòng xác minh để giữ thông tin cũ hoặc lấy thông tin mới.
+                    Phát hiện <strong className="text-slate-800">{verificationDiffs.length} KOL</strong> cần xác minh (có xung đột dữ liệu hoặc khớp tên gần giống). Vui lòng xác minh để giữ thông tin cũ, lấy thông tin mới hoặc tạo hồ sơ mới.
                   </p>
                 </div>
                 <button
@@ -2657,12 +2712,12 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
                         {diff.isFuzzy && (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
                             <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                            Khớp mờ theo tên — kiểm tra đúng người chưa
+                            Khớp tên gần giống
                           </span>
                         )}
                         {isSkipped && (
                           <span className="text-[11px] font-semibold text-slate-500 bg-slate-200 px-2 py-0.5 rounded">
-                            (Đã bỏ qua, không cập nhật)
+                            (Đã bỏ qua, không import)
                           </span>
                         )}
                       </div>
@@ -2676,11 +2731,11 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
                             className="rounded border-slate-300 text-red-600 focus:ring-red-500 w-4 h-4 cursor-pointer"
                           />
                           <span className={isSkipped ? 'text-red-600 font-semibold' : ''}>
-                            Bỏ qua KOL này
+                            Bỏ qua dòng này
                           </span>
                         </label>
 
-                        {!isSkipped && (
+                        {!isSkipped && (!diff.isFuzzy || resolution.fuzzyAction === 'merge_existing') && diff.conflicts.length > 0 && (
                           <div className="flex items-center gap-1 border-l border-slate-200 pl-3">
                             <button
                               type="button"
@@ -2701,8 +2756,63 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
                       </div>
                     </div>
 
-                    {/* Bảng các mục xung đột của KOL */}
-                    {!isSkipped && (
+                    {/* Cảnh báo và lựa chọn riêng cho dòng khớp mờ (Phần C) */}
+                    {diff.isFuzzy && !isSkipped && (
+                      <div className="p-3.5 mx-4 my-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2.5">
+                        <div className="flex items-start gap-2.5">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                          <div className="text-xs">
+                            <span className="font-bold text-amber-900 block">
+                              Khớp tên gần giống — có thể không phải cùng một KOL
+                            </span>
+                            <span className="text-amber-800 text-[11px] block mt-0.5">
+                              Tên trong file: <strong className="text-slate-900">{diff.kolData.ten}</strong> • Hồ sơ trùng khớp mờ trong hệ thống: <strong className="text-slate-900">{diff.matchedKol.ten}</strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-5 pl-6 pt-1 flex-wrap">
+                          <label className="flex items-center gap-2 cursor-pointer text-xs select-none">
+                            <input
+                              type="radio"
+                              name={`fuzzy_action_${diff.rowIndex}`}
+                              checked={resolution.fuzzyAction === 'create_new' || !resolution.fuzzyAction}
+                              onChange={() => handleToggleFuzzyAction(diff.rowIndex, 'create_new')}
+                              className="text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                            />
+                            <span className={resolution.fuzzyAction === 'create_new' || !resolution.fuzzyAction ? 'font-bold text-indigo-700' : 'text-slate-700'}>
+                              Tạo hồ sơ mới (Mặc định an toàn)
+                            </span>
+                          </label>
+
+                          <label className="flex items-center gap-2 cursor-pointer text-xs select-none">
+                            <input
+                              type="radio"
+                              name={`fuzzy_action_${diff.rowIndex}`}
+                              checked={resolution.fuzzyAction === 'merge_existing'}
+                              onChange={() => handleToggleFuzzyAction(diff.rowIndex, 'merge_existing')}
+                              className="text-amber-600 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+                            />
+                            <span className={resolution.fuzzyAction === 'merge_existing' ? 'font-bold text-amber-900' : 'text-slate-700'}>
+                              Gộp vào hồ sơ cũ ({diff.matchedKol.ten})
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Nội dung chi tiết: Tạo mới vs Không xung đột vs Bảng xung đột */}
+                    {!isSkipped && diff.isFuzzy && (resolution.fuzzyAction === 'create_new' || !resolution.fuzzyAction) ? (
+                      <div className="px-4 py-3 mx-4 mb-4 bg-indigo-50/80 border border-indigo-200/70 rounded-xl text-xs text-indigo-900 flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+                        <span>Hồ sơ <strong>{diff.kolData.ten}</strong> sẽ được tạo mới hoàn toàn với đầy đủ dữ liệu trong file, không ghi đè hồ sơ <strong>{diff.matchedKol.ten}</strong>.</span>
+                      </div>
+                    ) : !isSkipped && diff.conflicts.length === 0 ? (
+                      <div className="px-4 py-3 mx-4 mb-4 bg-emerald-50/80 border border-emerald-200/70 rounded-xl text-xs text-emerald-900 flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Không có trường nào bị xung đột số liệu. Các thông tin mới từ file sẽ được bổ sung vào hồ sơ <strong>{diff.matchedKol.ten}</strong>.</span>
+                      </div>
+                    ) : !isSkipped && diff.conflicts.length > 0 && (
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] font-bold border-b border-slate-100">

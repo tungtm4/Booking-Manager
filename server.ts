@@ -366,21 +366,61 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
 });
 
 // ----------------------------------------------------------------------------
-// API: Proxy tải dữ liệu Google Sheet CSV (Tránh bị chặn CORS ở Browser)
+// API: Proxy tải dữ liệu Google Sheet CSV (Chỉ chấp nhận Google Sheet hợp lệ)
 // ----------------------------------------------------------------------------
 app.get('/api/sheets/fetch-csv', async (req, res) => {
   try {
-    const sheetId = req.query.sheetId as string;
-    const directUrl = req.query.url as string;
+    const rawSheetId = req.query.sheetId as string | undefined;
+    const directUrl = req.query.url as string | undefined;
 
-    let targetUrl = '';
-    if (sheetId) {
-      targetUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/export?format=csv`;
-    } else if (directUrl) {
-      targetUrl = directUrl;
+    let targetSheetId: string | null = null;
+
+    if (rawSheetId && typeof rawSheetId === 'string' && rawSheetId.trim()) {
+      const trimmed = rawSheetId.trim();
+      // Google Sheet ID thường có từ 10 đến 120 ký tự gồm chữ, số, gạch ngang, gạch dưới
+      if (/^[a-zA-Z0-9-_]{10,120}$/.test(trimmed)) {
+        targetSheetId = trimmed;
+      } else {
+        return res.status(400).json({
+          error: 'Mã Google Sheet (sheetId) không đúng định dạng hợp lệ.',
+        });
+      }
+    } else if (directUrl && typeof directUrl === 'string' && directUrl.trim()) {
+      try {
+        const parsed = new URL(directUrl.trim());
+        // URL phải có giao thức https và tên miền chính xác docs.google.com
+        if (parsed.protocol !== 'https:' || parsed.hostname !== 'docs.google.com') {
+          return res.status(400).json({
+            error: 'URL không hợp lệ. Chỉ chấp nhận đường liên kết Google Sheet từ https://docs.google.com.',
+          });
+        }
+        // Đường dẫn phải có dạng /spreadsheets/d/{id}
+        const match = parsed.pathname.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]{10,120})/);
+        if (!match || !match[1]) {
+          return res.status(400).json({
+            error: 'Đường dẫn URL không đúng định dạng bảng tính Google Sheet (/spreadsheets/d/{id}).',
+          });
+        }
+        targetSheetId = match[1];
+      } catch {
+        return res.status(400).json({
+          error: 'URL Google Sheet không hợp lệ hoặc sai định dạng.',
+        });
+      }
     } else {
-      return res.status(400).json({ error: 'Thiếu sheetId hoặc url' });
+      return res.status(400).json({
+        error: 'Thiếu tham số sheetId hoặc URL Google Sheet hợp lệ.',
+      });
     }
+
+    if (!targetSheetId) {
+      return res.status(400).json({
+        error: 'Không thể xác định mã Google Sheet từ dữ liệu cung cấp.',
+      });
+    }
+
+    // Tự dựng link export của Google Sheet, TUYỆT ĐỐI không tải URL gốc
+    const targetUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(targetSheetId)}/export?format=csv`;
 
     const response = await fetch(targetUrl);
     if (!response.ok) {

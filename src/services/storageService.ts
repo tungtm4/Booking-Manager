@@ -248,6 +248,8 @@ export const StorageService = {
       tenNguoiLienHe?: string;
       soDienThoai?: string;
       emailZalo?: string;
+      forceCreate?: boolean;
+      targetKolId?: string;
     }>,
     matchKey: 'name' | 'link' = 'name',
     overwriteEmpty: boolean = false
@@ -320,19 +322,24 @@ export const StorageService = {
 
       let matchedIndex = -1;
 
-      if (matchKey === 'link' && itemLinks.length > 0) {
-        // Khớp theo bất kỳ link kênh nào của KOL
-        matchedIndex = kols.findIndex((k) =>
-          k.nenTang?.some((nt) => nt.linkProfile && itemLinks.includes(normalizeUrl(nt.linkProfile)))
-        );
-      }
+      if (!item.forceCreate) {
+        if (item.targetKolId) {
+          // Ưu tiên khớp theo đích danh ID hồ sơ đã được người dùng xác nhận
+          matchedIndex = kols.findIndex((k) => k.id === item.targetKolId);
+        } else if (matchKey === 'link' && itemLinks.length > 0) {
+          // Khớp theo bất kỳ link kênh nào của KOL
+          matchedIndex = kols.findIndex((k) =>
+            k.nenTang?.some((nt) => nt.linkProfile && itemLinks.includes(normalizeUrl(nt.linkProfile)))
+          );
+        }
 
-      if (matchedIndex === -1) {
-        // Khớp theo tên
-        matchedIndex = kols.findIndex((k) => {
-          const normKName = normalizeName(k.ten);
-          return normKName === normItemName || normKName.includes(normItemName) || normItemName.includes(normKName);
-        });
+        if (matchedIndex === -1 && !item.targetKolId) {
+          // Khớp chính xác theo tên (không tự ý khớp mờ chuỗi con để tránh ghi đè nhầm)
+          matchedIndex = kols.findIndex((k) => {
+            const normKName = normalizeName(k.ten);
+            return normKName === normItemName;
+          });
+        }
       }
 
       if (matchedIndex >= 0) {
@@ -547,24 +554,106 @@ export const StorageService = {
   importDataJson(jsonStr: string): { success: boolean; message: string; count?: number } {
     try {
       const parsed = JSON.parse(jsonStr);
-      if (!parsed || !Array.isArray(parsed.kols)) {
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.kols)) {
         return { success: false, message: 'File JSON không đúng định dạng sao lưu của KOL Booking Manager.' };
       }
 
-      localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(parsed.kols));
+      // Helper kiểm tra cấu trúc hồ sơ KOL hợp lệ
+      const isValidBackupKol = (item: any): boolean => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+        // id là chuỗi không rỗng
+        if (typeof item.id !== 'string' || !item.id.trim()) return false;
+        // ten là chuỗi không rỗng
+        if (typeof item.ten !== 'string' || !item.ten.trim()) return false;
+        // bangGia là object hoặc null/không có (nếu có thì các giá trị phải là số hoặc null)
+        if (item.bangGia !== null && item.bangGia !== undefined) {
+          if (typeof item.bangGia !== 'object' || Array.isArray(item.bangGia)) return false;
+          for (const val of Object.values(item.bangGia)) {
+            if (val !== null && typeof val !== 'number') return false;
+            if (typeof val === 'number' && isNaN(val)) return false;
+          }
+        }
+        // nenTang là mảng
+        if (!Array.isArray(item.nenTang)) return false;
+        // linhVuc là mảng
+        if (!Array.isArray(item.linhVuc)) return false;
+        return true;
+      };
+
+      // Helper kiểm tra cấu trúc báo giá hợp lệ
+      const isValidBackupQuote = (item: any): boolean => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+        // id dạng chuỗi và items là mảng
+        if (typeof item.id !== 'string' || !item.id.trim()) return false;
+        if (!Array.isArray(item.items)) return false;
+        return true;
+      };
+
+      const rawKols = parsed.kols;
+      const validKols: KolProfile[] = [];
+      let rejectedKolCount = 0;
+
+      rawKols.forEach((k: any) => {
+        if (isValidBackupKol(k)) {
+          validKols.push(k);
+        } else {
+          rejectedKolCount++;
+        }
+      });
+
+      // Nếu TOÀN BỘ hồ sơ trong file đều không hợp lệ -> trả về thất bại và KHÔNG ghi đè bất cứ dữ liệu nào
+      if (rawKols.length > 0 && validKols.length === 0) {
+        return {
+          success: false,
+          message: `Toàn bộ ${rawKols.length} hồ sơ KOL trong file đều sai cấu trúc hoặc không hợp lệ. Hệ thống không khôi phục để bảo vệ dữ liệu hiện có.`,
+        };
+      }
+      if (rawKols.length === 0) {
+        return {
+          success: false,
+          message: 'File sao lưu không chứa hồ sơ KOL nào để khôi phục.',
+        };
+      }
+
+      // Kiểm tra tối thiểu danh sách báo giá
+      const rawQuotes = Array.isArray(parsed.quotes) ? parsed.quotes : [];
+      const validQuotes: SowQuote[] = [];
+      let rejectedQuoteCount = 0;
+
+      rawQuotes.forEach((q: any) => {
+        if (isValidBackupQuote(q)) {
+          validQuotes.push(q);
+        } else {
+          rejectedQuoteCount++;
+        }
+      });
+
+      // Chỉ ghi các hồ sơ và báo giá hợp lệ vào bộ nhớ
+      localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(validKols));
       if (Array.isArray(parsed.quotes)) {
-        localStorage.setItem(STORAGE_KEYS.SOW_QUOTES, JSON.stringify(parsed.quotes));
+        localStorage.setItem(STORAGE_KEYS.SOW_QUOTES, JSON.stringify(validQuotes));
       }
       if (Array.isArray(parsed.customTags)) {
-        localStorage.setItem(STORAGE_KEYS.CUSTOM_TAGS, JSON.stringify(parsed.customTags));
+        const validTags = parsed.customTags.filter((t: any) => typeof t === 'string' && t.trim().length > 0);
+        localStorage.setItem(STORAGE_KEYS.CUSTOM_TAGS, JSON.stringify(validTags));
       }
 
       notifyChange(STORAGE_KEYS.KOLS);
       notifyChange(STORAGE_KEYS.SOW_QUOTES);
+
+      const totalRejected = rejectedKolCount + rejectedQuoteCount;
+      let msg = `Đã khôi phục thành công ${validKols.length} KOL và ${validQuotes.length} báo giá.`;
+      if (totalRejected > 0) {
+        const rejectedParts: string[] = [];
+        if (rejectedKolCount > 0) rejectedParts.push(`${rejectedKolCount} hồ sơ KOL`);
+        if (rejectedQuoteCount > 0) rejectedParts.push(`${rejectedQuoteCount} báo giá`);
+        msg += ` Đã loại bỏ ${totalRejected} mục sai cấu trúc (${rejectedParts.join(', ')}).`;
+      }
+
       return {
         success: true,
-        message: `Đã khôi phục thành công ${parsed.kols.length} KOL và ${parsed.quotes?.length || 0} báo giá!`,
-        count: parsed.kols.length,
+        message: msg,
+        count: validKols.length,
       };
     } catch (err: unknown) {
       return { success: false, message: 'Lỗi đọc file JSON: ' + (err instanceof Error ? err.message : String(err)) };
