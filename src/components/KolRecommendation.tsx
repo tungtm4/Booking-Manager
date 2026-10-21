@@ -3,19 +3,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Sparkles, 
   Check, 
   Star, 
-  ArrowRight, 
   FileSpreadsheet, 
   DollarSign, 
   TrendingUp, 
   Award, 
   AlertCircle,
   CheckCircle2,
-  Filter
+  Filter,
+  Bot,
+  Loader2,
+  AlertTriangle,
+  Info,
+  ChevronDown,
+  ChevronUp,
+  Layers,
+  Plus,
+  Minus
 } from 'lucide-react';
 import { 
   KolProfile, 
@@ -23,15 +31,36 @@ import {
   PriceFormatKey, 
   PRICE_FORMAT_LABELS, 
   RecommendationFilter, 
-  RecommendationScore 
+  RecommendationScore,
+  RecommendedKolSowItem
 } from '../types/kol';
-import { formatFollowers, formatVND, getCategoryBadgeClass, POPULAR_CATEGORIES } from '../utils/formatters';
+import { formatFollowers, formatVND, formatNumberOnly, getCategoryBadgeClass, POPULAR_CATEGORIES } from '../utils/formatters';
 import { rankKolsForRecommendation } from '../utils/recommendationEngine';
+
+const PRICE_FORMAT_ORDER: PriceFormatKey[] = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
+
+const PRICE_SHORT_LABELS: Record<PriceFormatKey, string> = {
+  post: 'Post/Ảnh',
+  video: 'Video dài',
+  shorts: 'Video ngắn',
+  livestream: 'Livestream',
+  thamDuSuKien: 'Tham dự sự kiện',
+  sdha: 'SDHA',
+};
+
+const PRICE_FORMAT_STYLES: Record<PriceFormatKey, string> = {
+  post: 'bg-sky-50 border-sky-200 text-sky-700',
+  video: 'bg-violet-50 border-violet-200 text-violet-700',
+  shorts: 'bg-rose-50 border-rose-200 text-rose-700',
+  livestream: 'bg-orange-50 border-orange-200 text-orange-700',
+  thamDuSuKien: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+  sdha: 'bg-amber-50 border-amber-200 text-amber-700',
+};
 
 interface KolRecommendationProps {
   kols: KolProfile[];
   onSelectKol: (kol: KolProfile) => void;
-  onSendKolsToSow: (selectedKols: KolProfile[]) => void;
+  onSendKolsToSow: (payload: { items: RecommendedKolSowItem[]; tenChienDich?: string }) => void;
 }
 
 export const KolRecommendation: React.FC<KolRecommendationProps> = ({
@@ -39,7 +68,27 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
   onSelectKol,
   onSendKolsToSow,
 }) => {
-  // Form yêu cầu
+  // State: Brief AI Parser
+  const [briefText, setBriefText] = useState('');
+  const [isAnalyzingBrief, setIsAnalyzingBrief] = useState(false);
+  const [briefError, setBriefError] = useState<string | null>(null);
+  const [briefSuccessMsg, setBriefSuccessMsg] = useState<string | null>(null);
+  const [autoDividedNotice, setAutoDividedNotice] = useState(false);
+
+  // State: Vùng DUYỆT SOW (SOW Scope & Deliverables)
+  const [tenChienDich, setTenChienDich] = useState('Chiến dịch mới');
+  const [nganSachTong, setNganSachTong] = useState<number | ''>('');
+  const [followerToiThieu, setFollowerToiThieu] = useState<number | ''>('');
+  const [duyetHangMuc, setDuyetHangMuc] = useState<Record<PriceFormatKey, number>>({
+    post: 0,
+    video: 1,
+    shorts: 0,
+    livestream: 0,
+    thamDuSuKien: 0,
+    sdha: 0,
+  });
+
+  // State: Form tiêu chí truyền thống
   const [linhVuc, setLinhVuc] = useState<string>('Ẩm thực');
   const [nenTang, setNenTang] = useState<PlatformType | 'TatCa'>('TatCa');
   const [formatNganSach, setFormatNganSach] = useState<PriceFormatKey>('video');
@@ -48,27 +97,180 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
   const [soLuongCan, setSoLuongCan] = useState<number>(5);
   const [mucTieu, setMucTieu] = useState<string>('Tăng nhận diện thương hiệu & review trải nghiệm');
 
-  // Kết quả đề xuất
+  // State: Kết quả & phân công công việc
   const [hasSearched, setHasSearched] = useState(false);
   const [recommendations, setRecommendations] = useState<RecommendationScore[]>([]);
-
-  // Checkbox lựa chọn KOL để chuyển sang SOW
   const [selectedKolIds, setSelectedKolIds] = useState<string[]>([]);
+  const [kolTaskAssignments, setKolTaskAssignments] = useState<Record<string, Record<PriceFormatKey, number>>>({});
 
-  const handleRunRecommendation = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Xử lý gọi AI phân tích Brief
+  const handleParseBrief = async () => {
+    if (!briefText.trim()) {
+      setBriefError('Vui lòng dán đoạn mô tả / brief chiến dịch trước khi phân tích!');
+      return;
+    }
+
+    setIsAnalyzingBrief(true);
+    setBriefError(null);
+    setBriefSuccessMsg(null);
+    setAutoDividedNotice(false);
+
+    try {
+      const response = await fetch('/api/ai/parse-brief', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ moTa: briefText.trim() }),
+      });
+
+      const resData = await response.json();
+
+      if (!resData.success || !resData.data) {
+        setBriefError(
+          resData.error || resData.message || 'Không thể phân tích brief bằng AI. Bạn vẫn có thể điền các thông số bên dưới thủ công.'
+        );
+        return;
+      }
+
+      const d = resData.data;
+
+      // 1. Tên chiến dịch
+      if (d.tenChienDich) {
+        setTenChienDich(d.tenChienDich);
+      }
+
+      // 2. Lĩnh vực
+      if (d.linhVuc) {
+        const foundCategory = POPULAR_CATEGORIES.find(
+          (c) => c.toLowerCase() === d.linhVuc.toLowerCase()
+        ) || POPULAR_CATEGORIES.find(
+          (c) => c.toLowerCase().includes(d.linhVuc.toLowerCase()) || d.linhVuc.toLowerCase().includes(c.toLowerCase())
+        );
+        if (foundCategory) {
+          setLinhVuc(foundCategory);
+        } else {
+          setLinhVuc(d.linhVuc);
+        }
+      }
+
+      // 3. Nền tảng
+      if (d.nenTang) {
+        setNenTang(d.nenTang as PlatformType);
+      }
+
+      // 4. Số lượng KOL
+      if (d.soLuongKol && Number(d.soLuongKol) > 0) {
+        setSoLuongCan(Number(d.soLuongKol));
+      }
+
+      // 5. Mục tiêu
+      if (d.mucTieu) {
+        setMucTieu(d.mucTieu);
+      }
+
+      // 6. Ngân sách mỗi KOL -> nganSachToiDa
+      if (d.nganSachMoiKol && Number(d.nganSachMoiKol) > 0) {
+        setNganSachToiDa(Number(d.nganSachMoiKol));
+      }
+
+      // 7. Ngân sách tổng
+      if (d.nganSachTong && Number(d.nganSachTong) > 0) {
+        setNganSachTong(Number(d.nganSachTong));
+      }
+
+      // 8. Tương tác tối thiểu
+      if (d.engagementToiThieu && Number(d.engagementToiThieu) > 0) {
+        setEngagementToiThieu(Number(d.engagementToiThieu));
+      }
+
+      // 9. Follower tối thiểu
+      if (d.followerToiThieu && Number(d.followerToiThieu) > 0) {
+        setFollowerToiThieu(Number(d.followerToiThieu));
+      }
+
+      // 10. Hạng mục mỗi KOL làm
+      const newDuyet: Record<PriceFormatKey, number> = {
+        post: 0,
+        video: 0,
+        shorts: 0,
+        livestream: 0,
+        thamDuSuKien: 0,
+        sdha: 0,
+      };
+
+      if (d.hangMucMoiKol && Array.isArray(d.hangMucMoiKol) && d.hangMucMoiKol.length > 0) {
+        d.hangMucMoiKol.forEach((hm: { format: PriceFormatKey; soLuong: number }) => {
+          if (PRICE_FORMAT_ORDER.includes(hm.format)) {
+            newDuyet[hm.format] = hm.soLuong;
+          }
+        });
+        setAutoDividedNotice(false);
+      } else if (d.hangMucTongCampaign && Array.isArray(d.hangMucTongCampaign) && d.hangMucTongCampaign.length > 0) {
+        const kolCount = Number(d.soLuongKol) || soLuongCan || 1;
+        d.hangMucTongCampaign.forEach((hm: { format: PriceFormatKey; soLuong: number }) => {
+          if (PRICE_FORMAT_ORDER.includes(hm.format)) {
+            newDuyet[hm.format] = Math.max(1, Math.round(hm.soLuong / kolCount));
+          }
+        });
+        setAutoDividedNotice(true);
+      } else {
+        // Mặc định giữ 1 video nếu brief không đề cập hạng mục
+        newDuyet.video = 1;
+        setAutoDividedNotice(false);
+      }
+
+      setDuyetHangMuc(newDuyet);
+      setBriefSuccessMsg('Đã trích xuất thông tin brief thành công! Vui lòng kiểm tra và duyệt lại các thông số SOW bên dưới trước khi tìm KOL.');
+    } catch (err: any) {
+      setBriefError('Lỗi kết nối máy chủ phân tích AI: ' + (err.message || 'Vui lòng thử lại sau.'));
+    } finally {
+      setIsAnalyzingBrief(false);
+    }
+  };
+
+  // Thay đổi số lượng hạng mục ở vùng duyệt SOW
+  const handleUpdateDuyetQty = (format: PriceFormatKey, qty: number) => {
+    setDuyetHangMuc((prev) => ({
+      ...prev,
+      [format]: Math.max(0, qty),
+    }));
+  };
+
+  // Thay đổi số lượng hạng mục của riêng một KOL trong danh sách kết quả
+  const handleUpdateKolTaskQty = (kolId: string, format: PriceFormatKey, qty: number) => {
+    setKolTaskAssignments((prev) => {
+      const current = prev[kolId] || { ...duyetHangMuc };
+      return {
+        ...prev,
+        [kolId]: {
+          ...current,
+          [format]: Math.max(0, qty),
+        },
+      };
+    });
+  };
+
+  // Chấm điểm & Tìm KOL
+  const handleRunRecommendation = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
 
     if (!linhVuc) {
       alert('Vui lòng chọn lĩnh vực chiến dịch!');
       return;
     }
 
+    // Xác định formatNganSach: nếu bảng duyệt có format > 0 thì lấy format đầu tiên, ngược lại giữ form
+    const firstAssignedFormat = PRICE_FORMAT_ORDER.find((fmt) => (duyetHangMuc[fmt] || 0) > 0);
+    const activeFormat = firstAssignedFormat || formatNganSach;
+
     const filter: RecommendationFilter = {
       linhVuc,
       nenTang,
-      formatNganSach,
+      formatNganSach: activeFormat,
       nganSachToiDa: nganSachToiDa === '' ? undefined : Number(nganSachToiDa),
       engagementToiThieu: engagementToiThieu === '' ? undefined : Number(engagementToiThieu),
+      followerToiThieu: followerToiThieu === '' ? undefined : Number(followerToiThieu),
       soLuongCan,
       mucTieu: mucTieu.trim(),
     };
@@ -77,8 +279,15 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
     setRecommendations(results);
     setHasSearched(true);
 
-    // Mặc định chọn top 3 KOL đầu tiên
-    setSelectedKolIds(results.slice(0, 3).map((r) => r.kol.id));
+    // Khởi tạo bảng hạng mục gán việc cho từng KOL từ bảng duyệt SOW
+    const initAssignments: Record<string, Record<PriceFormatKey, number>> = {};
+    results.forEach((r) => {
+      initAssignments[r.kol.id] = { ...duyetHangMuc };
+    });
+    setKolTaskAssignments(initAssignments);
+
+    // Mặc định chọn tất cả KOL được đề xuất
+    setSelectedKolIds(results.map((r) => r.kol.id));
   };
 
   const handleToggleSelectKol = (kolId: string) => {
@@ -87,17 +296,97 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
     );
   };
 
-  const handleSendSelectedToSow = () => {
-    const chosenKols = recommendations
-      .filter((r) => selectedKolIds.includes(r.kol.id))
-      .map((r) => r.kol);
+  // Sắp xếp kết quả: KOL đủ giá lên trước, thiếu giá xuống sau; trong mỗi nhóm giữ thứ tự điểm
+  const sortedRecommendations = useMemo(() => {
+    if (recommendations.length === 0) return [];
 
-    if (chosenKols.length === 0) {
-      alert('Vui lòng chọn ít nhất 1 KOL để chuyển sang Báo giá SOW!');
+    const duGiaList: RecommendationScore[] = [];
+    const thieuGiaList: RecommendationScore[] = [];
+
+    recommendations.forEach((item) => {
+      const assignments = kolTaskAssignments[item.kol.id] || duyetHangMuc;
+      // KOL bị coi là thiếu giá nếu có ít nhất 1 format được gán > 0 mà KOL chưa có giá (null/0)
+      const isMissing = PRICE_FORMAT_ORDER.some((fmt) => {
+        const qty = assignments[fmt] || 0;
+        if (qty <= 0) return false;
+        const p = item.kol.bangGia?.[fmt];
+        return p === null || p === undefined || p === 0;
+      });
+
+      if (isMissing) {
+        thieuGiaList.push(item);
+      } else {
+        duGiaList.push(item);
+      }
+    });
+
+    return [...duGiaList, ...thieuGiaList];
+  }, [recommendations, kolTaskAssignments, duyetHangMuc]);
+
+  // Tính chi phí SOW của một KOL cụ thể
+  const getKolSowCost = (kol: KolProfile) => {
+    const assignments = kolTaskAssignments[kol.id] || duyetHangMuc;
+    return PRICE_FORMAT_ORDER.reduce((acc, fmt) => {
+      const qty = assignments[fmt] || 0;
+      if (qty <= 0) return acc;
+      const unitPrice = kol.bangGia?.[fmt] || 0;
+      return acc + unitPrice * qty;
+    }, 0);
+  };
+
+  // Đếm số hạng mục thiếu giá của một KOL
+  const getKolMissingPriceCount = (kol: KolProfile) => {
+    const assignments = kolTaskAssignments[kol.id] || duyetHangMuc;
+    return PRICE_FORMAT_ORDER.filter((fmt) => {
+      const qty = assignments[fmt] || 0;
+      if (qty <= 0) return false;
+      const unitPrice = kol.bangGia?.[fmt];
+      return unitPrice === null || unitPrice === undefined || unitPrice === 0;
+    }).length;
+  };
+
+  // Tính tổng chi phí SOW dự kiến của tất cả KOL được chọn
+  const totalSowCost = useMemo(() => {
+    return recommendations
+      .filter((r) => selectedKolIds.includes(r.kol.id))
+      .reduce((sum, r) => sum + getKolSowCost(r.kol), 0);
+  }, [recommendations, selectedKolIds, kolTaskAssignments, duyetHangMuc]);
+
+  const nganSachTongNumber = nganSachTong === '' ? 0 : Number(nganSachTong);
+  const isBudgetExceeded = nganSachTongNumber > 0 && totalSowCost > nganSachTongNumber;
+
+  // Gửi sang SOW Builder với payload chuẩn xác
+  const handleSendSelectedToSow = () => {
+    const chosenItems: RecommendedKolSowItem[] = [];
+
+    recommendations
+      .filter((r) => selectedKolIds.includes(r.kol.id))
+      .forEach((r) => {
+        const assignments = kolTaskAssignments[r.kol.id] || duyetHangMuc;
+        const hangMuc = PRICE_FORMAT_ORDER
+          .filter((fmt) => (assignments[fmt] || 0) > 0)
+          .map((fmt) => ({
+            format: fmt,
+            soLuong: assignments[fmt],
+          }));
+
+        if (hangMuc.length > 0) {
+          chosenItems.push({
+            kol: r.kol,
+            hangMuc,
+          });
+        }
+      });
+
+    if (chosenItems.length === 0) {
+      alert('Vui lòng chọn ít nhất 1 KOL có hạng mục công việc để đưa vào Báo giá SOW!');
       return;
     }
 
-    onSendKolsToSow(chosenKols);
+    onSendKolsToSow({
+      items: chosenItems,
+      tenChienDich: tenChienDich.trim() || undefined,
+    });
   };
 
   return (
@@ -107,15 +396,211 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
         <div className="relative z-10 max-w-3xl">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-bold mb-3">
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>Thuật toán chấm điểm thông minh 100 điểm</span>
+            <span>AI Brief → SOW Planner & Thuật toán đề xuất 100 điểm</span>
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
             Đề Xuất KOL Phù Hợp Chiến Dịch
           </h1>
           <p className="mt-2 text-sm text-slate-300">
-            Hệ thống tự động phân tích độ khớp lĩnh vực (40đ), ngân sách và format (30đ), tương tác engagement (20đ) và lịch sử hợp tác uy tín (10đ) để đưa ra xếp hạng tối ưu nhất.
+            Dán yêu cầu/brief của khách hàng để AI tự bóc tách SOW, đối chiếu ngân sách và tự động chấm điểm xếp hạng KOL tối ưu nhất.
           </p>
+        </div>
+      </div>
+
+      {/* KHỐI 1: PHÂN TÍCH BRIEF BẰNG AI */}
+      <div className="bg-white rounded-2xl border border-indigo-200/80 p-5 sm:p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600">
+              <Bot className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="font-bold text-slate-900 text-sm">
+                Phân Tích Brief Khách Hàng Bằng AI
+              </h2>
+              <p className="text-xs text-slate-500">
+                Tự động bóc tách tên chiến dịch, mục tiêu, ngân sách tổng/mỗi KOL và khối lượng deliverables SOW
+              </p>
+            </div>
+          </div>
+          <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">
+            Hỗ trợ tiếng Việt 100%
+          </span>
+        </div>
+
+        <div className="space-y-3">
+          <textarea
+            rows={3}
+            value={briefText}
+            onChange={(e) => setBriefText(e.target.value)}
+            placeholder="Dán mô tả / brief của khách tại đây... (Ví dụ: Cần tìm 5 KOL ẩm thực tại Hà Nội/TP.HCM trên TikTok, ngân sách tổng 120 triệu, mỗi bạn làm 1 video dài review + 1 video ngắn Shorts, ER tối thiểu 4%, follower > 100k...)"
+            className="w-full p-3 text-xs sm:text-sm border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden leading-relaxed text-slate-800 placeholder:text-slate-400"
+          />
+
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex-1">
+              {briefError && (
+                <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 p-2.5 rounded-xl">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>{briefError}</span>
+                </div>
+              )}
+              {briefSuccessMsg && (
+                <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{briefSuccessMsg}</span>
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleParseBrief}
+              disabled={isAnalyzingBrief || !briefText.trim()}
+              className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm shrink-0 cursor-pointer ${
+                isAnalyzingBrief || !briefText.trim()
+                  ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200 active:scale-95'
+              }`}
+            >
+              {isAnalyzingBrief ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                  <span>Đang bóc tách brief...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                  <span>Phân tích bằng AI</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* VÙNG DUYỆT SOW (SOW Scope & Deliverables Review) */}
+        <div className="pt-4 mt-2 border-t border-slate-200/80 space-y-4 bg-slate-50/60 -mx-5 -mb-5 p-5 rounded-b-2xl">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Layers className="w-4 h-4 text-indigo-600" />
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                Vùng Duyệt SOW & Phân Bổ Hạng Mục Deliverables
+              </h3>
+            </div>
+            <span className="text-[11px] text-slate-500 font-medium">
+              Kiểm tra & chỉnh sửa trước khi tìm kiếm
+            </span>
+          </div>
+
+          {autoDividedNotice && (
+            <div className="flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200/80 p-2.5 rounded-xl">
+              <Info className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Đã tự chia đều từ tổng số lượng campaign — sửa lại nếu cần</span>
+            </div>
+          )}
+
+          {/* Hàng ô nhập: Tên chiến dịch + Ngân sách tổng + Follower tối thiểu */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Tên Chiến Dịch
+              </label>
+              <input
+                type="text"
+                value={tenChienDich}
+                onChange={(e) => setTenChienDich(e.target.value)}
+                placeholder="Vd: Chiến dịch Ra Mắt Sản Phẩm Hè"
+                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden font-semibold text-slate-900"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Ngân Sách Tổng Toàn Campaign (VND)
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="1000000"
+                  value={nganSachTong}
+                  onChange={(e) => setNganSachTong(e.target.value ? Number(e.target.value) : '')}
+                  placeholder="Vd: 150000000 (Tùy chọn)"
+                  className="w-full pl-3 pr-8 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden font-mono text-slate-900"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">₫</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Follower Tối Thiểu (Người theo dõi)
+              </label>
+              <input
+                type="number"
+                step="10000"
+                value={followerToiThieu}
+                onChange={(e) => setFollowerToiThieu(e.target.value ? Number(e.target.value) : '')}
+                placeholder="Vd: 100000 (Lọc KOL đủ reach)"
+                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden text-slate-900"
+              />
+            </div>
+          </div>
+
+          {/* Bảng Hạng mục mỗi KOL làm (6 format) */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              Hạng Mục Mỗi KOL Làm (0 = Không làm):
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+              {PRICE_FORMAT_ORDER.map((fmt) => {
+                const qty = duyetHangMuc[fmt] || 0;
+                return (
+                  <div
+                    key={fmt}
+                    className={`p-2.5 rounded-xl border transition-all flex flex-col justify-between ${
+                      qty > 0
+                        ? 'bg-indigo-50/70 border-indigo-300 ring-1 ring-indigo-200'
+                        : 'bg-white border-slate-200'
+                    }`}
+                  >
+                    <span className={`text-[11px] font-bold block truncate mb-1.5 ${qty > 0 ? 'text-indigo-900' : 'text-slate-600'}`}>
+                      {PRICE_SHORT_LABELS[fmt]}
+                    </span>
+
+                    <div className="flex items-center justify-between gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateDuyetQty(fmt, qty - 1)}
+                        className="w-6 h-6 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
+                        title="Giảm 1"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+
+                      <input
+                        type="number"
+                        min="0"
+                        max="99"
+                        value={qty}
+                        onChange={(e) => handleUpdateDuyetQty(fmt, Number(e.target.value) || 0)}
+                        className="w-10 text-center text-xs font-bold py-1 bg-transparent border-0 focus:outline-hidden text-slate-900"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateDuyetQty(fmt, qty + 1)}
+                        className="w-6 h-6 rounded-md bg-indigo-100 hover:bg-indigo-200 text-indigo-700 flex items-center justify-center transition-colors cursor-pointer"
+                        title="Tăng 1"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -125,7 +610,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
           <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
             <Filter className="w-4 h-4 text-indigo-600" />
             <h2 className="font-bold text-slate-900 text-sm uppercase tracking-wider">
-              Yêu Cầu Chiến Dịch
+              Tiêu Chí Chấm Điểm
             </h2>
           </div>
 
@@ -138,7 +623,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
               <select
                 value={linhVuc}
                 onChange={(e) => setLinhVuc(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden"
+                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden text-slate-800"
               >
                 {POPULAR_CATEGORIES.map((c) => (
                   <option key={c} value={c}>
@@ -156,7 +641,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
               <select
                 value={nenTang}
                 onChange={(e) => setNenTang(e.target.value as PlatformType | 'TatCa')}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden"
+                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden text-slate-800"
               >
                 <option value="TatCa">Tất cả nền tảng</option>
                 <option value="TikTok">TikTok</option>
@@ -170,12 +655,12 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
             <div className="space-y-2">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Format Cần Booking
+                  Format Tính Điểm Giá Mặc Định
                 </label>
                 <select
                   value={formatNganSach}
                   onChange={(e) => setFormatNganSach(e.target.value as PriceFormatKey)}
-                  className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden"
+                  className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden text-slate-800"
                 >
                   {Object.entries(PRICE_FORMAT_LABELS).map(([k, label]) => (
                     <option key={k} value={k}>
@@ -198,7 +683,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                     onChange={(e) =>
                       setNganSachToiDa(e.target.value ? Number(e.target.value) : '')
                     }
-                    className="w-full pl-3 pr-8 py-2 text-xs border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden"
+                    className="w-full pl-3 pr-8 py-2 text-xs border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden font-mono"
                   />
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-semibold">
                     ₫
@@ -237,7 +722,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
               <select
                 value={soLuongCan}
                 onChange={(e) => setSoLuongCan(Number(e.target.value))}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden"
+                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden text-slate-800"
               >
                 <option value={3}>Top 3 KOL điểm cao nhất</option>
                 <option value={5}>Top 5 KOL điểm cao nhất</option>
@@ -283,20 +768,59 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                 )}
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Các KOL được sắp xếp theo tổng điểm phù hợp từ cao xuống thấp
+                Các KOL được sắp xếp theo tổng điểm phù hợp và trạng thái đủ giá SOW
               </p>
             </div>
 
             {recommendations.length > 0 && (
               <button
+                type="button"
                 onClick={handleSendSelectedToSow}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-200 transition-all active:scale-95 shrink-0"
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-200 transition-all active:scale-95 shrink-0 cursor-pointer"
               >
                 <FileSpreadsheet className="w-4 h-4" />
                 <span>Đưa ({selectedKolIds.length}) KOL vào SOW</span>
               </button>
             )}
           </div>
+
+          {/* Thanh Tổng Kết Chi Phí SOW (Đặt ngay trên danh sách và nút) */}
+          {hasSearched && recommendations.length > 0 && (
+            <div className="p-4 rounded-xl bg-slate-900 text-white shadow-md border border-slate-700 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-xs space-y-0.5 text-center sm:text-left">
+                <p className="font-bold text-sm text-white">
+                  Đã chọn <span className="text-indigo-400">{selectedKolIds.length}</span> KOL · Tổng chi phí SOW dự kiến:{' '}
+                  <span className="text-amber-300 font-mono text-base font-extrabold">
+                    {formatNumberOnly(totalSowCost)}đ
+                  </span>
+                </p>
+
+                {nganSachTongNumber > 0 && (
+                  <p className="text-xs">
+                    Ngân sách: <span className="font-mono text-slate-300">{formatNumberOnly(nganSachTongNumber)}đ</span>
+                    {isBudgetExceeded ? (
+                      <span className="text-rose-400 font-bold ml-2">
+                        · Vượt ngân sách {formatNumberOnly(totalSowCost - nganSachTongNumber)}đ
+                      </span>
+                    ) : (
+                      <span className="text-emerald-400 font-semibold ml-2">
+                        · Còn lại: {formatNumberOnly(nganSachTongNumber - totalSowCost)}đ
+                      </span>
+                    )}
+                  </p>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSendSelectedToSow}
+                className="w-full sm:w-auto px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>Đưa ({selectedKolIds.length}) KOL vào SOW</span>
+              </button>
+            </div>
+          )}
 
           {!hasSearched ? (
             <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center shadow-xs">
@@ -305,7 +829,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                 Sẵn Sàng Chấm Điểm & Đề Xuất
               </h3>
               <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-md mx-auto">
-                Nhập tiêu chí ngân sách, lĩnh vực và format booking ở bảng bên trái, sau đó bấm <strong>"Chấm Điểm & Tìm KOL Tối Ưu"</strong> để xem kết quả.
+                Dán brief ở trên hoặc nhập tiêu chí ở bảng bên trái, sau đó bấm <strong>"Chấm Điểm & Tìm KOL Tối Ưu"</strong> để xem kết quả.
               </p>
             </div>
           ) : recommendations.length === 0 ? (
@@ -313,15 +837,18 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
               <AlertCircle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
               <h3 className="text-base font-bold text-slate-800">Không tìm thấy KOL phù hợp</h3>
               <p className="text-xs text-slate-500 mt-1">
-                Hãy thử nới lỏng ngân sách tối đa hoặc thay đổi nền tảng tìm kiếm.
+                Hãy thử nới lỏng ngân sách tối đa, giảm ngưỡng follower hoặc thay đổi nền tảng tìm kiếm.
               </p>
             </div>
           ) : (
             <div className="space-y-4">
-              {recommendations.map((item, index) => {
-                const { kol, tongDiem, diemLinhVuc, diemGia, diemEngagement, diemHopTac, lyDo, giaHienTai } =
-                  item;
+              {sortedRecommendations.map((item, index) => {
+                const { kol, tongDiem, diemLinhVuc, diemGia, diemEngagement, diemHopTac, lyDo } = item;
                 const isSelected = selectedKolIds.includes(kol.id);
+                const assignments = kolTaskAssignments[kol.id] || duyetHangMuc;
+                const kolCost = getKolSowCost(kol);
+                const missingCount = getKolMissingPriceCount(kol);
+                const isMissingPrice = missingCount > 0;
 
                 return (
                   <div
@@ -332,6 +859,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                         : 'border-slate-200 hover:border-slate-300'
                     }`}
                   >
+                    {/* Header Thẻ: Checkbox, Avatar, Info, Badges, Score */}
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                       {/* Checkbox + Avatar + Tên */}
                       <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -372,6 +900,14 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                                 {kol.danhGiaHieuQua.diem}
                               </span>
                             )}
+
+                            {/* Badge Thiếu Giá nếu có hạng mục gán mà chưa có giá */}
+                            {isMissingPrice && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 inline-flex items-center gap-1 shrink-0">
+                                <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                <span>Thiếu giá</span>
+                              </span>
+                            )}
                           </div>
 
                           {/* Kênh & Tương tác */}
@@ -388,10 +924,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                             </span>
                             <span>•</span>
                             <span>
-                              Giá {PRICE_FORMAT_LABELS[formatNganSach]}:{' '}
-                              <strong className="text-indigo-600">
-                                {giaHienTai ? formatVND(giaHienTai) : 'Chưa có giá'}
-                              </strong>
+                              Lĩnh vực: <strong className="text-slate-700">{kol.linhVuc?.join(', ') || 'Chung'}</strong>
                             </span>
                           </div>
                         </div>
@@ -408,7 +941,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                       </div>
                     </div>
 
-                    {/* Điểm chi tiết 4 tiêu chí */}
+                    {/* Điểm chi tiết 4 tiêu chí (GIỮ NGUYÊN) */}
                     <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                       <div className="bg-slate-50 p-2 rounded-lg">
                         <span className="text-slate-400 block text-[10px]">1. Lĩnh vực (Max 40)</span>
@@ -428,7 +961,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                       </div>
                     </div>
 
-                    {/* Lý do đề xuất */}
+                    {/* Lý do đề xuất (GIỮ NGUYÊN) */}
                     <div className="mt-3 bg-amber-50/50 border border-amber-200/60 rounded-xl p-3">
                       <span className="text-xs font-bold text-amber-900 block mb-1">
                         Lý do đề xuất:
@@ -441,6 +974,142 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                           </li>
                         ))}
                       </ul>
+                    </div>
+
+                    {/* (a) BẢNG GIÁ 6 Ô CỐ ĐỊNH (Theo đúng mẫu KolList, tô đậm theo SOW) */}
+                    <div className="mt-4 pt-3 border-t border-slate-100">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-slate-700">
+                          Bảng giá 6 định dạng (Tô đậm các hạng mục SOW phân công):
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                        {PRICE_FORMAT_ORDER.map((fmt) => {
+                          const val = kol.bangGia ? kol.bangGia[fmt] : null;
+                          const hasPrice = val !== null && val !== undefined && val > 0;
+                          const assignedQty = assignments[fmt] || 0;
+                          const isAssigned = assignedQty > 0;
+
+                          return (
+                            <div
+                              key={fmt}
+                              className={`text-xs px-2.5 py-1.5 rounded-lg border transition-all flex items-center justify-between gap-1.5 ${
+                                isAssigned
+                                  ? hasPrice
+                                    ? 'bg-indigo-50 border-indigo-400 text-indigo-900 ring-2 ring-indigo-500 font-extrabold shadow-xs'
+                                    : 'bg-amber-50 border-amber-300 text-amber-800 ring-2 ring-amber-400 font-bold'
+                                  : hasPrice
+                                  ? `${PRICE_FORMAT_STYLES[fmt]}`
+                                  : 'bg-slate-50 border-slate-200 text-slate-400'
+                              }`}
+                            >
+                              <div className="truncate min-w-0">
+                                <span className={hasPrice ? 'font-medium' : 'font-normal'}>
+                                  {PRICE_SHORT_LABELS[fmt]}:{' '}
+                                </span>
+                                {isAssigned ? (
+                                  hasPrice ? (
+                                    <span className="font-extrabold font-mono">{formatNumberOnly(val)}đ</span>
+                                  ) : (
+                                    <span className="text-amber-700 font-bold">Chưa có giá</span>
+                                  )
+                                ) : hasPrice ? (
+                                  <span className="font-bold font-mono">{formatNumberOnly(val)}đ</span>
+                                ) : (
+                                  <span>—</span>
+                                )}
+                              </div>
+
+                              {isAssigned && (
+                                <span
+                                  className={`px-1.5 py-0.2 rounded-sm text-[10px] font-extrabold shrink-0 ${
+                                    hasPrice ? 'bg-indigo-600 text-white' : 'bg-amber-600 text-white'
+                                  }`}
+                                >
+                                  ×{assignedQty}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* (b) HÀNG CHỈNH "HẠNG MỤC KOL NÀY LÀM" (Sửa riêng cho từng KOL) */}
+                    <div className="mt-3 p-3 bg-slate-50/80 rounded-xl border border-slate-200/80 space-y-2">
+                      <div className="flex items-center justify-between flex-wrap gap-1">
+                        <span className="text-[11px] font-bold text-slate-700">
+                          Hạng mục KOL này làm trong SOW (Chỉnh số lượng):
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          Nhập 0 để bỏ qua
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                        {PRICE_FORMAT_ORDER.map((fmt) => {
+                          const qty = assignments[fmt] || 0;
+                          return (
+                            <div
+                              key={fmt}
+                              className={`p-2 rounded-lg border bg-white flex items-center justify-between gap-1 transition-all ${
+                                qty > 0 ? 'border-indigo-300 ring-1 ring-indigo-200' : 'border-slate-200'
+                              }`}
+                            >
+                              <span className="text-[10px] font-semibold text-slate-700 truncate">
+                                {PRICE_SHORT_LABELS[fmt]}
+                              </span>
+
+                              <div className="flex items-center gap-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateKolTaskQty(kol.id, fmt, qty - 1)}
+                                  className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-[10px] transition-colors cursor-pointer"
+                                >
+                                  -
+                                </button>
+                                <span className="w-5 text-center font-bold text-xs text-slate-900 font-mono">
+                                  {qty}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateKolTaskQty(kol.id, fmt, qty + 1)}
+                                  className="w-5 h-5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px] transition-colors cursor-pointer"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* (c) DÒNG TÍNH TIỀN: Chi phí SOW của KOL */}
+                    <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2 text-xs">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-slate-600">
+                          Chi phí SOW của KOL:{' '}
+                          <strong className="text-indigo-700 font-mono text-sm font-bold">
+                            {formatNumberOnly(kolCost)}đ
+                          </strong>
+                        </span>
+
+                        {isMissingPrice && (
+                          <span className="text-[11px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 font-medium">
+                            (Có {missingCount} hạng mục chưa có giá — sẽ tính là giá tạm trong SOW)
+                          </span>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => onSelectKol(kol)}
+                        className="text-indigo-600 hover:text-indigo-800 text-xs font-semibold hover:underline cursor-pointer"
+                      >
+                        Xem hồ sơ chi tiết →
+                      </button>
                     </div>
                   </div>
                 );

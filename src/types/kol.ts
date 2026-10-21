@@ -110,8 +110,19 @@ export interface RecommendationFilter {
   nganSachToiDa?: number;
   formatNganSach?: PriceFormatKey;
   engagementToiThieu?: number;
+  followerToiThieu?: number;
   soLuongCan: number;
   mucTieu?: string;
+}
+
+export interface RecommendedKolSowItem {
+  kol: KolProfile;
+  hangMuc: { format: PriceFormatKey; soLuong: number }[];
+}
+
+export interface SendRecommendedKolsToSowPayload {
+  items: RecommendedKolSowItem[];
+  tenChienDich?: string;
 }
 
 export interface RecommendationScore {

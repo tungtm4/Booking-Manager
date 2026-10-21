@@ -27,11 +27,13 @@ import {
   X,
   Check,
   AlertTriangle,
-  CheckCircle2
+  CheckCircle2,
+  Scale
 } from 'lucide-react';
 import { KolProfile, PlatformType, PriceFormatKey, PRICE_FORMAT_LABELS, SowQuote, SowLineItem } from '../types/kol';
 import { formatFollowers, formatVND, formatNumberOnly, getCategoryBadgeClass, POPULAR_CATEGORIES } from '../utils/formatters';
 import { StorageService } from '../services/storageService';
+import { KolCompareModal } from './KolCompareModal';
 
 const PRICE_FORMAT_ORDER: PriceFormatKey[] = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
 const PRICE_SHORT_LABELS: Record<PriceFormatKey, string> = {
@@ -113,6 +115,40 @@ export const KolList: React.FC<KolListProps> = ({
   const showToast = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
     setToastMessage({ text, type });
     setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  // So sánh hồ sơ KOL (Tối đa 3 KOL)
+  const [compareKolIds, setCompareKolIds] = useState<string[]>([]);
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
+
+  const handleToggleCompare = (kolId: string) => {
+    setCompareKolIds((prev) => {
+      if (prev.includes(kolId)) {
+        return prev.filter((id) => id !== kolId);
+      }
+      if (prev.length >= 3) {
+        showToast('Chỉ có thể so sánh tối đa 3 KOL cùng lúc. Hãy bỏ bớt 1 hồ sơ.', 'info');
+        return prev;
+      }
+      const next = [...prev, kolId];
+      showToast(`Đã chọn ${next.length}/3 KOL để so sánh`, 'success');
+      return next;
+    });
+  };
+
+  const handleAddKolToCompare = (kol: KolProfile) => {
+    setCompareKolIds((prev) => {
+      if (prev.includes(kol.id)) return prev;
+      if (prev.length >= 3) {
+        showToast('Đã đạt giới hạn tối đa 3 KOL để so sánh', 'info');
+        return prev;
+      }
+      return [...prev, kol.id];
+    });
+  };
+
+  const handleRemoveKolFromCompare = (kolId: string) => {
+    setCompareKolIds((prev) => prev.filter((id) => id !== kolId));
   };
 
   // Toggle category tag
@@ -409,6 +445,13 @@ export const KolList: React.FC<KolListProps> = ({
     });
   }, [filteredKols, sortBy, budgetFormat]);
 
+  // Danh sách KOL đang chọn để so sánh
+  const comparedKols = useMemo(() => {
+    return compareKolIds
+      .map((id) => kols.find((k) => k.id === id))
+      .filter((k): k is KolProfile => !!k);
+  }, [compareKolIds, kols]);
+
   return (
     <div className="space-y-6 pb-12">
       {/* Top Header & Search Bar */}
@@ -458,6 +501,35 @@ export const KolList: React.FC<KolListProps> = ({
                 <List className="w-4 h-4" />
               </button>
             </div>
+
+            {/* Nút So sánh KOL */}
+            <button
+              type="button"
+              onClick={() => {
+                if (compareKolIds.length === 0) {
+                  if (sortedKols.length >= 2) {
+                    setCompareKolIds([sortedKols[0].id, sortedKols[1].id]);
+                  } else if (sortedKols.length === 1) {
+                    setCompareKolIds([sortedKols[0].id]);
+                  }
+                }
+                setIsCompareModalOpen(true);
+              }}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-all cursor-pointer ${
+                compareKolIds.length > 0
+                  ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-semibold shadow-xs'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-indigo-600'
+              }`}
+              title="So sánh chi tiết tối đa 3 hồ sơ KOL cạnh nhau"
+            >
+              <Scale className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span className="hidden sm:inline">So sánh</span>
+              {compareKolIds.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-indigo-600 text-white text-[10px] font-bold">
+                  {compareKolIds.length}
+                </span>
+              )}
+            </button>
 
             <button
               onClick={onOpenAddKol}
@@ -686,18 +758,70 @@ export const KolList: React.FC<KolListProps> = ({
           </div>
         </div>
       ) : viewMode === 'grid' ? (
-        /* Dạng Dải Ngang (Horizontal Strips) */
-        <div className="flex flex-col gap-3">
-          {sortedKols.map((kol) => {
-            return (
-              <div
-                key={kol.id}
-                className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col md:flex-row md:items-center gap-4 hover:border-indigo-300 transition-colors"
-              >
-                {/* Khối trái: flex items-start gap-3 min-w-0 flex-1 */}
-                <div className="flex items-start gap-3 min-w-0 flex-1">
-                  {/* Avatar: w-12 h-12 */}
-                  <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-100 border border-slate-200 shrink-0">
+        <div className="space-y-3">
+          {/* Thanh công cụ Chọn tất cả cho Dạng Dải Ngang */}
+          <div className="flex items-center justify-between bg-white px-4 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-600 shadow-xs">
+            <label className="flex items-center gap-2.5 cursor-pointer font-medium select-none hover:text-slate-900">
+              <input
+                type="checkbox"
+                checked={sortedKols.length > 0 && sortedKols.every((k) => selectedKolIds.includes(k.id))}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    const currentIds = new Set(selectedKolIds);
+                    sortedKols.forEach((k) => currentIds.add(k.id));
+                    setSelectedKolIds(Array.from(currentIds));
+                  } else {
+                    const sortedIds = new Set(sortedKols.map((k) => k.id));
+                    setSelectedKolIds(selectedKolIds.filter((id) => !sortedIds.has(id)));
+                  }
+                }}
+                className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+              />
+              <span>
+                Chọn tất cả <strong className="text-slate-900 font-bold">({sortedKols.length} KOL đang hiển thị)</strong>
+              </span>
+            </label>
+            {selectedKolIds.length > 0 && (
+              <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
+                Đã chọn {selectedKolIds.length} KOL
+              </span>
+            )}
+          </div>
+
+          {/* Dạng Dải Ngang (Horizontal Strips) */}
+          <div className="flex flex-col gap-3">
+            {sortedKols.map((kol) => {
+              const isSelected = selectedKolIds.includes(kol.id);
+              return (
+                <div
+                  key={kol.id}
+                  className={`bg-white rounded-xl border p-4 flex flex-col md:flex-row md:items-center gap-4 transition-all ${
+                    isSelected
+                      ? 'border-indigo-500 ring-2 ring-indigo-100 bg-indigo-50/15'
+                      : 'border-slate-200 hover:border-indigo-300'
+                  }`}
+                >
+                  {/* Khối trái: flex items-start gap-3 min-w-0 flex-1 */}
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    {/* Checkbox chọn hàng loạt */}
+                    <div className="mt-3 shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          setSelectedKolIds((prev) =>
+                            prev.includes(kol.id) ? prev.filter((id) => id !== kol.id) : [...prev, kol.id]
+                          );
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                        title={isSelected ? 'Bỏ chọn KOL này' : 'Chọn KOL này'}
+                      />
+                    </div>
+
+                    {/* Avatar: w-12 h-12 */}
+                    <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-100 border border-slate-200 shrink-0">
                     {kol.anhDaiDien ? (
                       <img
                         src={kol.anhDaiDien}
@@ -821,6 +945,23 @@ export const KolList: React.FC<KolListProps> = ({
 
                   {/* Hàng nút thao tác */}
                   <div className="flex items-center gap-1.5 justify-end">
+                    {/* Nút So sánh */}
+                    <button
+                      type="button"
+                      onClick={() => handleToggleCompare(kol.id)}
+                      title={compareKolIds.includes(kol.id) ? "Bỏ so sánh" : "Thêm vào so sánh (tối đa 3)"}
+                      className={`flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
+                        compareKolIds.includes(kol.id)
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-300'
+                      }`}
+                    >
+                      <Scale className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">
+                        {compareKolIds.includes(kol.id) ? 'Đã chọn' : 'So sánh'}
+                      </span>
+                    </button>
+
                     <button
                       onClick={() => onSelectKol(kol)}
                       className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
@@ -859,6 +1000,7 @@ export const KolList: React.FC<KolListProps> = ({
               </div>
             );
           })}
+          </div>
         </div>
       ) : (
         /* Dạng Bảng (Table View) */
@@ -1005,6 +1147,18 @@ export const KolList: React.FC<KolListProps> = ({
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button
+                            type="button"
+                            onClick={() => handleToggleCompare(kol.id)}
+                            className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                              compareKolIds.includes(kol.id)
+                                ? 'text-white bg-indigo-600 shadow-xs'
+                                : 'text-slate-500 hover:text-indigo-600 hover:bg-slate-100'
+                            }`}
+                            title={compareKolIds.includes(kol.id) ? "Bỏ so sánh" : "Thêm vào so sánh"}
+                          >
+                            <Scale className="w-4 h-4" />
+                          </button>
+                          <button
                             onClick={() => onSelectKol(kol)}
                             className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition-colors"
                             title="Xem chi tiết"
@@ -1036,8 +1190,8 @@ export const KolList: React.FC<KolListProps> = ({
         </div>
       )}
 
-      {/* Thanh Thao Tác Hàng Loạt (Chỉ hiện khi table view và có KOL được chọn) */}
-      {viewMode === 'table' && selectedKolIds.length > 0 && (
+      {/* Thanh Thao Tác Hàng Loạt (Hiện ở cả 2 dạng hiển thị khi có KOL được chọn) */}
+      {selectedKolIds.length > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[95%] max-w-2xl bg-slate-900/95 backdrop-blur-md text-white rounded-2xl shadow-2xl border border-slate-700/80 px-4 py-3 sm:px-6 sm:py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-xs border border-indigo-500/30">
@@ -1054,6 +1208,23 @@ export const KolList: React.FC<KolListProps> = ({
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
+            {/* So sánh tối đa 3 KOL */}
+            <button
+              type="button"
+              onClick={() => {
+                const toCompare = selectedKolIds.slice(0, 3);
+                setCompareKolIds(toCompare);
+                setIsCompareModalOpen(true);
+                if (selectedKolIds.length > 3) {
+                  showToast('Đang so sánh 3 KOL đầu tiên được chọn (tối đa 3)', 'info');
+                }
+              }}
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-xs transition-colors cursor-pointer"
+            >
+              <Scale className="w-4 h-4" />
+              <span>So sánh {selectedKolIds.length > 3 ? '(3)' : `(${selectedKolIds.length})`}</span>
+            </button>
+
             <button
               type="button"
               onClick={handleOpenAddToQuote}
@@ -1456,6 +1627,76 @@ export const KolList: React.FC<KolListProps> = ({
           </div>
         </div>
       )}
+
+      {/* Thanh So Sánh Nổi (Floating Comparison Dock) */}
+      {compareKolIds.length > 0 && selectedKolIds.length === 0 && (
+        <div className="fixed bottom-6 right-4 sm:right-6 z-40 bg-slate-900/95 backdrop-blur-md text-white rounded-2xl shadow-2xl border border-slate-700/80 p-3 sm:p-3.5 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <div className="flex items-center -space-x-2">
+            {comparedKols.map((k) => (
+              <div
+                key={k.id}
+                className="w-8 h-8 rounded-full border-2 border-slate-900 overflow-hidden bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-[10px] shadow-xs"
+                title={k.ten}
+              >
+                {k.anhDaiDien ? (
+                  <img src={k.anhDaiDien} alt={k.ten} className="w-full h-full object-cover" />
+                ) : (
+                  k.ten.slice(0, 2).toUpperCase()
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <p className="text-xs font-bold text-white flex items-center gap-1.5">
+              <Scale className="w-3.5 h-3.5 text-indigo-400" />
+              <span>So sánh ({compareKolIds.length}/3)</span>
+            </p>
+            <p className="text-[10px] text-slate-400">
+              {compareKolIds.length === 1 ? 'Chọn thêm 1-2 KOL' : 'Sẵn sàng đối chiếu'}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1.5 ml-1">
+            <button
+              type="button"
+              onClick={() => setIsCompareModalOpen(true)}
+              className="px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-xs transition-all flex items-center gap-1 cursor-pointer"
+            >
+              <span>Xem ngay</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCompareKolIds([])}
+              className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              title="Xóa danh sách so sánh"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal So Sánh Cạnh Nhau */}
+      <KolCompareModal
+        isOpen={isCompareModalOpen}
+        onClose={() => setIsCompareModalOpen(false)}
+        selectedKols={comparedKols}
+        allKols={kols}
+        onAddKolToCompare={handleAddKolToCompare}
+        onRemoveKolFromCompare={handleRemoveKolFromCompare}
+        onSelectKolDetail={(k) => {
+          setIsCompareModalOpen(false);
+          onSelectKol(k);
+        }}
+        onAddToSow={(k) => {
+          if (onAddToSow) {
+            onAddToSow(k);
+            showToast(`Đã thêm ${k.ten} vào báo giá SOW`, 'success');
+          }
+        }}
+      />
 
       {/* Toast thông báo kết quả */}
       {toastMessage && (

@@ -17,7 +17,7 @@ import { DataImportView } from './components/DataImportView';
 import { DataBackupModal } from './components/DataBackupModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { StorageService } from './services/storageService';
-import { CollaborationHistory, KolProfile, RatingReview, SowQuote } from './types/kol';
+import { CollaborationHistory, KolProfile, RatingReview, SowQuote, PRICE_FORMAT_LABELS, RecommendedKolSowItem, SowLineItem } from './types/kol';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -159,12 +159,60 @@ export default function App() {
     setActiveTab('sow');
   };
 
-  // Hand-off recommended KOLs directly to SOW Builder
-  const handleSendRecommendedKolsToSow = (selectedKols: KolProfile[]) => {
-    if (selectedKols.length > 0) {
-      setPreselectedKolForSow(selectedKols[0]);
-      setActiveTab('sow');
-    }
+  // Hand-off recommended KOLs directly to SOW Builder (tạo báo giá thật theo từng hạng mục được gán)
+  const handleSendRecommendedKolsToSow = (payload: {
+    items: RecommendedKolSowItem[];
+    tenChienDich?: string;
+  }) => {
+    if (!payload.items || payload.items.length === 0) return;
+
+    const lineItems: SowLineItem[] = [];
+    payload.items.forEach(({ kol, hangMuc }) => {
+      hangMuc.forEach((hm) => {
+        if (hm.soLuong > 0) {
+          const unitPrice = kol.bangGia?.[hm.format] || 0;
+          const laGiaTam = !kol.bangGia?.[hm.format];
+          lineItems.push({
+            id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            kolId: kol.id,
+            kolName: kol.ten,
+            kolAvatar: kol.anhDaiDien,
+            format: hm.format,
+            formatLabel: PRICE_FORMAT_LABELS[hm.format] || hm.format,
+            soLuong: hm.soLuong,
+            donGia: unitPrice,
+            laGiaTam,
+            thanhTien: unitPrice * hm.soLuong,
+            ghiChu: '',
+          });
+        }
+      });
+    });
+
+    if (lineItems.length === 0) return;
+
+    const tongTamTinh = lineItems.reduce((acc, it) => acc + it.thanhTien, 0);
+
+    const newQuote: SowQuote = {
+      id: `quote-${Date.now()}`,
+      maBaoGia: `SOW-${Date.now().toString().slice(-6)}`,
+      tenChienDich: payload.tenChienDich?.trim() || 'Chiến dịch mới',
+      ngayLap: new Date().toISOString().split('T')[0],
+      items: lineItems,
+      tongTamTinh,
+      chietKhauPhanTram: 0,
+      tienChietKhau: 0,
+      phuPhi: 0,
+      tongCuoiCung: tongTamTinh,
+      ghiChuDieuKhoan:
+        'Báo giá đã bao gồm chi phí sản xuất cơ bản của KOL. Chưa bao gồm VAT 8% và chi phí chạy quảng cáo Whitelist/Spark Ads.',
+      ngayTao: new Date().toISOString(),
+    };
+
+    StorageService.saveQuote(newQuote);
+    reloadData();
+    setPreselectedKolForSow(null);
+    setActiveTab('sow');
   };
 
   const sampleCount = kols.filter((k) => k.isSample).length;

@@ -174,6 +174,198 @@ Hãy trích xuất danh sách các mục báo giá theo cấu trúc JSON.`;
 });
 
 // ----------------------------------------------------------------------------
+// API: Phân tích mô tả / brief chiến dịch bằng AI (Feature: Parse Brief SOW)
+// ----------------------------------------------------------------------------
+app.post('/api/ai/parse-brief', async (req, res) => {
+  try {
+    const { moTa } = req.body;
+
+    if (!moTa || typeof moTa !== 'string' || !moTa.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Vui lòng cung cấp nội dung mô tả hoặc brief chiến dịch.',
+      });
+    }
+
+    if (!aiClient) {
+      return res.json({
+        success: false,
+        useFallback: true,
+        message: 'Chưa cấu hình GEMINI_API_KEY trên server. Vui lòng nhập thông tin thủ công.',
+      });
+    }
+
+    const systemInstruction = `Bạn là chuyên gia Media Planner và Campaign Manager tại Việt Nam, chuyên phân tích brief quảng cáo/booking KOL và chuyển thành yêu cầu SOW (Scope of Work).
+
+NHIỆM VỤ:
+Đọc kỹ đoạn mô tả brief của khách hàng và trích xuất các thông số chiến dịch thành JSON đúng cấu trúc yêu cầu.
+
+QUY TẮC CỰC KỲ QUAN TRỌNG:
+1. CHỈ trích xuất thông tin brief NÓI RÕ hoặc có căn cứ trực tiếp; nếu không có thì để null hoặc mảng rỗng [] — TUYỆT ĐỐI KHÔNG TỰ BỊA SỐ HOẶC ĐOÁN MÒ THÔNG SỐ KHÔNG CÓ TRONG BRIEF.
+2. Quy đổi số tiền viết kiểu Việt thành số nguyên VND đầy đủ:
+   - "250tr", "250 triệu", "250 củ" -> 250000000
+   - "1,2 tỷ", "1.2 tỉ" -> 1200000000
+   - "30tr/KOL", "30 triệu / creator" -> 30000000
+   - "500k", "500 ngàn" -> 500000
+3. PHÂN BIỆT RÕ CÁC LOẠI NGÂN SÁCH:
+   - "ngân sách tổng/toàn chiến dịch", "tổng budget", "ngân sách dự kiến cả dự án" -> nganSachTong (number | null)
+   - "tối đa mỗi KOL", "mỗi creator tối đa", "budget cho 1 bạn", "ngân sách từng người" -> nganSachMoiKol (number | null)
+4. PHÂN BIỆT RÕ HẠNG MỤC (DELIVERABLES):
+   - Cụm "mỗi KOL làm X", "mỗi bạn sản xuất X", "KPI mỗi người là X" -> hangMucMoiKol (mảng các object { format, soLuong })
+   - Số lượng tính gộp cho CẢ campaign (ví dụ "cần tổng 5 video review", "tổng sản lượng 10 clip ngắn") -> hangMucTongCampaign (mảng các object { format, soLuong })
+5. Ánh xạ các hạng mục công việc về đúng 6 format key chuẩn:
+   - 'video': Video dài (YouTube video, video dài Facebook, clip review chi tiết trên 3 phút)
+   - 'shorts': Clip ngắn (TikTok clip, YouTube Shorts, Facebook/Instagram Reels dưới 60s)
+   - 'post': Bài đăng ảnh / status bài viết Facebook, Instagram, Fanpage
+   - 'livestream': Buổi phát sóng trực tiếp (livestream bán hàng, livestream sự kiện)
+   - 'thamDuSuKien': Tham dự / có mặt tại sự kiện, khai trương, workshop, họp báo
+   - 'sdha': Sử dụng hình ảnh (quyền SDHA, quảng cáo Spark Ads, Whitelist, banner)
+6. Nền tảng (nenTang): Chỉ nhận một trong các giá trị: "TikTok", "YouTube", "Facebook", "Instagram", hoặc null nếu không nói rõ hoặc đa nền tảng.
+7. Lĩnh vực (linhVuc): Tên lĩnh vực chính của brief (ví dụ: "Ẩm thực", "Làm đẹp", "Công nghệ", "Thời trang", "Du lịch", "Mẹ & bé", "Giải trí", "Tài chính", "Sức khỏe & Gym", "Giáo dục", "Lifestyle", "Gaming"), hoặc null.
+8. Số lượng KOL (soLuongKol): Số nguyên (ví dụ: 3, 5, 10), hoặc null.
+9. Tương tác (engagementToiThieu): Tỷ lệ % tối thiểu (ví dụ 4.5), hoặc null.
+10. Follower tối thiểu (followerToiThieu): Số người theo dõi tối thiểu dạng số nguyên (ví dụ 100000), hoặc null.`;
+
+    const prompt = `HÃY PHÂN TÍCH BRIEF CHIẾN DỊCH SAU ĐÂY:\n"""\n${moTa.trim()}\n"""\n\nTrả về kết quả dưới định dạng JSON đúng schema.`;
+
+    const response = await aiClient.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: [prompt],
+      config: {
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            tenChienDich: {
+              type: Type.STRING,
+              description: 'Tên chiến dịch hoặc thương hiệu/sản phẩm (hoặc null nếu không có)',
+            },
+            linhVuc: {
+              type: Type.STRING,
+              description: 'Lĩnh vực phù hợp nhất (hoặc null)',
+            },
+            nenTang: {
+              type: Type.STRING,
+              description: 'TikTok, YouTube, Facebook, Instagram hoặc null',
+            },
+            soLuongKol: {
+              type: Type.INTEGER,
+              description: 'Số lượng KOL cần tìm (hoặc null)',
+            },
+            mucTieu: {
+              type: Type.STRING,
+              description: 'Mục tiêu chiến dịch (hoặc null)',
+            },
+            nganSachTong: {
+              type: Type.NUMBER,
+              description: 'Ngân sách tổng toàn bộ chiến dịch tính bằng VND (hoặc null)',
+            },
+            nganSachMoiKol: {
+              type: Type.NUMBER,
+              description: 'Ngân sách tối đa cho mỗi KOL tính bằng VND (hoặc null)',
+            },
+            engagementToiThieu: {
+              type: Type.NUMBER,
+              description: 'Tỷ lệ tương tác tối thiểu (%) hoặc null',
+            },
+            followerToiThieu: {
+              type: Type.NUMBER,
+              description: 'Lượng follower tối thiểu của KOL (hoặc null)',
+            },
+            hangMucMoiKol: {
+              type: Type.ARRAY,
+              description: 'Danh sách các hạng mục mỗi KOL làm (nếu brief nói rõ mỗi KOL làm gì)',
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  format: {
+                    type: Type.STRING,
+                    description: 'post, video, shorts, livestream, thamDuSuKien, sdha',
+                  },
+                  soLuong: {
+                    type: Type.INTEGER,
+                    description: 'Số lượng cho format này',
+                  },
+                },
+                required: ['format', 'soLuong'],
+              },
+            },
+            hangMucTongCampaign: {
+              type: Type.ARRAY,
+              description: 'Danh sách các hạng mục tính cho toàn bộ chiến dịch',
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  format: {
+                    type: Type.STRING,
+                    description: 'post, video, shorts, livestream, thamDuSuKien, sdha',
+                  },
+                  soLuong: {
+                    type: Type.INTEGER,
+                    description: 'Số lượng cho format này',
+                  },
+                },
+                required: ['format', 'soLuong'],
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const outputText = response.text || '{}';
+    let parsedData: any = {};
+    try {
+      parsedData = JSON.parse(outputText);
+    } catch {
+      const cleanJson = outputText.replace(/```json/g, '').replace(/```/g, '').trim();
+      parsedData = JSON.parse(cleanJson);
+    }
+
+    const validFormats = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
+    const validPlatforms = ['TikTok', 'YouTube', 'Facebook', 'Instagram'];
+
+    // Sanitization
+    const sanitizeHangMuc = (arr: any) => {
+      if (!Array.isArray(arr)) return [];
+      return arr
+        .filter((item: any) => item && validFormats.includes(item.format) && Number(item.soLuong) > 0)
+        .map((item: any) => ({
+          format: item.format,
+          soLuong: Math.max(1, Math.round(Number(item.soLuong))),
+        }));
+    };
+
+    const sanitizedResult = {
+      tenChienDich: parsedData.tenChienDich ? String(parsedData.tenChienDich).trim() : null,
+      linhVuc: parsedData.linhVuc ? String(parsedData.linhVuc).trim() : null,
+      nenTang: validPlatforms.includes(parsedData.nenTang) ? parsedData.nenTang : null,
+      soLuongKol: parsedData.soLuongKol && Number(parsedData.soLuongKol) > 0 ? Math.round(Number(parsedData.soLuongKol)) : null,
+      mucTieu: parsedData.mucTieu ? String(parsedData.mucTieu).trim() : null,
+      nganSachTong: parsedData.nganSachTong && Number(parsedData.nganSachTong) > 0 ? Number(parsedData.nganSachTong) : null,
+      nganSachMoiKol: parsedData.nganSachMoiKol && Number(parsedData.nganSachMoiKol) > 0 ? Number(parsedData.nganSachMoiKol) : null,
+      engagementToiThieu: parsedData.engagementToiThieu && Number(parsedData.engagementToiThieu) > 0 ? Number(parsedData.engagementToiThieu) : null,
+      followerToiThieu: parsedData.followerToiThieu && Number(parsedData.followerToiThieu) > 0 ? Number(parsedData.followerToiThieu) : null,
+      hangMucMoiKol: sanitizeHangMuc(parsedData.hangMucMoiKol),
+      hangMucTongCampaign: sanitizeHangMuc(parsedData.hangMucTongCampaign),
+    };
+
+    return res.json({
+      success: true,
+      data: sanitizedResult,
+    });
+  } catch (err: any) {
+    console.error('Lỗi khi phân tích brief bằng AI:', err);
+    return res.json({
+      success: false,
+      useFallback: true,
+      error: err.message || 'Lỗi khi gọi AI phân tích brief',
+    });
+  }
+});
+
+// ----------------------------------------------------------------------------
 // API: Proxy tải dữ liệu Google Sheet CSV (Tránh bị chặn CORS ở Browser)
 // ----------------------------------------------------------------------------
 app.get('/api/sheets/fetch-csv', async (req, res) => {

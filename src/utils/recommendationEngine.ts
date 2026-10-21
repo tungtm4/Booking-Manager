@@ -169,7 +169,24 @@ export function rankKolsForRecommendation(
   kols: KolProfile[],
   filter: RecommendationFilter
 ): RecommendationScore[] {
-  const scored = kols.map((k) => calculateKolRecommendation(k, filter));
+  let eligibleKols = kols;
+
+  // Lọc theo follower tối thiểu (nếu có yêu cầu)
+  if (filter.followerToiThieu && filter.followerToiThieu > 0) {
+    const minFol = filter.followerToiThieu;
+    eligibleKols = eligibleKols.filter((k) => {
+      if (filter.nenTang && filter.nenTang !== 'TatCa') {
+        const ch = k.nenTang?.find(
+          (p) => p.tenNenTang.toLowerCase() === filter.nenTang?.toLowerCase()
+        );
+        return (ch?.soFollower || 0) >= minFol;
+      }
+      const maxFollower = Math.max(0, ...(k.nenTang || []).map((p) => p.soFollower || 0));
+      return maxFollower >= minFol;
+    });
+  }
+
+  const scored = eligibleKols.map((k) => calculateKolRecommendation(k, filter));
 
   // Sắp xếp: Điểm cao nhất trước, nếu bằng điểm thì ưu tiên engagement rate cao hơn
   scored.sort((a, b) => {
