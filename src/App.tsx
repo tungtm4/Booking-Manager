@@ -38,6 +38,7 @@ export default function App() {
   // Search & Navigation Hand-off State
   const [listSearchKeyword, setListSearchKeyword] = useState('');
   const [preselectedKolForSow, setPreselectedKolForSow] = useState<KolProfile | null>(null);
+  const [openQuoteId, setOpenQuoteId] = useState<string | null>(null);
 
   // Reload data from storage
   const reloadData = useCallback(() => {
@@ -212,6 +213,7 @@ export default function App() {
     StorageService.saveQuote(newQuote);
     reloadData();
     setPreselectedKolForSow(null);
+    setOpenQuoteId(newQuote.id);
     setActiveTab('sow');
   };
 
@@ -289,6 +291,8 @@ export default function App() {
             }}
             preselectedKol={preselectedKolForSow}
             onClearPreselectedKol={() => setPreselectedKolForSow(null)}
+            openQuoteId={openQuoteId}
+            onOpenQuoteHandled={() => setOpenQuoteId(null)}
           />
         )}
 

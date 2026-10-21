@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Plus, 
   Trash2, 
@@ -32,6 +32,8 @@ interface SowQuoteBuilderProps {
   onDeleteQuote: (id: string) => void;
   preselectedKol?: KolProfile | null;
   onClearPreselectedKol?: () => void;
+  openQuoteId?: string | null;
+  onOpenQuoteHandled?: () => void;
 }
 
 export const SowQuoteBuilder: React.FC<SowQuoteBuilderProps> = ({
@@ -41,6 +43,8 @@ export const SowQuoteBuilder: React.FC<SowQuoteBuilderProps> = ({
   onDeleteQuote,
   preselectedKol,
   onClearPreselectedKol,
+  openQuoteId,
+  onOpenQuoteHandled,
 }) => {
   const [viewTab, setViewTab] = useState<'create' | 'history'>('create');
 
@@ -233,6 +237,19 @@ export const SowQuoteBuilder: React.FC<SowQuoteBuilderProps> = ({
     setGhiChuDieuKhoan(q.ghiChuDieuKhoan || '');
     setViewTab('create');
   };
+
+  // Tự động mở báo giá vừa tạo khi nhận tín hiệu openQuoteId (Yêu cầu luồng Đề xuất KOL -> SOW)
+  useEffect(() => {
+    if (openQuoteId) {
+      const targetQuote = quotes.find((q) => q.id === openQuoteId);
+      if (targetQuote) {
+        handleLoadQuote(targetQuote);
+        if (onOpenQuoteHandled) {
+          onOpenQuoteHandled();
+        }
+      }
+    }
+  }, [openQuoteId, quotes, onOpenQuoteHandled]);
 
   // Lọc gợi ý KOL khi gõ vào thanh tìm kiếm
   const matchedKols = kolSearchInput.trim()
