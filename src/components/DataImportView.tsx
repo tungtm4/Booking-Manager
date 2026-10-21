@@ -1,3 +1,4 @@
+import { friendlyAiMessage } from '../utils/aiMessages';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -776,6 +777,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
 
       if (res.ok) {
         const json = await res.json();
+        if (json.success === false) setErrorMessage(friendlyAiMessage(json.message));
         if (
           json.success &&
           json.data &&
@@ -857,7 +859,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         }
       }
     } catch (err) {
-      console.warn('Lỗi gọi API AI phân loại bảng, chuyển sang heuristic cục bộ:', err);
+      setErrorMessage('Không thể phân tích bằng AI lúc này. Hệ thống sẽ nhận diện cục bộ.');
     } finally {
       setIsAiAnalyzing(false);
     }

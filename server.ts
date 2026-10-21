@@ -37,6 +37,45 @@ if (apiKey && apiKey !== 'MY_GEMINI_API_KEY') {
   });
 }
 
+// Chỉ nhận diện mã/trạng thái có cấu trúc, không suy đoán từ câu lỗi.
+export function isTemporaryAiError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  const visit = (value: unknown, depth = 0): boolean => {
+    if (depth > 6 || value == null || seen.has(value)) return false;
+    seen.add(value);
+    if (typeof value === 'string') {
+      try { return visit(JSON.parse(value), depth + 1); } catch { return false; }
+    }
+    if (typeof value !== 'object') return false;
+    const e = value as Record<string, unknown>;
+    const codes = [e.code, e.status, e.statusCode];
+    // Không thử lại lỗi xác thực/đầu vào, kể cả khi message lồng thông tin khác.
+    if (codes.some(c => [400, 401, 403, 404].includes(Number(c)))) return false;
+    return codes.some(c => [429, 503].includes(Number(c)) || c === 'UNAVAILABLE' || c === 'RESOURCE_EXHAUSTED')
+      || [e.error, e.message, e.cause, e.response].some(v => visit(v, depth + 1));
+  };
+  return visit(error);
+}
+
+export async function callAiWithRetry<T>(
+  call: () => Promise<T>,
+  wait: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await call(); }
+    catch (error) {
+      if (attempt >= 2 || !isTemporaryAiError(error)) throw error;
+      await wait([1000, 2500][attempt]);
+    }
+  }
+}
+
+export function aiFailureMessage(error: unknown): string {
+  return isTemporaryAiError(error)
+    ? 'AI đang quá tải, vui lòng thử lại sau ít phút.'
+    : 'Không thể xử lý bằng AI lúc này. Vui lòng thử lại sau hoặc nhập thông tin thủ công.';
+}
+
 // ----------------------------------------------------------------------------
 // API: Trích xuất báo giá KOL tự động bằng Gemini AI (Feature 2.2)
 // ----------------------------------------------------------------------------
@@ -47,7 +86,7 @@ app.post('/api/ai/extract-prices', async (req, res) => {
     if (!text && !imageBase64) {
       return res.status(400).json({
         success: false,
-        error: 'Vui lòng cung cấp đoạn văn bản tin nhắn hoặc ảnh chụp báo giá.',
+        message: 'Vui lòng cung cấp đoạn văn bản tin nhắn hoặc ảnh chụp báo giá.',
       });
     }
 
@@ -106,7 +145,7 @@ Hãy trích xuất danh sách các mục báo giá theo cấu trúc JSON.`;
 
     contents.push({ text: textPrompt });
 
-    const response = await aiClient.models.generateContent({
+    const response = await callAiWithRetry(() => aiClient!.models.generateContent({
       model: 'gemini-3.8-flash',
       contents,
       config: {
@@ -138,7 +177,7 @@ Hãy trích xuất danh sách các mục báo giá theo cấu trúc JSON.`;
           },
         },
       },
-    });
+    }));
 
     const outputText = response.text || '[]';
     let parsedData = [];
@@ -164,11 +203,11 @@ Hãy trích xuất danh sách các mục báo giá theo cấu trúc JSON.`;
       data: sanitized,
     });
   } catch (err: any) {
-    console.error('Lỗi khi gọi Gemini API:', err);
+    console.warn('Yêu cầu AI thất bại', { tamThoi: isTemporaryAiError(err) });
     return res.json({
       success: false,
       useFallback: true,
-      error: `Gemini API tạm thời bận hoặc lỗi: ${err.message || 'Chuyển sang bộ phân tích tự động'}`
+      message: aiFailureMessage(err)
     });
   }
 });
@@ -183,7 +222,7 @@ app.post('/api/ai/parse-brief', async (req, res) => {
     if (!moTa || typeof moTa !== 'string' || !moTa.trim()) {
       return res.status(400).json({
         success: false,
-        error: 'Vui lòng cung cấp nội dung mô tả hoặc brief chiến dịch.',
+        message: 'Vui lòng cung cấp nội dung mô tả hoặc brief chiến dịch.',
       });
     }
 
@@ -210,6 +249,7 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
 3. PHÂN BIỆT RÕ CÁC LOẠI NGÂN SÁCH:
    - "ngân sách tổng/toàn chiến dịch", "tổng budget", "ngân sách dự kiến cả dự án" -> nganSachTong (number | null)
    - "tối đa mỗi KOL", "mỗi creator tối đa", "budget cho 1 bạn", "ngân sách từng người" -> nganSachMoiKol (number | null)
+   - Không tự nhân ngân sách mỗi KOL với số KOL để điền nganSachTong; không tự chia tổng để điền nganSachMoiKol. Trường không được nêu phải là null.
 4. PHÂN BIỆT RÕ HẠNG MỤC (DELIVERABLES):
    - Cụm "mỗi KOL làm X", "mỗi bạn sản xuất X", "KPI mỗi người là X" -> hangMucMoiKol (mảng các object { format, soLuong })
    - Số lượng tính gộp cho CẢ campaign (ví dụ "cần tổng 5 video review", "tổng sản lượng 10 clip ngắn") -> hangMucTongCampaign (mảng các object { format, soLuong })
@@ -228,7 +268,7 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
 
     const prompt = `HÃY PHÂN TÍCH BRIEF CHIẾN DỊCH SAU ĐÂY:\n"""\n${moTa.trim()}\n"""\n\nTrả về kết quả dưới định dạng JSON đúng schema.`;
 
-    const response = await aiClient.models.generateContent({
+    const response = await callAiWithRetry(() => aiClient!.models.generateContent({
       model: 'gemini-3.8-flash',
       contents: [prompt],
       config: {
@@ -312,7 +352,7 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
           },
         },
       },
-    });
+    }));
 
     const outputText = response.text || '{}';
     let parsedData: any = {};
@@ -351,16 +391,42 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
       hangMucTongCampaign: sanitizeHangMuc(parsedData.hangMucTongCampaign),
     };
 
+    // Các hạng mục nêu rõ theo tổng campaign phải được giữ đúng tổng.
+    const explicitTasks = [...moTa.matchAll(/(\d+)\s*(video\s+review|clip\s+ngắn|video\s+ngắn)/giu)].map(m => ({
+      format: /ngắn/iu.test(m[2]) ? 'shorts' : 'video', soLuong: Number(m[1]),
+    }));
+    if (explicitTasks.length && /tổng\s*(?:cộng)?/iu.test(moTa) && !/mỗi\s*(?:KOL|người|bạn)\s*làm/iu.test(moTa)) {
+      sanitizedResult.hangMucTongCampaign = explicitTasks;
+      sanitizedResult.hangMucMoiKol = [];
+    }
+    const explicitCategory = moTa.match(/(?:mảng|lĩnh vực)\s*(ẩm thực|làm đẹp|công nghệ|thời trang|du lịch|giáo dục|giải trí)/iu);
+    if (explicitCategory) {
+      const category = explicitCategory[1].toLocaleLowerCase('vi-VN');
+      sanitizedResult.linhVuc = category[0].toLocaleUpperCase('vi-VN') + category.slice(1);
+    }
+
+    // Đối chiếu các số được ghi rõ trong brief, không tự suy ra ngân sách.
+    const explicitCount = moTa.match(/(?:chọn|cần|tìm)\s*(\d+)\s*KOL/iu);
+    if (explicitCount) sanitizedResult.soLuongKol = Number(explicitCount[1]);
+    const budgetAmount = (match: RegExpMatchArray | null) => match
+      ? Math.round(Number(match[1].replace(',', '.')) * (/tỷ|tỉ/iu.test(match[2]) ? 1_000_000_000 : 1_000_000)) : null;
+    const totalBudget = moTa.match(/ngân sách\s+(?:(?:tổng|toàn|cả)\s+(?:chiến dịch|campaign)?)[^\d.;:]{0,30}(\d+(?:[.,]\d+)?)\s*(triệu|tr|tỷ|tỉ)/iu);
+    const perBudget = moTa.match(/ngân sách[^\d.;:]{0,30}(\d+(?:[.,]\d+)?)\s*(triệu|tr|tỷ|tỉ)\s*(?:mỗi|\/)\s*KOL/iu);
+    if (totalBudget) sanitizedResult.nganSachTong = budgetAmount(totalBudget);
+    else if (perBudget) sanitizedResult.nganSachTong = null;
+    if (perBudget) sanitizedResult.nganSachMoiKol = budgetAmount(perBudget);
+    else if (totalBudget) sanitizedResult.nganSachMoiKol = null;
+
     return res.json({
       success: true,
       data: sanitizedResult,
     });
   } catch (err: any) {
-    console.error('Lỗi khi phân tích brief bằng AI:', err);
+    console.warn('Yêu cầu AI thất bại', { tamThoi: isTemporaryAiError(err) });
     return res.json({
       success: false,
       useFallback: true,
-      error: err.message || 'Lỗi khi gọi AI phân tích brief',
+      message: aiFailureMessage(err),
     });
   }
 });
@@ -449,7 +515,7 @@ app.post('/api/import/classify-columns', async (req, res) => {
     if (!rows || !Array.isArray(rows) || rows.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'Vui lòng cung cấp mảng dữ liệu các dòng đầu của bảng tính.',
+        message: 'Vui lòng cung cấp mảng dữ liệu các dòng đầu của bảng tính.',
       });
     }
 
@@ -489,7 +555,7 @@ ${JSON.stringify(rows, null, 2)}
 
 Hãy tìm headerRowIndex và phân loại từng cột theo đúng định dạng JSON được yêu cầu.`;
 
-    const response = await aiClient.models.generateContent({
+    const response = await callAiWithRetry(() => aiClient!.models.generateContent({
       model: 'gemini-3.8-flash',
       contents: [prompt],
       config: {
@@ -533,7 +599,7 @@ Hãy tìm headerRowIndex và phân loại từng cột theo đúng định dạn
           required: ['headerRowIndex', 'columns'],
         },
       },
-    });
+    }));
 
     const outputText = response.text || '{}';
     let parsedData: any = {};
@@ -553,11 +619,11 @@ Hãy tìm headerRowIndex và phân loại từng cột theo đúng định dạn
       data: parsedData,
     });
   } catch (err: any) {
-    console.error('Lỗi khi gọi AI phân loại cấu trúc bảng:', err);
+    console.warn('Yêu cầu AI thất bại', { tamThoi: isTemporaryAiError(err) });
     return res.json({
       success: false,
       useFallback: true,
-      error: err.message || 'Lỗi khi gọi AI phân loại cột',
+      message: aiFailureMessage(err),
     });
   }
 });

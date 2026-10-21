@@ -1,3 +1,5 @@
+import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
+import { friendlyAiMessage } from '../utils/aiMessages';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -142,12 +144,26 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
 
       if (!resData.success || !resData.data) {
         setBriefError(
-          resData.error || resData.message || 'Không thể phân tích brief bằng AI. Bạn vẫn có thể điền các thông số bên dưới thủ công.'
+          friendlyAiMessage(resData.message) || 'Không thể phân tích brief bằng AI. Bạn vẫn có thể điền các thông số bên dưới thủ công.'
         );
         return;
       }
 
       const d = resData.data;
+      // Mỗi lần phân tích thành công thay toàn bộ tiêu chí; không mang brief cũ sang.
+      setTenChienDich('Chiến dịch mới');
+      setLinhVuc('');
+      setNenTang('TatCa');
+      setSoLuongCan(5);
+      setMucTieu('');
+      setNganSachToiDa('');
+      setNganSachTong('');
+      setEngagementToiThieu('');
+      setFollowerToiThieu('');
+      setRecommendations([]);
+      setSelectedKolIds([]);
+      setKolTaskAssignments({});
+      setHasSearched(false);
 
       // 1. Tên chiến dịch
       if (d.tenChienDich) {
@@ -248,7 +264,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
 
       setBriefSuccessMsg('Đã trích xuất thông tin brief thành công! Vui lòng kiểm tra và duyệt lại các thông số SOW bên dưới trước khi tìm KOL.');
     } catch (err: any) {
-      setBriefError('Lỗi kết nối máy chủ phân tích AI: ' + (err.message || 'Vui lòng thử lại sau.'));
+      setBriefError('Không thể phân tích brief lúc này. Vui lòng thử lại sau.');
     } finally {
       setIsAnalyzingBrief(false);
     }
@@ -707,11 +723,11 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
               </label>
               <div className="relative">
                 <input
-                  type="number"
-                  step="1000000"
-                  value={nganSachTong}
-                  onChange={(e) => setNganSachTong(e.target.value ? Number(e.target.value) : '')}
-                  placeholder="Vd: 150000000 (Tùy chọn)"
+                  type="text"
+                  inputMode="numeric"
+                  value={formatMoneyInput(nganSachTong)}
+                  onChange={(e) => setNganSachTong(parseMoneyInput(e.target.value))}
+                  placeholder="Vd: 150.000.000 (Tùy chọn)"
                   className="w-full pl-3 pr-8 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden font-mono text-slate-900"
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">₫</span>
@@ -723,11 +739,11 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                 Follower Tối Thiểu (Người theo dõi)
               </label>
               <input
-                type="number"
-                step="10000"
-                value={followerToiThieu}
-                onChange={(e) => setFollowerToiThieu(e.target.value ? Number(e.target.value) : '')}
-                placeholder="Vd: 100000 (Lọc KOL đủ reach)"
+                type="text"
+                inputMode="numeric"
+                value={formatMoneyInput(followerToiThieu)}
+                onChange={(e) => setFollowerToiThieu(parseMoneyInput(e.target.value))}
+                placeholder="Vd: 100.000 (Lọc KOL đủ reach)"
                 className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden text-slate-900"
               />
             </div>
@@ -835,7 +851,8 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                 onChange={(e) => setLinhVuc(e.target.value)}
                 className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden text-slate-800"
               >
-                {POPULAR_CATEGORIES.map((c) => (
+                <option value="">Chọn lĩnh vực</option>
+                  {POPULAR_CATEGORIES.map((c) => (
                   <option key={c} value={c}>
                     {c}
                   </option>
@@ -886,12 +903,12 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                 </label>
                 <div className="relative">
                   <input
-                    type="number"
-                    step="1000000"
-                    placeholder="Vd: 30000000"
-                    value={nganSachToiDa}
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="Vd: 30.000.000"
+                    value={formatMoneyInput(nganSachToiDa)}
                     onChange={(e) =>
-                      setNganSachToiDa(e.target.value ? Number(e.target.value) : '')
+                      setNganSachToiDa(parseMoneyInput(e.target.value))
                     }
                     className="w-full pl-3 pr-8 py-2 text-xs border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden font-mono"
                   />
@@ -934,6 +951,9 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                 onChange={(e) => setSoLuongCan(Number(e.target.value))}
                 className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden text-slate-800"
               >
+                {![3, 5, 10, 20].includes(soLuongCan) && (
+                  <option value={soLuongCan}>Top {soLuongCan} KOL điểm cao nhất</option>
+                )}
                 <option value={3}>Top 3 KOL điểm cao nhất</option>
                 <option value={5}>Top 5 KOL điểm cao nhất</option>
                 <option value={10}>Top 10 KOL điểm cao nhất</option>

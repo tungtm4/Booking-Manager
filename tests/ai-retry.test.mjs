@@ -1,0 +1,13 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {stripTypeScriptTypes} from 'node:module';
+const source=readFileSync(new URL('../server.ts',import.meta.url),'utf8');
+const helpers=source.slice(source.indexOf('export function isTemporaryAiError'),source.indexOf('// ----------------------------------------------------------------------------'));
+const {callAiWithRetry,isTemporaryAiError,aiFailureMessage}=await import('data:text/javascript;base64,'+Buffer.from(stripTypeScriptTypes(helpers)).toString('base64'));
+test('thành công ngay không chờ',async()=>{let n=0;assert.equal(await callAiWithRetry(async()=>++n,async()=>assert.fail()),1);});
+test('503 rồi 429 rồi thành công, chờ 1 và 2,5 giây',async()=>{let n=0;const waits=[];const result=await callAiWithRetry(async()=>{n++;if(n<3)throw {message:JSON.stringify({error:{code:n===1?503:429,status:n===1?'UNAVAILABLE':'RESOURCE_EXHAUSTED'}})};return 'đạt';},async ms=>{waits.push(ms)});assert.equal(result,'đạt');assert.deepEqual(waits,[1000,2500]);assert.equal(n,3);});
+test('dừng sau 3 lần, không lộ lỗi nhà cung cấp',async()=>{let n=0;const err={code:503,message:'bí mật nhà cung cấp'};await assert.rejects(callAiWithRetry(async()=>{n++;throw err},async()=>{}));assert.equal(n,3);assert.equal(aiFailureMessage(err),'AI đang quá tải, vui lòng thử lại sau ít phút.');});
+test('không retry lỗi cấu hình và đầu vào',async()=>{for(const code of [400,401,403,404]){let n=0;const err={code,message:'lỗi thô'};await assert.rejects(callAiWithRetry(async()=>{n++;throw err},async()=>assert.fail()));assert.equal(n,1);assert.ok(!aiFailureMessage(err).includes('lỗi thô'));}});
+test('message hỏng và đối tượng vòng không gây crash',()=>{assert.equal(isTemporaryAiError({message:'không phải JSON 503'}),false);const e={};e.cause=e;assert.equal(isTemporaryAiError(e),false);});
+test('cả ba endpoint dùng helper',()=>assert.equal((source.match(/await callAiWithRetry\(/g)||[]).length,3));

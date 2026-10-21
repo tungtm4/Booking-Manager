@@ -1,3 +1,4 @@
+import { friendlyAiMessage } from '../utils/aiMessages';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -265,6 +266,7 @@ export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onData
     setIsAnalyzing(true);
     try {
       let rawResults: any[] = [];
+      let aiMessage: string | null = null;
 
       // Gọi server-side API `/api/ai/extract-prices`
       try {
@@ -282,9 +284,9 @@ export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onData
           const resData = await res.json();
           if (resData.success && Array.isArray(resData.data)) {
             rawResults = resData.data;
-          } else if (resData.useFallback) {
-            // Server báo dùng fallback
-            rawResults = fallbackExtractPrices(inputText);
+          } else {
+            aiMessage = friendlyAiMessage(resData.message);
+            if (resData.useFallback) rawResults = fallbackExtractPrices(inputText);
           }
         } else {
           // Lỗi HTTP, chạy fallback parser
@@ -301,7 +303,7 @@ export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onData
       }
 
       if (rawResults.length === 0) {
-        setErrorMessage('Không trích xuất được thông tin báo giá nào. Vui lòng kiểm tra lại nội dung tin nhắn hoặc ảnh đính kèm.');
+        setErrorMessage(aiMessage || 'Không trích xuất được thông tin báo giá. Vui lòng thử lại sau hoặc kiểm tra nội dung.');
         setIsAnalyzing(false);
         return;
       }
@@ -328,7 +330,7 @@ export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onData
       setExtractedList(mapped);
       showToast(`AI đã trích xuất thành công ${mapped.length} mục báo giá!`);
     } catch (err: any) {
-      setErrorMessage(`Lỗi phân tích: ${err.message || 'Không thể trích xuất'}`);
+      setErrorMessage('Không thể phân tích báo giá lúc này. Vui lòng thử lại sau.');
     } finally {
       setIsAnalyzing(false);
     }
