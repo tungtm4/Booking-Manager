@@ -1160,6 +1160,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       // 2. Tìm kiếm so khớp
       let matchedKol: KolProfile | null = null;
       let isFuzzy = false;
+      let sameNameDifferentLinkKol: KolProfile | null = null;
 
       // Danh sách tất cả các link của dòng này
       const allRowLinks = [
@@ -1169,16 +1170,25 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         .filter((l): l is string => Boolean(l && l.trim()))
         .map(normalizeUrl);
 
-      if (matchKey === 'link' && allRowLinks.length > 0) {
-        matchedKol =
-          kols.find((k) =>
-            k.nenTang?.some(
-              (nt) => nt.linkProfile && allRowLinks.includes(normalizeUrl(nt.linkProfile))
-            )
-          ) || null;
-      }
+      if (matchKey === 'link') {
+        // Khi chọn khớp theo link (matchKey === 'link') thì TUYỆT ĐỐI không so khớp theo tên nữa (PHẦN A)
+        if (allRowLinks.length > 0) {
+          matchedKol =
+            kols.find((k) =>
+              k.nenTang?.some(
+                (nt) => nt.linkProfile && allRowLinks.includes(normalizeUrl(nt.linkProfile))
+              )
+            ) || null;
+        }
 
-      if (!matchedKol) {
+        // Dòng nào không khớp link với hồ sơ nào -> tạo mới; dòng không có link nào -> cũng tạo mới.
+        // Nếu tên của dòng trùng chính xác với một hồ sơ có sẵn nhưng link khác:
+        if (!matchedKol) {
+          const normTen = normalizeName(ten);
+          sameNameDifferentLinkKol = kols.find((k) => normalizeName(k.ten) === normTen) || null;
+        }
+      } else {
+        // matchKey === 'name': giữ nguyên hành vi hiện tại (khớp chính xác, khớp mờ)
         const normTen = normalizeName(ten);
         // Khớp chính xác tên
         matchedKol = kols.find((k) => normalizeName(k.ten) === normTen) || null;
@@ -1229,13 +1239,19 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         };
       }
 
+      let createReason =
+        channels.length > 1
+          ? `KOL mới (${channels.length} nền tảng)`
+          : 'KOL mới hoàn toàn';
+
+      if (matchKey === 'link' && sameNameDifferentLinkKol) {
+        createReason = `Tên trùng với ${sameNameDifferentLinkKol.ten} nhưng link khác — tạo mới theo chế độ khớp link`;
+      }
+
       return {
         index,
         status: 'create' as const,
-        reason:
-          channels.length > 1
-            ? `KOL mới (${channels.length} nền tảng)`
-            : 'KOL mới hoàn toàn',
+        reason: createReason,
         kolData,
         matchedKol: null,
         isFuzzy: false,

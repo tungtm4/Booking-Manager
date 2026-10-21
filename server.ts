@@ -422,17 +422,75 @@ app.get('/api/sheets/fetch-csv', async (req, res) => {
     // Tự dựng link export của Google Sheet, TUYỆT ĐỐI không tải URL gốc
     const targetUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(targetSheetId)}/export?format=csv`;
 
-    const response = await fetch(targetUrl);
+    // Giới hạn thời gian chờ tối đa 15 giây (PHẦN E)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    let response: Response;
+    try {
+      response = await fetch(targetUrl, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
     if (!response.ok) {
       return res.status(response.status).json({
         error: `Không thể tải Google Sheet (Mã lỗi ${response.status}). Hãy đảm bảo bảng tính đã bật quyền 'Bất kỳ ai có đường liên kết đều có thể xem' (Anyone with the link can view).`,
       });
     }
 
-    const csvText = await response.text();
+    // Giới hạn dung lượng tối đa 10MB (PHẦN E)
+    const MAX_BYTES = 10 * 1024 * 1024; // 10MB
+    const contentLength = response.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > MAX_BYTES) {
+      return res.status(413).json({
+        error: 'File quá lớn',
+      });
+    }
+
+    let totalBytes = 0;
+    const chunks: Buffer[] = [];
+
+    if (!response.body) {
+      return res.status(400).json({
+        error: 'Phản hồi từ Google Sheet trống.',
+      });
+    }
+
+    const reader = response.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        totalBytes += value.length;
+        if (totalBytes > MAX_BYTES) {
+          try {
+            await reader.cancel();
+          } catch {
+            // ignore
+          }
+          return res.status(413).json({
+            error: 'File quá lớn',
+          });
+        }
+        chunks.push(Buffer.from(value));
+      }
+    }
+
+    const csvText = Buffer.concat(chunks).toString('utf-8');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     return res.send(csvText);
   } catch (err: any) {
+    if (
+      err.name === 'AbortError' ||
+      err.name === 'TimeoutError' ||
+      err.message?.includes('aborted') ||
+      err.message?.includes('timeout')
+    ) {
+      return res.status(408).json({
+        error: 'Tải Google Sheet quá thời gian chờ',
+      });
+    }
     return res.status(500).json({
       error: `Lỗi kết nối Google Sheet: ${err.message}`,
     });

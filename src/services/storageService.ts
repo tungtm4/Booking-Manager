@@ -326,15 +326,15 @@ export const StorageService = {
         if (item.targetKolId) {
           // Ưu tiên khớp theo đích danh ID hồ sơ đã được người dùng xác nhận
           matchedIndex = kols.findIndex((k) => k.id === item.targetKolId);
-        } else if (matchKey === 'link' && itemLinks.length > 0) {
-          // Khớp theo bất kỳ link kênh nào của KOL
-          matchedIndex = kols.findIndex((k) =>
-            k.nenTang?.some((nt) => nt.linkProfile && itemLinks.includes(normalizeUrl(nt.linkProfile)))
-          );
-        }
-
-        if (matchedIndex === -1 && !item.targetKolId) {
-          // Khớp chính xác theo tên (không tự ý khớp mờ chuỗi con để tránh ghi đè nhầm)
+        } else if (matchKey === 'link') {
+          // Khớp theo bất kỳ link kênh nào của KOL (CHỈ khớp theo link, TUYỆT ĐỐI không so khớp theo tên - PHẦN A)
+          if (itemLinks.length > 0) {
+            matchedIndex = kols.findIndex((k) =>
+              k.nenTang?.some((nt) => nt.linkProfile && itemLinks.includes(normalizeUrl(nt.linkProfile)))
+            );
+          }
+        } else {
+          // matchKey === 'name': Khớp chính xác theo tên (không tự ý khớp mờ chuỗi con để tránh ghi đè nhầm)
           matchedIndex = kols.findIndex((k) => {
             const normKName = normalizeName(k.ten);
             return normKName === normItemName;
@@ -554,11 +554,11 @@ export const StorageService = {
   importDataJson(jsonStr: string): { success: boolean; message: string; count?: number } {
     try {
       const parsed = JSON.parse(jsonStr);
-      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.kols)) {
+      if (!parsed || typeof parsed !== 'object' || (!Array.isArray(parsed.kols) && !Array.isArray(parsed.quotes))) {
         return { success: false, message: 'File JSON không đúng định dạng sao lưu của KOL Booking Manager.' };
       }
 
-      // Helper kiểm tra cấu trúc hồ sơ KOL hợp lệ
+      // Helper kiểm tra cấu trúc hồ sơ KOL hợp lệ (PHẦN B)
       const isValidBackupKol = (item: any): boolean => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
         // id là chuỗi không rỗng
@@ -573,23 +573,45 @@ export const StorageService = {
             if (typeof val === 'number' && isNaN(val)) return false;
           }
         }
-        // nenTang là mảng
+        // nenTang là mảng: mỗi phần tử phải là object có tenNenTang là chuỗi không rỗng; soFollower nếu có phải là số
         if (!Array.isArray(item.nenTang)) return false;
-        // linhVuc là mảng
+        for (const ch of item.nenTang) {
+          if (!ch || typeof ch !== 'object' || Array.isArray(ch)) return false;
+          if (typeof ch.tenNenTang !== 'string' || !ch.tenNenTang.trim()) return false;
+          if (ch.soFollower !== undefined && ch.soFollower !== null) {
+            if (typeof ch.soFollower !== 'number' || isNaN(ch.soFollower)) return false;
+          }
+        }
+        // linhVuc là mảng: mỗi phần tử phải là chuỗi
         if (!Array.isArray(item.linhVuc)) return false;
+        for (const lv of item.linhVuc) {
+          if (typeof lv !== 'string') return false;
+        }
         return true;
       };
 
-      // Helper kiểm tra cấu trúc báo giá hợp lệ
+      // 6 format chuẩn của ứng dụng
+      const VALID_FORMATS = new Set(['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha']);
+
+      // Helper kiểm tra cấu trúc báo giá hợp lệ (PHẦN C)
       const isValidBackupQuote = (item: any): boolean => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
         // id dạng chuỗi và items là mảng
         if (typeof item.id !== 'string' || !item.id.trim()) return false;
         if (!Array.isArray(item.items)) return false;
+        // Kiểm tra TỪNG dòng trong items
+        for (const it of item.items) {
+          if (!it || typeof it !== 'object' || Array.isArray(it)) return false;
+          if (typeof it.kolId !== 'string') return false;
+          if (!VALID_FORMATS.has(it.format)) return false;
+          if (typeof it.soLuong !== 'number' || isNaN(it.soLuong) || it.soLuong <= 0) return false;
+          if (typeof it.donGia !== 'number' || isNaN(it.donGia) || it.donGia < 0) return false;
+          if (typeof it.thanhTien !== 'number' || isNaN(it.thanhTien) || it.thanhTien < 0) return false;
+        }
         return true;
       };
 
-      const rawKols = parsed.kols;
+      const rawKols = Array.isArray(parsed.kols) ? parsed.kols : [];
       const validKols: KolProfile[] = [];
       let rejectedKolCount = 0;
 
@@ -601,21 +623,7 @@ export const StorageService = {
         }
       });
 
-      // Nếu TOÀN BỘ hồ sơ trong file đều không hợp lệ -> trả về thất bại và KHÔNG ghi đè bất cứ dữ liệu nào
-      if (rawKols.length > 0 && validKols.length === 0) {
-        return {
-          success: false,
-          message: `Toàn bộ ${rawKols.length} hồ sơ KOL trong file đều sai cấu trúc hoặc không hợp lệ. Hệ thống không khôi phục để bảo vệ dữ liệu hiện có.`,
-        };
-      }
-      if (rawKols.length === 0) {
-        return {
-          success: false,
-          message: 'File sao lưu không chứa hồ sơ KOL nào để khôi phục.',
-        };
-      }
-
-      // Kiểm tra tối thiểu danh sách báo giá
+      // Kiểm tra danh sách báo giá
       const rawQuotes = Array.isArray(parsed.quotes) ? parsed.quotes : [];
       const validQuotes: SowQuote[] = [];
       let rejectedQuoteCount = 0;
@@ -627,6 +635,22 @@ export const StorageService = {
           rejectedQuoteCount++;
         }
       });
+
+      // Quy tắc mới (PHẦN D): chỉ thất bại và không ghi đè dữ liệu khi KHÔNG có bất kỳ mục hợp lệ nào để khôi phục
+      // (0 KOL hợp lệ VÀ 0 báo giá hợp lệ).
+      if (validKols.length === 0 && validQuotes.length === 0) {
+        const totalRaw = rawKols.length + rawQuotes.length;
+        if (totalRaw === 0) {
+          return {
+            success: false,
+            message: 'File sao lưu không chứa hồ sơ KOL hoặc báo giá nào để khôi phục.',
+          };
+        }
+        return {
+          success: false,
+          message: `Toàn bộ ${totalRaw} mục trong file đều sai cấu trúc hoặc không hợp lệ (${rejectedKolCount} KOL, ${rejectedQuoteCount} báo giá). Hệ thống không khôi phục để bảo vệ dữ liệu hiện có.`,
+        };
+      }
 
       // Chỉ ghi các hồ sơ và báo giá hợp lệ vào bộ nhớ
       localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(validKols));
