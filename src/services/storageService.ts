@@ -604,9 +604,9 @@ export const StorageService = {
           if (!it || typeof it !== 'object' || Array.isArray(it)) return false;
           if (typeof it.kolId !== 'string') return false;
           if (!VALID_FORMATS.has(it.format)) return false;
-          if (typeof it.soLuong !== 'number' || isNaN(it.soLuong) || it.soLuong <= 0) return false;
-          if (typeof it.donGia !== 'number' || isNaN(it.donGia) || it.donGia < 0) return false;
-          if (typeof it.thanhTien !== 'number' || isNaN(it.thanhTien) || it.thanhTien < 0) return false;
+          if (typeof it.soLuong !== 'number' || !Number.isFinite(it.soLuong) || it.soLuong <= 0) return false;
+          if (typeof it.donGia !== 'number' || !Number.isFinite(it.donGia) || it.donGia < 0) return false;
+          if (typeof it.thanhTien !== 'number' || !Number.isFinite(it.thanhTien) || it.thanhTien < 0) return false;
         }
         return true;
       };
@@ -636,24 +636,18 @@ export const StorageService = {
         }
       });
 
-      // Quy tắc mới (PHẦN D): chỉ thất bại và không ghi đè dữ liệu khi KHÔNG có bất kỳ mục hợp lệ nào để khôi phục
-      // (0 KOL hợp lệ VÀ 0 báo giá hợp lệ).
-      if (validKols.length === 0 && validQuotes.length === 0) {
-        const totalRaw = rawKols.length + rawQuotes.length;
-        if (totalRaw === 0) {
-          return {
-            success: false,
-            message: 'File sao lưu không chứa hồ sơ KOL hoặc báo giá nào để khôi phục.',
-          };
-        }
+      // Không khôi phục một phần: dữ liệu sai phải bị từ chối trước mọi thao tác ghi.
+      if (rejectedKolCount > 0 || rejectedQuoteCount > 0) {
         return {
           success: false,
-          message: `Toàn bộ ${totalRaw} mục trong file đều sai cấu trúc hoặc không hợp lệ (${rejectedKolCount} KOL, ${rejectedQuoteCount} báo giá). Hệ thống không khôi phục để bảo vệ dữ liệu hiện có.`,
+          message: `File sao lưu có ${rejectedKolCount} hồ sơ KOL và ${rejectedQuoteCount} báo giá sai cấu trúc. Dữ liệu hiện có được giữ nguyên.`,
         };
       }
 
       // Chỉ ghi các hồ sơ và báo giá hợp lệ vào bộ nhớ
       localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(validKols));
+      // Backup là dữ liệu chủ đích, kể cả danh sách rỗng; không tự nạp mẫu trở lại.
+      localStorage.setItem('kol_booking_samples_cleared', 'true');
       if (Array.isArray(parsed.quotes)) {
         localStorage.setItem(STORAGE_KEYS.SOW_QUOTES, JSON.stringify(validQuotes));
       }
