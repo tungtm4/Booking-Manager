@@ -86,6 +86,11 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     if(used>0)return res.status(400).json({message:`Phase còn ${used} KOL trong danh sách. Chuyển các KOL sang phase khác trước khi xoá.`});
     db.prepare('DELETE FROM project_phases WHERE id=?').run(row.id);audit(u.id,'delete_phase',row.id);res.json({success:true});
   });
+  router.post('/projects/:id/shortlist/:rowId/remove',(req,res)=>{
+    const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật danh sách dự án.'});
+    const row=db.prepare('SELECT * FROM project_shortlist WHERE id=? AND project_id=?').get(req.params.rowId,pid) as any;if(!row)return res.status(404).json({message:'Không tìm thấy KOL trong dự án.'});
+    db.prepare('DELETE FROM project_shortlist WHERE id=?').run(row.id);audit(u.id,'remove_project_shortlist',row.id);res.json({success:true});
+  });
   router.post('/projects/:id/shortlist/:rowId/phase',(req,res)=>{
     const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật danh sách dự án.'});
     const row=db.prepare('SELECT * FROM project_shortlist WHERE id=? AND project_id=?').get(req.params.rowId,pid) as any;if(!row)return res.status(404).json({message:'Không tìm thấy KOL trong dự án.'});
