@@ -60,7 +60,7 @@ export interface KolProfile {
   ten: string;
   anhDaiDien?: string;
   nenTang: SocialChannel[];
-  engagementRate?: number; // %
+  engagementRate?: number; // Tương thích backup cũ; không nhập, hiển thị hay đánh giá.
   linhVuc: string[];
   reviewSoBo?: string;
   bangGia: PriceList;
@@ -109,7 +109,6 @@ export interface RecommendationFilter {
   nenTang?: PlatformType | 'TatCa';
   nganSachToiDa?: number;
   formatNganSach?: PriceFormatKey;
-  engagementToiThieu?: number;
   followerToiThieu?: number;
   soLuongCan: number;
   mucTieu?: string;
@@ -128,10 +127,9 @@ export interface SendRecommendedKolsToSowPayload {
 
 export interface RecommendationScore {
   kol: KolProfile;
-  tongDiem: number; // Max 100
+  tongDiem: number; // Max 80 (không dùng ER)
   diemLinhVuc: number; // Max 40
   diemGia: number; // Max 30
-  diemEngagement: number; // Max 20
   diemHopTac: number; // Max 10
   lyDo: string[];
   giaHienTai?: number | null;

@@ -171,13 +171,6 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
                 </div>
                 <span>•</span>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-slate-400">Tương tác (ER):</span>
-                  <strong className="text-emerald-400 font-bold">
-                    {kol.engagementRate ? `${kol.engagementRate}%` : 'N/A'}
-                  </strong>
-                </div>
-                <span>•</span>
-                <div className="flex items-center gap-1.5">
                   <span className="text-slate-400">Đánh giá:</span>
                   {kol.danhGiaHieuQua?.diem ? (
                     <span className="flex items-center gap-1 text-amber-400 font-bold">

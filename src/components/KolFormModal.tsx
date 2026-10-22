@@ -48,7 +48,6 @@ export const KolFormModal: React.FC<KolFormModalProps> = ({
   // Form fields
   const [ten, setTen] = useState('');
   const [anhDaiDien, setAnhDaiDien] = useState('');
-  const [engagementRate, setEngagementRate] = useState<number | ''>('');
   const [linhVuc, setLinhVuc] = useState<string[]>([]);
   const [newTagInput, setNewTagInput] = useState('');
   const [reviewSoBo, setReviewSoBo] = useState('');
@@ -91,7 +90,6 @@ export const KolFormModal: React.FC<KolFormModalProps> = ({
     if (kolToEdit) {
       setTen(kolToEdit.ten || '');
       setAnhDaiDien(kolToEdit.anhDaiDien || '');
-      setEngagementRate(kolToEdit.engagementRate ?? '');
       setLinhVuc(kolToEdit.linhVuc || []);
       setReviewSoBo(kolToEdit.reviewSoBo || '');
       setNenTangList(
@@ -123,7 +121,6 @@ export const KolFormModal: React.FC<KolFormModalProps> = ({
   const resetForm = () => {
     setTen('');
     setAnhDaiDien('');
-    setEngagementRate('');
     setLinhVuc(['Ẩm thực']);
     setNewTagInput('');
     setReviewSoBo('');
@@ -239,7 +236,6 @@ export const KolFormModal: React.FC<KolFormModalProps> = ({
         linkProfile: ch.linkProfile.trim(),
         soFollower: Number(ch.soFollower) || 0,
       })),
-      engagementRate: engagementRate === '' ? undefined : Number(engagementRate),
       linhVuc,
       reviewSoBo: reviewSoBo.trim() || undefined,
       bangGia: {
@@ -376,26 +372,6 @@ export const KolFormModal: React.FC<KolFormModalProps> = ({
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Tương Tác Trung Bình (ER %)
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      step="0.1"
-                      placeholder="Vd: 6.8"
-                      value={engagementRate}
-                      onChange={(e) =>
-                        setEngagementRate(e.target.value ? Number(e.target.value) : '')
-                      }
-                      className="w-full pl-3.5 pr-8 py-2.5 text-sm border border-slate-300 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:outline-hidden"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-semibold">
-                      %
-                    </span>
-                  </div>
-                </div>
               </div>
 
               <div>

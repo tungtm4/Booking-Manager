@@ -94,7 +94,6 @@ export const KolCompareModal: React.FC<KolCompareModalProps> = ({
   });
 
   const maxFollowers = Math.max(0, ...Object.values(totalFollowersMap));
-  const maxEr = Math.max(0, ...selectedKols.map((k) => k.engagementRate || 0));
 
   // Tính giá thấp nhất theo từng format giữa các KOL có giá
   const minPricePerFormat: Record<PriceFormatKey, number | null> = {
@@ -263,7 +262,6 @@ export const KolCompareModal: React.FC<KolCompareModalProps> = ({
                 {selectedKols.map((kol) => {
                   const totalFollowers = totalFollowersMap[kol.id] || 0;
                   const isTopFollowers = totalFollowers > 0 && totalFollowers === maxFollowers && selectedKols.length > 1;
-                  const isTopEr = (kol.engagementRate || 0) > 0 && kol.engagementRate === maxEr && selectedKols.length > 1;
 
                   return (
                     <div
@@ -332,12 +330,6 @@ export const KolCompareModal: React.FC<KolCompareModalProps> = ({
                               Followers cao nhất
                             </span>
                           )}
-                          {isTopEr && (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              <TrendingUp className="w-3 h-3 text-emerald-500" />
-                              Tương tác cao nhất ({kol.engagementRate}%)
-                            </span>
-                          )}
                         </div>
 
                         {/* Chỉ số nhanh (KPI bar) */}
@@ -346,12 +338,6 @@ export const KolCompareModal: React.FC<KolCompareModalProps> = ({
                             <span className="text-[10px] text-slate-400 font-medium block">Tổng Followers:</span>
                             <span className="font-bold text-slate-900 text-sm">
                               {formatFollowers(totalFollowers)}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-[10px] text-slate-400 font-medium block">Tỷ lệ tương tác:</span>
-                            <span className="font-bold text-indigo-600 text-sm">
-                              {kol.engagementRate ? `${kol.engagementRate}%` : 'N/A'}
                             </span>
                           </div>
                         </div>

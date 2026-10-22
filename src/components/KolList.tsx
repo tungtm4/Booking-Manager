@@ -63,7 +63,7 @@ interface KolListProps {
   initialSearch?: string;
 }
 
-type SortOption = 'followers_desc' | 'followers_asc' | 'engagement_desc' | 'price_asc' | 'price_desc' | 'newest';
+type SortOption = 'followers_desc' | 'followers_asc' | 'price_asc' | 'price_desc' | 'newest';
 
 export const KolList: React.FC<KolListProps> = ({
   kols,
@@ -80,7 +80,6 @@ export const KolList: React.FC<KolListProps> = ({
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [minFollowers, setMinFollowers] = useState<number | ''>('');
   const [maxFollowers, setMaxFollowers] = useState<number | ''>('');
-  const [minEngagement, setMinEngagement] = useState<number | ''>('');
   
   // Lọc Ngân sách theo Format
   const [budgetFormat, setBudgetFormat] = useState<PriceFormatKey>('video');
@@ -165,7 +164,6 @@ export const KolList: React.FC<KolListProps> = ({
     setSelectedCategories([]);
     setMinFollowers('');
     setMaxFollowers('');
-    setMinEngagement('');
     setMaxBudget('');
     setIncludeNoPrice(false);
     setSortBy('newest');
@@ -345,10 +343,9 @@ export const KolList: React.FC<KolListProps> = ({
     if (selectedPlatform !== 'all') count++;
     if (selectedCategories.length > 0) count++;
     if (minFollowers !== '' || maxFollowers !== '') count++;
-    if (minEngagement !== '') count++;
     if (maxBudget !== '') count++;
     return count;
-  }, [keyword, selectedPlatform, selectedCategories, minFollowers, maxFollowers, minEngagement, maxBudget]);
+  }, [keyword, selectedPlatform, selectedCategories, minFollowers, maxFollowers, maxBudget]);
 
   // Bộ lọc đa điều kiện kết hợp
   const filteredKols = useMemo(() => {
@@ -386,11 +383,6 @@ export const KolList: React.FC<KolListProps> = ({
         return false;
       }
 
-      // 5. Engagement rate tối thiểu
-      if (minEngagement !== '') {
-        const er = kol.engagementRate || 0;
-        if (er < minEngagement) return false;
-      }
 
       // 6. Ngân sách theo format cụ thể
       if (maxBudget !== '' && maxBudget > 0) {
@@ -413,7 +405,6 @@ export const KolList: React.FC<KolListProps> = ({
     selectedCategories,
     minFollowers,
     maxFollowers,
-    minEngagement,
     budgetFormat,
     maxBudget,
     includeNoPrice,
@@ -432,8 +423,6 @@ export const KolList: React.FC<KolListProps> = ({
           return getTopFollowers(b) - getTopFollowers(a);
         case 'followers_asc':
           return getTopFollowers(a) - getTopFollowers(b);
-        case 'engagement_desc':
-          return (b.engagementRate || 0) - (a.engagementRate || 0);
         case 'price_asc':
           return getPrice(a) - getPrice(b);
         case 'price_desc':
@@ -593,7 +582,6 @@ export const KolList: React.FC<KolListProps> = ({
                 <option value="newest">Mới cập nhật nhất</option>
                 <option value="followers_desc">Followers cao nhất</option>
                 <option value="followers_asc">Followers thấp nhất</option>
-                <option value="engagement_desc">Tương tác (ER%) cao nhất</option>
                 <option value="price_asc">Giá format thấp đến cao</option>
                 <option value="price_desc">Giá format cao đến thấp</option>
               </select>
@@ -633,7 +621,7 @@ export const KolList: React.FC<KolListProps> = ({
             </div>
           </div>
 
-          {/* Hàng 2: Followers range + ER min + Checkbox chưa có giá */}
+          {/* Hàng 2: Followers range + Checkbox chưa có giá */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
             {/* Followers range */}
             <div>
@@ -654,24 +642,6 @@ export const KolList: React.FC<KolListProps> = ({
                   onChange={(e) => setMaxFollowers(e.target.value ? Number(e.target.value) : '')}
                   className="w-1/2 px-2.5 py-1.5 bg-white text-slate-800 text-xs border border-slate-200 rounded-lg"
                 />
-              </div>
-            </div>
-
-            {/* ER tối thiểu */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Tỷ lệ tương tác tối thiểu (%)
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  step="0.5"
-                  placeholder="Vd: 5.0"
-                  value={minEngagement}
-                  onChange={(e) => setMinEngagement(e.target.value ? Number(e.target.value) : '')}
-                  className="w-full px-2.5 py-1.5 bg-white text-slate-800 text-xs border border-slate-200 rounded-lg"
-                />
-                <span className="text-xs text-slate-500 font-medium">%</span>
               </div>
             </div>
 
@@ -865,7 +835,7 @@ export const KolList: React.FC<KolListProps> = ({
                       )}
                     </div>
 
-                    {/* Dòng thông tin: kênh, ER, lĩnh vực */}
+                    {/* Dòng thông tin: kênh, lĩnh vực */}
                     <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                       {kol.nenTang && kol.nenTang.length > 0 ? (
                         kol.nenTang.map((nt, idx) => (
@@ -879,10 +849,6 @@ export const KolList: React.FC<KolListProps> = ({
                       ) : (
                         <span className="text-xs text-slate-400">Chưa có kênh</span>
                       )}
-                      <span className="text-slate-300">•</span>
-                      <span className="text-xs font-semibold text-emerald-600">
-                        ER: {kol.engagementRate ? `${kol.engagementRate}%` : 'N/A'}
-                      </span>
                       {kol.linhVuc && kol.linhVuc.length > 0 && (
                         <>
                           <span className="text-slate-300 hidden sm:inline">•</span>
@@ -1030,7 +996,6 @@ export const KolList: React.FC<KolListProps> = ({
                   <th className="px-4 py-3.5">KOL / Nghệ danh</th>
                   <th className="px-4 py-3.5">Kênh & Followers</th>
                   <th className="px-4 py-3.5">Lĩnh vực</th>
-                  <th className="px-4 py-3.5">Tương tác</th>
                   <th className="px-4 py-3.5">Giá {PRICE_FORMAT_LABELS[budgetFormat]}</th>
                   <th className="px-4 py-3.5">Đánh giá</th>
                   <th className="px-4 py-3.5 text-right">Thao tác</th>
@@ -1113,11 +1078,6 @@ export const KolList: React.FC<KolListProps> = ({
                             </span>
                           ))}
                         </div>
-                      </td>
-
-                      {/* ER */}
-                      <td className="px-4 py-3 font-semibold text-emerald-600">
-                        {kol.engagementRate ? `${kol.engagementRate}%` : 'N/A'}
                       </td>
 
                       {/* Price for format */}

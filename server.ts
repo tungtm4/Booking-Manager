@@ -4,6 +4,7 @@
  */
 
 import express from 'express';
+import { createWorkspace } from './server/workspace';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -21,6 +22,16 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 // Body parser
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+
+const workspace = createWorkspace(path.join(__dirname, '.local'));
+app.use('/api/workspace', workspace.router);
+// Module KOL/SOW cũ chưa có projectId: chỉ Admin được dùng đến khi migration hoàn tất.
+app.use('/api', (req, res, next) => {
+  const user = workspace.sessionUser(req);
+  if (!user) return res.status(401).json({success:false,message:'Vui lòng đăng nhập.'});
+  if (user.must_change_password || user.organization_role !== 'admin') return res.status(403).json({success:false,message:'Chức năng dữ liệu cũ hiện chỉ dành cho Admin.'});
+  next();
+});
 
 // Khởi tạo Gemini AI Client từ API Key
 const apiKey = process.env.GEMINI_API_KEY;
@@ -263,7 +274,7 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
 6. Nền tảng (nenTang): Chỉ nhận một trong các giá trị: "TikTok", "YouTube", "Facebook", "Instagram", hoặc null nếu không nói rõ hoặc đa nền tảng.
 7. Lĩnh vực (linhVuc): Tên lĩnh vực chính của brief (ví dụ: "Ẩm thực", "Làm đẹp", "Công nghệ", "Thời trang", "Du lịch", "Mẹ & bé", "Giải trí", "Tài chính", "Sức khỏe & Gym", "Giáo dục", "Lifestyle", "Gaming"), hoặc null.
 8. Số lượng KOL (soLuongKol): Số nguyên (ví dụ: 3, 5, 10), hoặc null.
-9. Tương tác (engagementToiThieu): Tỷ lệ % tối thiểu (ví dụ 4.5), hoặc null.
+9. Bỏ qua yêu cầu ER / tỷ lệ tương tác nếu brief có nhắc; không dùng làm tiêu chí đề xuất.
 10. Follower tối thiểu (followerToiThieu): Số người theo dõi tối thiểu dạng số nguyên (ví dụ 100000), hoặc null.`;
 
     const prompt = `HÃY PHÂN TÍCH BRIEF CHIẾN DỊCH SAU ĐÂY:\n"""\n${moTa.trim()}\n"""\n\nTrả về kết quả dưới định dạng JSON đúng schema.`;
@@ -304,10 +315,6 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
             nganSachMoiKol: {
               type: Type.NUMBER,
               description: 'Ngân sách tối đa cho mỗi KOL tính bằng VND (hoặc null)',
-            },
-            engagementToiThieu: {
-              type: Type.NUMBER,
-              description: 'Tỷ lệ tương tác tối thiểu (%) hoặc null',
             },
             followerToiThieu: {
               type: Type.NUMBER,
@@ -385,7 +392,6 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
       mucTieu: parsedData.mucTieu ? String(parsedData.mucTieu).trim() : null,
       nganSachTong: parsedData.nganSachTong && Number(parsedData.nganSachTong) > 0 ? Number(parsedData.nganSachTong) : null,
       nganSachMoiKol: parsedData.nganSachMoiKol && Number(parsedData.nganSachMoiKol) > 0 ? Number(parsedData.nganSachMoiKol) : null,
-      engagementToiThieu: parsedData.engagementToiThieu && Number(parsedData.engagementToiThieu) > 0 ? Number(parsedData.engagementToiThieu) : null,
       followerToiThieu: parsedData.followerToiThieu && Number(parsedData.followerToiThieu) > 0 ? Number(parsedData.followerToiThieu) : null,
       hangMucMoiKol: sanitizeHangMuc(parsedData.hangMucMoiKol),
       hangMucTongCampaign: sanitizeHangMuc(parsedData.hangMucTongCampaign),
@@ -596,7 +602,7 @@ Nhận dữ liệu thô tối đa 12 dòng đầu tiên của bảng tính (có 
 
 2. Với MỖI CỘT dữ liệu (căn cứ vào tên cột tại dòng tiêu đề + các dòng dữ liệu mẫu bên dưới):
    Phân loại thành một trong các giá trị sau:
-   - Một 'key' phù hợp từ danh sách fields được gửi (ví dụ: 'ten', 'linhVuc', 'engagementRate', 'giaVideo', 'giaShorts', 'soDienThoai', 'emailZalo', 'tenNguoiLienHe'...).
+   - Một 'key' phù hợp từ danh sách fields được gửi (ví dụ: 'ten', 'linhVuc', 'giaVideo', 'giaShorts', 'soDienThoai', 'emailZalo', 'tenNguoiLienHe'...).
    - HOẶC 'platform:YouTube', 'platform:TikTok', 'platform:Facebook', 'platform:Instagram': nếu cột đó chứa thông tin kênh của nền tảng đó — có thể là link URL, hoặc định dạng gộp "Tên kênh | Số follow" (ví dụ: "Khánh Vy OFFICIAL | 2.21M", "Schanel | 3.5M"), hoặc tên handle.
    - HOẶC 'ignore': nếu cột không liên quan đến hồ sơ KOL (ví dụ: cột STT, ngày nhập, mã code nội bộ, cột rỗng).
    - Mỗi cột bao gồm:
@@ -706,8 +712,8 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server KOL Booking Manager đang chạy tại http://0.0.0.0:${PORT}`);
+  app.listen(PORT, '127.0.0.1', () => {
+    console.log(`🚀 Server KOL Booking Manager đang chạy tại http://localhost:${PORT}`);
   });
 }
 

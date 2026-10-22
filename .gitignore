@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Database và mã khởi tạo chỉ ở máy local
+.local/

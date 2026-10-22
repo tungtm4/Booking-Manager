@@ -109,7 +109,6 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
   const [nenTang, setNenTang] = useState<PlatformType | 'TatCa'>('TatCa');
   const [formatNganSach, setFormatNganSach] = useState<PriceFormatKey>('video');
   const [nganSachToiDa, setNganSachToiDa] = useState<number | ''>(25000000);
-  const [engagementToiThieu, setEngagementToiThieu] = useState<number | ''>(5.0);
   const [soLuongCan, setSoLuongCan] = useState<number>(5);
   const [mucTieu, setMucTieu] = useState<string>('Tăng nhận diện thương hiệu & review trải nghiệm');
 
@@ -158,7 +157,6 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
       setMucTieu('');
       setNganSachToiDa('');
       setNganSachTong('');
-      setEngagementToiThieu('');
       setFollowerToiThieu('');
       setRecommendations([]);
       setSelectedKolIds([]);
@@ -207,11 +205,6 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
       // 7. Ngân sách tổng
       if (d.nganSachTong && Number(d.nganSachTong) > 0) {
         setNganSachTong(Number(d.nganSachTong));
-      }
-
-      // 8. Tương tác tối thiểu
-      if (d.engagementToiThieu && Number(d.engagementToiThieu) > 0) {
-        setEngagementToiThieu(Number(d.engagementToiThieu));
       }
 
       // 9. Follower tối thiểu
@@ -410,7 +403,6 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
       nenTang,
       formatNganSach: activeFormat,
       nganSachToiDa: nganSachToiDa === '' ? undefined : Number(nganSachToiDa),
-      engagementToiThieu: engagementToiThieu === '' ? undefined : Number(engagementToiThieu),
       followerToiThieu: followerToiThieu === '' ? undefined : Number(followerToiThieu),
       soLuongCan,
       mucTieu: mucTieu.trim(),
@@ -593,7 +585,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
         <div className="relative z-10 max-w-3xl">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-bold mb-3">
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>AI Brief → SOW Planner & Thuật toán đề xuất 100 điểm</span>
+            <span>AI Brief → SOW Planner & Đề xuất theo lĩnh vực, giá và lịch sử hợp tác</span>
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
@@ -631,7 +623,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
             rows={3}
             value={briefText}
             onChange={(e) => setBriefText(e.target.value)}
-            placeholder="Dán mô tả / brief của khách tại đây... (Ví dụ: Cần tìm 5 KOL ẩm thực tại Hà Nội/TP.HCM trên TikTok, ngân sách tổng 120 triệu, mỗi bạn làm 1 video dài review + 1 video ngắn Shorts, ER tối thiểu 4%, follower > 100k...)"
+            placeholder="Dán mô tả / brief của khách tại đây... (Ví dụ: Cần tìm 5 KOL ẩm thực tại Hà Nội/TP.HCM trên TikTok, ngân sách tổng 120 triệu, mỗi bạn làm 1 video dài review + 1 video ngắn Shorts, follower > 100k...)"
             className="w-full p-3 text-xs sm:text-sm border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden leading-relaxed text-slate-800 placeholder:text-slate-400"
           />
 
@@ -919,28 +911,6 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
               </div>
             </div>
 
-            {/* Engagement tối thiểu */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Tỷ Lệ Tương Tác Tối Thiểu (ER %)
-              </label>
-              <div className="relative">
-                <input
-                  type="number"
-                  step="0.5"
-                  placeholder="Vd: 5.0"
-                  value={engagementToiThieu}
-                  onChange={(e) =>
-                    setEngagementToiThieu(e.target.value ? Number(e.target.value) : '')
-                  }
-                  className="w-full pl-3 pr-8 py-2 text-xs border border-slate-300 rounded-xl focus:border-indigo-500 focus:outline-hidden"
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-semibold">
-                  %
-                </span>
-              </div>
-            </div>
-
             {/* Số lượng KOL */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -1142,7 +1112,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
           ) : (
             <div className="space-y-4">
               {sortedRecommendations.map((item, index) => {
-                const { kol, tongDiem, diemLinhVuc, diemGia, diemEngagement, diemHopTac, lyDo } = item;
+                const { kol, tongDiem, diemLinhVuc, diemGia, diemHopTac, lyDo } = item;
                 const isSelected = selectedKolIds.includes(kol.id);
                 const assignments = kolTaskAssignments[kol.id] || (isCampaignTotalMode ? EMPTY_ASSIGNMENTS : duyetHangMuc);
                 const kolCost = getKolSowCost(kol);
@@ -1209,17 +1179,13 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                             )}
                           </div>
 
-                          {/* Kênh & Tương tác */}
+                          {/* Kênh & Lĩnh vực */}
                           <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 flex-wrap">
                             <span>
                               {kol.nenTang?.[0]?.tenNenTang}:{' '}
                               <strong className="text-slate-800">
                                 {formatFollowers(kol.nenTang?.[0]?.soFollower)}
                               </strong>
-                            </span>
-                            <span>•</span>
-                            <span className="text-emerald-600 font-bold">
-                              ER: {kol.engagementRate ? `${kol.engagementRate}%` : 'N/A'}
                             </span>
                             <span>•</span>
                             <span>
@@ -1234,14 +1200,14 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                         <div className="inline-flex flex-col items-center justify-center px-4 py-2 rounded-xl bg-indigo-50 border border-indigo-200">
                           <span className="text-2xl font-black text-indigo-700">{tongDiem}</span>
                           <span className="text-[10px] font-bold uppercase text-indigo-600 tracking-wider">
-                            / 100 Điểm
+                            / 80 Điểm
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Điểm chi tiết 4 tiêu chí (GIỮ NGUYÊN) */}
-                    <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    {/* Điểm chi tiết 3 tiêu chí */}
+                    <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
                       <div className="bg-slate-50 p-2 rounded-lg">
                         <span className="text-slate-400 block text-[10px]">1. Lĩnh vực (Max 40)</span>
                         <strong className="text-slate-800">{diemLinhVuc} / 40 đ</strong>
@@ -1251,11 +1217,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                         <strong className="text-slate-800">{diemGia} / 30 đ</strong>
                       </div>
                       <div className="bg-slate-50 p-2 rounded-lg">
-                        <span className="text-slate-400 block text-[10px]">3. Engagement (Max 20)</span>
-                        <strong className="text-slate-800">{diemEngagement} / 20 đ</strong>
-                      </div>
-                      <div className="bg-slate-50 p-2 rounded-lg">
-                        <span className="text-slate-400 block text-[10px]">4. Lịch sử job (Max 10)</span>
+                        <span className="text-slate-400 block text-[10px]">3. Lịch sử job (Max 10)</span>
                         <strong className="text-slate-800">{diemHopTac} / 10 đ</strong>
                       </div>
                     </div>

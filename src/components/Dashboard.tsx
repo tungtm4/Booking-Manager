@@ -70,8 +70,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   let instagramFollowers = 0;
   let otherFollowers = 0;
   let totalFollowers = 0;
-  let totalEngagement = 0;
-  let ratedCount = 0;
 
   kols.forEach((k) => {
     k.nenTang?.forEach((nt) => {
@@ -94,13 +92,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         otherFollowers += fol;
       }
     });
-    if (k.engagementRate && k.engagementRate > 0) {
-      totalEngagement += k.engagementRate;
-      ratedCount++;
-    }
+
   });
 
-  const avgEngagement = ratedCount > 0 ? (totalEngagement / ratedCount).toFixed(1) : '0';
 
   // Dữ liệu cho biểu đồ Recharts BarChart
   const platformChartData = [
@@ -224,10 +218,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       });
       const mergedChannels = Array.from(channelMap.values());
 
-      // ER: lấy từ hồ sơ mới nhất có ER
-      const erProfile = profiles.find((p) => p.engagementRate !== undefined && p.engagementRate !== null && p.engagementRate > 0);
-      const er = erProfile?.engagementRate;
-
       // Lĩnh vực: hợp nhất (union) các tag của cả nhóm
       const tagSet = new Set<string>();
       profiles.forEach((p) => {
@@ -276,7 +266,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         relativeTime,
         anhDaiDien,
         mergedChannels,
-        er,
         mergedLinhVuc,
         rating,
         prices,
@@ -458,23 +447,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <span className="text-slate-600">Instagram:</span>
               <span className="font-bold text-slate-900">{instagramCount}</span>
             </div>
-          </div>
-        </div>
-
-        {/* Engagement Rate */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Tương Tác TB</span>
-            <span className="p-2 bg-emerald-50 rounded-lg text-emerald-600">
-              <TrendingUp className="w-4 h-4" />
-            </span>
-          </div>
-          <div className="mt-3">
-            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900">{avgEngagement}%</span>
-            <span className="text-xs text-emerald-600 font-medium ml-1.5">bình quân</span>
-          </div>
-          <div className="mt-2 text-xs text-slate-500">
-            Dựa trên {ratedCount}/{totalKols} KOL có số liệu tương tác
           </div>
         </div>
 
@@ -736,10 +708,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         ) : (
                           <span className="text-xs text-slate-400">Chưa có kênh</span>
                         )}
-                        <span className="text-slate-300">•</span>
-                        <span className="text-xs text-emerald-600 font-medium">
-                          ER: {group.er ? `${group.er}%` : 'N/A'}
-                        </span>
                         {group.mergedLinhVuc.length > 0 && (
                           <>
                             <span className="text-slate-300 hidden sm:inline">•</span>

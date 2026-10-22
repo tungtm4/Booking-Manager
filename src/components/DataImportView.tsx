@@ -34,7 +34,7 @@ import { StorageService } from '../services/storageService';
 
 export interface ConflictItem {
   id: string;
-  type: 'price' | 'channel_link' | 'channel_follower' | 'engagementRate' | 'contact';
+  type: 'price' | 'channel_link' | 'channel_follower' | 'contact';
   subKey: string;
   label: string;
   oldValue: any;
@@ -69,7 +69,6 @@ export const KOL_FIELD_DEFINITIONS = [
   // 1. Thông tin cơ bản
   { key: 'ten', label: 'Tên KOL / Nghệ Danh', group: 'basic', required: true, aliases: ['tên', 'tên kol', 'nghệ danh', 'name', 'kol', 'họ và tên', 'họ tên', 'creator', 'tác giả'] },
   { key: 'linhVuc', label: 'Lĩnh Vực (ngăn bằng ;)', group: 'basic', required: false, aliases: ['lĩnh vực', 'chủ đề', 'category', 'tags', 'tag', 'ngành hàng', 'chuyên mục', 'nhóm nội dung', 'nội dung'] },
-  { key: 'engagementRate', label: 'Tỷ Lệ Tương Tác (ER %)', group: 'basic', required: false, aliases: ['engagement', 'tương tác', 'er', 'er %', 'tỷ lệ tương tác', 'er rate'] },
 
   // 2. Kênh & Link chuyên biệt cho từng nền tảng
   { key: 'linkTikTok', label: 'Link TikTok', group: 'social', required: false, aliases: ['link tiktok', 'tiktok link', 'kênh tiktok', 'tiktok url', 'tik tok', 'tiktok'] },
@@ -155,21 +154,6 @@ export const parseNumberWithSuffix = (val: any): number | undefined => {
   return undefined;
 };
 
-// Helper chuẩn hóa tỷ lệ % tương tác
-export const parsePercentageValue = (val: any): number | undefined => {
-  if (val === null || val === undefined) return undefined;
-  if (typeof val === 'number') {
-    if (isNaN(val)) return undefined;
-    if (val > 0 && val < 0.5) return Math.round(val * 1000) / 10;
-    return Math.round(val * 100) / 100;
-  }
-  const str = String(val).trim().replace(',', '.').replace('%', '');
-  const num = parseFloat(str);
-  if (isNaN(num)) return undefined;
-  if (num > 0 && num < 0.5 && String(val).includes('%')) return Math.round(num * 1000) / 10;
-  return Math.round(num * 100) / 100;
-};
-
 // Helper tách ô gộp kênh nếu có dấu '|' (Ví dụ: "Khánh Vy OFFICIAL | 2.21M")
 export const parseChannelCell = (raw: any): { linkOrName: string; followers?: number } => {
   if (raw === null || raw === undefined) return { linkOrName: '' };
@@ -253,15 +237,6 @@ export const smartDetectColumns = (headers: string[], rawRows: any[]): Record<st
     return validNumbers.length >= Math.max(1, Math.ceil(samples.length * 0.5));
   };
 
-  // 4. Kiểm tra cột ER (%): đa số ô mẫu phải parse được thành số % hợp lệ
-  const isValidERCol = (samples: string[]): boolean => {
-    if (samples.length === 0) return false;
-    const validERs = samples
-      .map(parsePercentageValue)
-      .filter((n): n is number => n !== undefined && !isNaN(n) && n > 0 && n <= 100);
-    return validERs.length >= Math.max(1, Math.ceil(samples.length * 0.5));
-  };
-
   // 5. Kiểm tra dạng tên: chữ người/kênh, không phải số thuần (STT), không phải URL/email/range
   const isNameLike = (s: string): boolean => {
     if (!s) return false;
@@ -302,9 +277,6 @@ export const smartDetectColumns = (headers: string[], rawRows: any[]): Record<st
     }
     if (['followerTikTok', 'followerYouTube', 'followerFacebook', 'followerInstagram', 'soFollower'].includes(fieldKey)) {
       return isValidFollowerCol(samples);
-    }
-    if (fieldKey === 'engagementRate') {
-      return isValidERCol(samples);
     }
     if (['linkTikTok', 'linkYouTube', 'linkFacebook', 'linkInstagram', 'linkProfile'].includes(fieldKey)) {
       return isValidUrlCol(samples);
@@ -462,15 +434,6 @@ export const smartDetectColumns = (headers: string[], rawRows: any[]): Record<st
         return;
       }
       // GỠ BỎ LỐI TẮT 1: Không mặc định gán vào giaVideo nếu không rõ format
-    }
-
-    // 4. NHẬN DIỆN CỘT ER (%) (Bắt buộc parse được thành % hợp lệ)
-    if (!mappedCols.has(h) && isValidERCol(samples) && !mapping['engagementRate']) {
-      if (hClean.includes('er') || hClean.includes('tương tác') || hClean.includes('engagement') || samples.some((s) => s.includes('%'))) {
-        mapping['engagementRate'] = h;
-        mappedCols.add(h);
-        return;
-      }
     }
 
     // 5. NHẬN DIỆN SỐ ĐIỆN THOẠI
@@ -660,7 +623,6 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       'Nền tảng',
       'Link kênh',
       'Followers',
-      'Engagement (%)',
       'Lĩnh vực (cách nhau bằng ;)',
       'Giá Post',
       'Giá Video',
@@ -679,7 +641,6 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         'TikTok',
         'https://www.tiktok.com/@quynhanh_food',
         1850000,
-        6.5,
         'Ẩm thực; Du lịch; Lifestyle',
         10000000,
         25000000,
@@ -696,7 +657,6 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         'YouTube',
         'https://www.youtube.com/@dattech_official',
         850000,
-        4.8,
         'Công nghệ; Gaming',
         8000000,
         28000000,
@@ -719,7 +679,6 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       { wch: 12 },
       { wch: 35 },
       { wch: 12 },
-      { wch: 15 },
       { wch: 25 },
       { wch: 14 },
       { wch: 14 },
@@ -1002,7 +961,6 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       };
 
       const ten = String(getVal('ten') || '').trim();
-      const engagementRate = parsePercentageValue(getVal('engagementRate'));
 
       const linhVucRaw = String(getVal('linhVuc') || '');
       const linhVuc = linhVucRaw
@@ -1212,7 +1170,6 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         linkProfile: primaryLink,
         soFollower: totalFollowers,
         channels,
-        engagementRate,
         linhVuc,
         bangGia,
         tenNguoiLienHe,
@@ -1225,7 +1182,6 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         let changedCount = 0;
         if (channels.length > 0) changedCount += channels.length;
         else if (totalFollowers !== undefined) changedCount++;
-        if (engagementRate !== undefined) changedCount++;
         if (linhVuc.length > 0) changedCount++;
         Object.values(bangGia).forEach((v) => {
           if (v !== null) changedCount++;
@@ -1391,33 +1347,6 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         }
       }
     });
-
-    // c. engagementRate
-    const oldER = oldKol.engagementRate;
-    const newER = newKol.engagementRate;
-    const hasOldER = oldER !== undefined && oldER !== null && oldER > 0;
-    const hasNewER = newER !== undefined && newER !== null && newER > 0;
-
-    if (hasOldER && hasNewER) {
-      if (oldER !== newER) {
-        conflicts.push({
-          id: 'er',
-          type: 'engagementRate',
-          subKey: 'engagementRate',
-          label: 'Tỷ lệ tương tác (ER)',
-          oldValue: oldER,
-          newValue: newER,
-          displayOld: `${oldER}%`,
-          displayNew: `${newER}%`,
-        });
-      }
-    } else if (!hasOldER && hasNewER) {
-      autoAdditions.push({
-        id: 'er',
-        kolName,
-        description: `${kolName}: thêm tỷ lệ tương tác ${newER}%`,
-      });
-    }
 
     // d. Liên hệ: tenNguoiLienHe, soDienThoai, emailZalo
     const contactFields: Array<{
@@ -1800,9 +1729,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
             if (kolData.nenTang?.toLowerCase() === conflict.subKey.toLowerCase()) {
               kolData.linkProfile = '';
             }
-          } else if (conflict.type === 'engagementRate') {
-            // ER -> đặt engagementRate = undefined
-            kolData.engagementRate = undefined;
+
           } else if (conflict.type === 'contact') {
             // Liên hệ -> đặt trường đó = ''
             kolData[conflict.subKey] = '';
@@ -2343,7 +2270,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
                   <th className="px-3 py-3 w-12 text-center">STT</th>
                   <th className="px-3 py-3 min-w-[180px]">Tên KOL</th>
                   <th className="px-3 py-3 min-w-[150px]">Kênh & Link</th>
-                  <th className="px-3 py-3 min-w-[140px]">Followers & ER</th>
+                  <th className="px-3 py-3 min-w-[140px]">Followers</th>
                   <th className="px-3 py-3 min-w-[160px]">Bảng Giá Nhận Diện</th>
                   <th className="px-3 py-3 min-w-[180px] text-center">Trạng Thái & Ghi Chú</th>
                 </tr>
@@ -2441,17 +2368,12 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
                         )}
                       </td>
 
-                      {/* Followers & ER */}
+                      {/* Followers */}
                       <td className="px-3 py-3">
                         <div className="space-y-0.5">
                           <span className="text-slate-700 block">
                             Tổng FL: <strong>{(r.kolData?.soFollower || 0).toLocaleString('vi-VN')}</strong>
                           </span>
-                          {r.kolData?.engagementRate !== undefined && (
-                            <span className="block text-emerald-600 font-bold text-[11px]">
-                              ER: {r.kolData.engagementRate}%
-                            </span>
-                          )}
                         </div>
                       </td>
 

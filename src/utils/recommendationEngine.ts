@@ -12,7 +12,6 @@ export function calculateKolRecommendation(
 ): RecommendationScore {
   let diemLinhVuc = 0;
   let diemGia = 0;
-  let diemEngagement = 0;
   let diemHopTac = 0;
   const lyDo: string[] = [];
   let vuotNganSach = false;
@@ -56,7 +55,7 @@ export function calculateKolRecommendation(
       (p) => p.tenNenTang.toLowerCase() === filter.nenTang?.toLowerCase()
     );
     if (hasPlatform) {
-      lyDo.push(`Đang hoạt động mạnh trên ${filter.nenTang}`);
+      lyDo.push(`Có kênh ${filter.nenTang}`);
     } else {
       // Trừ bớt 10 điểm lĩnh vực nếu không có nền tảng mong muốn
       diemLinhVuc = Math.max(0, diemLinhVuc - 10);
@@ -179,33 +178,6 @@ export function calculateKolRecommendation(
     }
   }
 
-  // 3. CHẤM ĐIỂM ENGAGEMENT RATE (Max 20 điểm)
-  const kolEngagement = kol.engagementRate || 0;
-  if (filter.engagementToiThieu && filter.engagementToiThieu > 0) {
-    if (kolEngagement >= filter.engagementToiThieu) {
-      diemEngagement = 20;
-      lyDo.push(`Tương tác ${kolEngagement}% đạt chỉ tiêu (≥ ${filter.engagementToiThieu}%)`);
-    } else if (kolEngagement >= filter.engagementToiThieu * 0.8) {
-      diemEngagement = 12;
-      lyDo.push(`Tương tác ${kolEngagement}% xấp xỉ mức mong muốn (${filter.engagementToiThieu}%)`);
-    } else {
-      diemEngagement = 4;
-      lyDo.push(`Tương tác ${kolEngagement}% thấp hơn yêu cầu (${filter.engagementToiThieu}%)`);
-    }
-  } else {
-    // Không yêu cầu ngưỡng engagement cụ thể
-    if (kolEngagement >= 5.0) {
-      diemEngagement = 20;
-      lyDo.push(`Tương tác tự nhiên rất tốt (${kolEngagement}%)`);
-    } else if (kolEngagement >= 3.0) {
-      diemEngagement = 15;
-      lyDo.push(`Tương tác ổn định (${kolEngagement}%)`);
-    } else {
-      diemEngagement = 8;
-      lyDo.push(`Tương tác ${kolEngagement}%`);
-    }
-  }
-
   // 4. CHẤM ĐIỂM LỊCH SỬ HỢP TÁC & HIỆU QUẢ (Max 10 điểm)
   const ratingScore = kol.danhGiaHieuQua?.diem;
   const collabCount = kol.lichSuHopTac?.length || 0;
@@ -225,14 +197,13 @@ export function calculateKolRecommendation(
     lyDo.push(`KOL mới tiềm năng, chưa có lịch sử hợp tác`);
   }
 
-  const tongDiem = Math.min(100, Math.round(diemLinhVuc + diemGia + diemEngagement + diemHopTac));
+  const tongDiem = Math.min(80, Math.round(diemLinhVuc + diemGia + diemHopTac));
 
   return {
     kol,
     tongDiem,
     diemLinhVuc,
     diemGia,
-    diemEngagement,
     diemHopTac,
     lyDo,
     giaHienTai: giaHienTaiCalculated,
@@ -263,12 +234,12 @@ export function rankKolsForRecommendation(
 
   const scored = eligibleKols.map((k) => calculateKolRecommendation(k, filter));
 
-  // Sắp xếp: Điểm cao nhất trước, nếu bằng điểm thì ưu tiên engagement rate cao hơn
+  // Sắp xếp: Điểm cao nhất trước, nếu bằng điểm thì sắp xếp theo tên
   scored.sort((a, b) => {
     if (b.tongDiem !== a.tongDiem) {
       return b.tongDiem - a.tongDiem;
     }
-    return (b.kol.engagementRate || 0) - (a.kol.engagementRate || 0);
+    return a.kol.ten.localeCompare(b.kol.ten,'vi');
   });
 
   if (filter.soLuongCan && filter.soLuongCan > 0) {
