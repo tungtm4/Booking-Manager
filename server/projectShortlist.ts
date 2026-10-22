@@ -12,12 +12,87 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
   db.exec(`CREATE TABLE IF NOT EXISTS kol_catalog(id TEXT NOT NULL,organization_id TEXT NOT NULL,profile_json TEXT NOT NULL,PRIMARY KEY(id,organization_id));
     CREATE TABLE IF NOT EXISTS project_briefs(project_id TEXT PRIMARY KEY REFERENCES projects(id),payload_json TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1);
     CREATE TABLE IF NOT EXISTS project_shortlist(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),catalog_id TEXT NOT NULL,profile_json TEXT NOT NULL,prices_json TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,UNIQUE(project_id,catalog_id));`);
+  db.exec(`CREATE TABLE IF NOT EXISTS project_phases(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'other',description TEXT NOT NULL DEFAULT '',budget INTEGER,sort_order INTEGER NOT NULL DEFAULT 0,brief_json TEXT,revision INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL DEFAULT '');`);
+  const slCols=(db.prepare(`PRAGMA table_info(project_shortlist)`).all() as any[]).map((r:any)=>r.name);
+  if(!slCols.includes('phase_id'))db.exec(`ALTER TABLE project_shortlist ADD COLUMN phase_id TEXT`);
+  // Migration Đợt 9: dự án chưa có phase nào → tạo phase mặc định giữ brief + shortlist hiện tại.
+  const phaseless=db.prepare('SELECT p.id FROM projects p WHERE NOT EXISTS (SELECT 1 FROM project_phases ph WHERE ph.project_id=p.id)').all() as any[];
+  for(const p of phaseless){
+    const b=db.prepare('SELECT payload_json FROM project_briefs WHERE project_id=?').get(p.id) as any;
+    const phaseId=randomUUID();const now=new Date().toISOString();
+    db.prepare('INSERT INTO project_phases(id,project_id,name,kind,description,budget,sort_order,brief_json,revision,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,1,?,?)').run(phaseId,p.id,'Phase 1 — Tổng hợp','other','',null,0,b?.payload_json??null,now,now);
+    db.prepare('UPDATE project_shortlist SET phase_id=? WHERE project_id=? AND phase_id IS NULL').run(phaseId,p.id);
+  }
   function profile(p:any){
     if(!p||!str(p.id,100)||!p.id.trim()||!str(p.ten,200)||!p.ten.trim()||!Array.isArray(p.linhVuc)||p.linhVuc.length>50||p.linhVuc.some((v:any)=>!str(v,100))||!Array.isArray(p.nenTang)||p.nenTang.length>30||!p.bangGia||formats.some(f=>!money(p.bangGia[f]??null)))return null;
     if(p.nenTang.some((c:any)=>!c||!str(c.tenNenTang,50)||!str(c.linkProfile??'',2000)||!Number.isSafeInteger(c.soFollower)||c.soFollower<0)||!str(p.reviewSoBo??'',5000))return null;
     return {id:p.id,ten:p.ten.trim(),linhVuc:p.linhVuc,nenTang:p.nenTang.map((c:any)=>({tenNenTang:c.tenNenTang,linkProfile:c.linkProfile??'',soFollower:c.soFollower})),reviewSoBo:p.reviewSoBo??'',anhDaiDien:typeof p.anhDaiDien==='string'&&/^https?:\/\//i.test(p.anhDaiDien)?p.anhDaiDien:undefined,bangGia:Object.fromEntries(formats.map(f=>[f,p.bangGia[f]??null])),ngayCapNhat:typeof p.ngayCapNhat==='string'?p.ngayCapNhat:undefined};
   }
   const emptyBrief=emptyProjectBrief;
+  const phaseKinds=['creator','community','seeding','other'];
+  const phaseOut=(r:any)=>({id:r.id,projectId:r.project_id,name:r.name,kind:r.kind,description:r.description,budget:r.budget,sortOrder:r.sort_order,brief:r.brief_json?(()=>{try{return readProjectBrief(JSON.parse(r.brief_json));}catch{return null;}})():null,revision:r.revision,createdAt:r.created_at,updatedAt:r.updated_at});
+  function cleanPhaseBrief(input:any){
+    if(input===undefined||input===null)return null;
+    const b=readProjectBrief(input);
+    if(!b||!str(b.text,10000)||!str(b.category,100)||!str(b.keyword,200)||!str(b.platform,50)||!Number.isSafeInteger(b.minFollowers)||b.minFollowers<0||!['campaign','per_kol'].includes(b.deliverableScope)||!Array.isArray(b.deliverables)||b.deliverables.length>6||b.deliverables.some((d:any)=>!d||!formats.includes(d.format)||!Number.isSafeInteger(d.quantity)||d.quantity<1||d.quantity>100000)||new Set(b.deliverables.map((d:any)=>d.format)).size!==b.deliverables.length||(b.targetCount!==null&&(!Number.isSafeInteger(b.targetCount)||b.targetCount<1||b.targetCount>100000))||!money(b.budget))return undefined;
+    return {...b,deliverables:b.deliverables.map((d:any)=>({format:d.format,quantity:d.quantity}))};
+  }
+  router.get('/catalog',(req,res)=>{
+    const u=res.locals.user;
+    const kols=db.prepare('SELECT profile_json FROM kol_catalog WHERE organization_id=? ORDER BY rowid').all(u.organization_id).map((r:any)=>{const {engagementRate,...p}=JSON.parse(r.profile_json);return p;});
+    res.json({kols});
+  });
+  router.get('/projects/:id/phases',(req,res)=>{
+    const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền xem dự án này.'});
+    const rows=db.prepare('SELECT * FROM project_phases WHERE project_id=? ORDER BY sort_order,rowid').all(pid);
+    res.json({phases:rows.map(phaseOut)});
+  });
+  router.post('/projects/:id/phases',(req,res)=>{
+    const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật dự án này.'});
+    const {name,kind,description,budget,sortOrder,brief}=req.body??{};
+    if(!str(name,200)||!name.trim())return res.status(400).json({message:'Vui lòng nhập tên phase.'});
+    if(kind!==undefined&&!phaseKinds.includes(kind))return res.status(400).json({message:'Loại phase không hợp lệ.'});
+    if(description!==undefined&&!str(description,2000))return res.status(400).json({message:'Mô tả phase quá dài.'});
+    if(budget!==undefined&&budget!==null&&!money(budget))return res.status(400).json({message:'Ngân sách phase không hợp lệ.'});
+    if(sortOrder!==undefined&&(!Number.isSafeInteger(sortOrder)||sortOrder<0||sortOrder>1000))return res.status(400).json({message:'Thứ tự phase không hợp lệ.'});
+    const cleanBrief=cleanPhaseBrief(brief);if(cleanBrief===undefined)return res.status(400).json({message:'Brief của phase không hợp lệ.'});
+    const id=randomUUID();const now=new Date().toISOString();
+    const order=sortOrder??(((db.prepare('SELECT MAX(sort_order) AS m FROM project_phases WHERE project_id=?').get(pid) as any)?.m??-1)+1);
+    db.prepare('INSERT INTO project_phases(id,project_id,name,kind,description,budget,sort_order,brief_json,revision,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,1,?,?)').run(id,pid,name.trim(),kind??'other',(description??'').trim(),budget??null,order,cleanBrief?JSON.stringify(cleanBrief):null,now,now);
+    audit(u.id,'create_phase',id);res.json({id});
+  });
+  router.patch('/projects/:id/phases/:phaseId',(req,res)=>{
+    const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật dự án này.'});
+    const row=db.prepare('SELECT * FROM project_phases WHERE id=? AND project_id=?').get(req.params.phaseId,pid) as any;
+    if(!row)return res.status(404).json({message:'Không tìm thấy phase trong dự án.'});
+    if(req.body?.revision!==row.revision)return res.status(409).json({message:'Phase đã thay đổi. Tải lại trước khi lưu.'});
+    const name=req.body.name!==undefined?req.body.name:row.name;
+    const kind=req.body.kind!==undefined?req.body.kind:row.kind;
+    const description=req.body.description!==undefined?req.body.description:row.description;
+    const budget=req.body.budget!==undefined?req.body.budget:row.budget;
+    const sortOrder=req.body.sortOrder!==undefined?req.body.sortOrder:row.sort_order;
+    if(!str(name,200)||!name.trim()||!phaseKinds.includes(kind)||!str(description,2000)||(budget!==null&&!money(budget))||!Number.isSafeInteger(sortOrder)||sortOrder<0||sortOrder>1000)return res.status(400).json({message:'Thông tin phase không hợp lệ.'});
+    let briefJson=row.brief_json;
+    if('brief' in req.body){const cleanBrief=cleanPhaseBrief(req.body.brief);if(cleanBrief===undefined)return res.status(400).json({message:'Brief của phase không hợp lệ.'});briefJson=cleanBrief?JSON.stringify(cleanBrief):null;}
+    db.prepare('UPDATE project_phases SET name=?,kind=?,description=?,budget=?,sort_order=?,brief_json=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?').run(name.trim(),kind,description.trim(),budget,sortOrder,briefJson,new Date().toISOString(),row.id,row.revision);
+    audit(u.id,'update_phase',row.id);res.json({success:true});
+  });
+  // Xoá phase qua POST (quy ước của app: mọi thao tác ghi đều là POST + JSON; DELETE không body bị guard 415 chặn).
+  router.post('/projects/:id/phases/:phaseId/delete',(req,res)=>{
+    const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật dự án này.'});
+    const row=db.prepare('SELECT * FROM project_phases WHERE id=? AND project_id=?').get(req.params.phaseId,pid) as any;
+    if(!row)return res.status(404).json({message:'Không tìm thấy phase trong dự án.'});
+    const used=(db.prepare('SELECT COUNT(*) AS c FROM project_shortlist WHERE project_id=? AND phase_id=?').get(pid,row.id) as any).c;
+    if(used>0)return res.status(400).json({message:`Phase còn ${used} KOL trong danh sách. Chuyển các KOL sang phase khác trước khi xoá.`});
+    db.prepare('DELETE FROM project_phases WHERE id=?').run(row.id);audit(u.id,'delete_phase',row.id);res.json({success:true});
+  });
+  router.post('/projects/:id/shortlist/:rowId/phase',(req,res)=>{
+    const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật danh sách dự án.'});
+    const row=db.prepare('SELECT * FROM project_shortlist WHERE id=? AND project_id=?').get(req.params.rowId,pid) as any;if(!row)return res.status(404).json({message:'Không tìm thấy KOL trong dự án.'});
+    const phaseId=req.body?.phaseId??null;
+    if(phaseId!==null){if(typeof phaseId!=='string')return res.status(400).json({message:'Phase không hợp lệ.'});const ph=db.prepare('SELECT id FROM project_phases WHERE id=? AND project_id=?').get(phaseId,pid);if(!ph)return res.status(400).json({message:'Phase không thuộc dự án này.'});}
+    db.prepare('UPDATE project_shortlist SET phase_id=? WHERE id=?').run(phaseId,row.id);audit(u.id,'move_shortlist_phase',row.id);res.json({success:true});
+  });
   router.get('/projects/:id/shortlist',(req,res)=>{
     const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền xem dự án này.'});
     const b=db.prepare('SELECT * FROM project_briefs WHERE project_id=?').get(pid) as any;
@@ -25,7 +100,7 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     const brief=readProjectBrief(b?JSON.parse(b.payload_json):null);
     // Không cắt Top N; số KOL mục tiêu chỉ để PM đối chiếu khi chọn phương án.
     const matches=catalog.filter(p=>assessProjectKol(p,brief).matches);
-    const rows=db.prepare('SELECT * FROM project_shortlist WHERE project_id=? ORDER BY rowid').all(pid).map((r:any)=>({id:r.id,catalogId:r.catalog_id,profile:(()=>{const {engagementRate,...p}=JSON.parse(r.profile_json);return p;})(),prices:JSON.parse(r.prices_json),revision:r.revision}));
+    const rows=db.prepare('SELECT * FROM project_shortlist WHERE project_id=? ORDER BY rowid').all(pid).map((r:any)=>({id:r.id,catalogId:r.catalog_id,profile:(()=>{const {engagementRate,...p}=JSON.parse(r.profile_json);return p;})(),prices:JSON.parse(r.prices_json),revision:r.revision,phaseId:r.phase_id??null}));
     res.json({brief,briefRevision:b?.revision??0,canManage:access(u,pid,true),canImport:u.organization_role==='admin',catalogCount:catalog.length,matches,rows});
   });
   router.post('/projects/:id/brief',(req,res)=>{
@@ -72,10 +147,14 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
   router.post('/projects/:id/shortlist/add',(req,res)=>{
     const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật danh sách dự án.'});
     if(!Array.isArray(req.body.ids)||!req.body.ids.length||req.body.ids.length>500||req.body.ids.some((id:any)=>typeof id!=='string'))return res.status(400).json({message:'Chọn KOL cần thêm.'});
+    let phaseId=req.body.phaseId??null;
+    if(phaseId!==null){if(typeof phaseId!=='string')return res.status(400).json({message:'Phase không hợp lệ.'});const ph=db.prepare('SELECT id FROM project_phases WHERE id=? AND project_id=?').get(phaseId,pid);if(!ph)return res.status(400).json({message:'Phase không thuộc dự án này.'});}
+    else{const first=db.prepare('SELECT id FROM project_phases WHERE project_id=? ORDER BY sort_order,rowid LIMIT 1').get(pid) as any;phaseId=first?.id??null;}
     const profiles=req.body.ids.map((id:string)=>db.prepare('SELECT profile_json FROM kol_catalog WHERE id=? AND organization_id=?').get(id,u.organization_id) as any);
     if(profiles.some((p:any)=>!p))return res.status(400).json({message:'KOL không thuộc thư viện công ty.'});
-    let added=0;db.exec('BEGIN');try{for(const row of profiles){const p=JSON.parse(row.profile_json);const prices=Object.fromEntries(formats.map(f=>[f,{value:p.bangGia[f],status:p.bangGia[f]===null?'waiting':'unconfirmed',source:'',checkedAt:null,checkedBy:null}]));added+=Number(db.prepare('INSERT OR IGNORE INTO project_shortlist VALUES (?,?,?,?,?,1)').run(randomUUID(),pid,p.id,JSON.stringify(p),JSON.stringify(prices)).changes);}audit(u.id,'add_project_shortlist',pid);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
-    res.json({added});
+    const existing=req.body.ids.map((id:string)=>db.prepare('SELECT catalog_id,phase_id FROM project_shortlist WHERE project_id=? AND catalog_id=?').get(pid,id) as any).filter(Boolean).map((r:any)=>({id:r.catalog_id,phaseId:r.phase_id??null}));
+    let added=0;db.exec('BEGIN');try{for(const row of profiles){const p=JSON.parse(row.profile_json);const prices=Object.fromEntries(formats.map(f=>[f,{value:p.bangGia[f],status:p.bangGia[f]===null?'waiting':'unconfirmed',source:'',checkedAt:null,checkedBy:null}]));added+=Number(db.prepare('INSERT OR IGNORE INTO project_shortlist(id,project_id,catalog_id,profile_json,prices_json,revision,phase_id) VALUES (?,?,?,?,?,1,?)').run(randomUUID(),pid,p.id,JSON.stringify(p),JSON.stringify(prices),phaseId).changes);}audit(u.id,'add_project_shortlist',pid);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
+    res.json({added,existing});
   });
   router.post('/projects/:id/shortlist/:rowId/prices',(req,res)=>{
     const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật giá dự án.'});

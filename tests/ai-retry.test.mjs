@@ -10,4 +10,4 @@ test('503 rồi 429 rồi thành công, chờ 1 và 2,5 giây',async()=>{let n=0
 test('dừng sau 3 lần, không lộ lỗi nhà cung cấp',async()=>{let n=0;const err={code:503,message:'bí mật nhà cung cấp'};await assert.rejects(callAiWithRetry(async()=>{n++;throw err},async()=>{}));assert.equal(n,3);assert.equal(aiFailureMessage(err),'AI đang quá tải, vui lòng thử lại sau ít phút.');});
 test('không retry lỗi cấu hình và đầu vào',async()=>{for(const code of [400,401,403,404]){let n=0;const err={code,message:'lỗi thô'};await assert.rejects(callAiWithRetry(async()=>{n++;throw err},async()=>assert.fail()));assert.equal(n,1);assert.ok(!aiFailureMessage(err).includes('lỗi thô'));}});
 test('message hỏng và đối tượng vòng không gây crash',()=>{assert.equal(isTemporaryAiError({message:'không phải JSON 503'}),false);const e={};e.cause=e;assert.equal(isTemporaryAiError(e),false);});
-test('cả ba endpoint dùng helper',()=>assert.equal((source.match(/await callAiWithRetry\(/g)||[]).length,3));
+test('cả bốn endpoint dùng helper',()=>assert.equal((source.match(/await callAiWithRetry\(/g)||[]).length,4));

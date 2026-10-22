@@ -5,6 +5,7 @@
 
 import express from 'express';
 import { createWorkspace } from './server/workspace';
+import { normalizePhaseDrafts } from './src/domain/phases';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -26,10 +27,15 @@ app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 const workspace = createWorkspace(path.join(__dirname, '.local'));
 app.use('/api/workspace', workspace.router);
 // Module KOL/SOW cũ chưa có projectId: chỉ Admin được dùng đến khi migration hoàn tất.
+// Ngoại lệ (Đợt 9, Cách A): hai endpoint AI brief chỉ cần đăng nhập — thành viên dự án dùng để
+// bóc phase từ brief tổng và đề xuất KOL theo brief phase; việc ghi dữ liệu vẫn qua quyền workspace.
+const MEMBER_AI_PATHS = new Set(['/ai/parse-brief', '/ai/breakdown-phases']);
 app.use('/api', (req, res, next) => {
   const user = workspace.sessionUser(req);
   if (!user) return res.status(401).json({success:false,message:'Vui lòng đăng nhập.'});
-  if (user.must_change_password || user.organization_role !== 'admin') return res.status(403).json({success:false,message:'Chức năng dữ liệu cũ hiện chỉ dành cho Admin.'});
+  if (user.must_change_password) return res.status(403).json({success:false,message:'Vui lòng đổi mật khẩu trước khi tiếp tục.'});
+  if (MEMBER_AI_PATHS.has(req.path)) return next();
+  if (user.organization_role !== 'admin') return res.status(403).json({success:false,message:'Chức năng dữ liệu cũ hiện chỉ dành cho Admin.'});
   next();
 });
 
@@ -440,6 +446,97 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
 // ----------------------------------------------------------------------------
 // API: Proxy tải dữ liệu Google Sheet CSV (Chỉ chấp nhận Google Sheet hợp lệ)
 // ----------------------------------------------------------------------------
+// Đợt 9 — AI-1: bóc brief TỔNG của dự án thành các phase NHÁP.
+// Chỉ trả nháp về cho người dùng duyệt/sửa; không tự lưu vào dự án.
+app.post('/api/ai/breakdown-phases', async (req, res) => {
+  try {
+    const { briefText } = req.body ?? {};
+    if (!briefText || typeof briefText !== 'string' || !briefText.trim() || briefText.length > 30000) {
+      return res.status(400).json({ success: false, message: 'Vui lòng cung cấp nội dung brief tổng của dự án (tối đa 30.000 ký tự).' });
+    }
+    if (!aiClient) {
+      return res.json({ success: false, useFallback: true, message: 'Chưa cấu hình GEMINI_API_KEY trên server. Vui lòng tạo phase thủ công.' });
+    }
+    const systemInstruction = `Bạn là chuyên gia Media Planner tại Việt Nam, chuyên bóc tách brief quảng cáo/booking thành các PHASE triển khai.
+
+NHIỆM VỤ:
+Đọc brief TỔNG của một dự án và tách thành các phase — mỗi phase là một nhóm công việc đồng nhất về LOẠI ĐỐI TÁC và cách triển khai, để các booking làm việc độc lập theo từng phase.
+
+QUY TẮC:
+1. kind của phase chỉ thuộc một trong: 'creator' (KOL/KOC/creator cá nhân), 'community' (fanpage/group/cộng đồng), 'seeding' (profile UGC đăng bài, comment, seeding trên Threads/Facebook...), 'other' (hạng mục còn lại như livestream mega, sản xuất...).
+2. CHỈ trích xuất điều brief nói rõ hoặc có căn cứ trực tiếp; thông tin không có thì để null/mảng rỗng — TUYỆT ĐỐI KHÔNG BỊA SỐ.
+3. budget: ngân sách brief GÁN RIÊNG cho phase đó (số nguyên VND; quy đổi "30tr" -> 30000000, "1,2 tỷ" -> 1200000000). Nếu brief chỉ có ngân sách tổng mà không phân bổ theo hạng mục thì để null cho mọi phase — KHÔNG tự chia.
+4. targetCount: số lượng creator/community/profile brief yêu cầu cho phase, hoặc null.
+5. deliverables: các hạng mục công việc thuộc phase, ánh xạ về đúng 6 format key chuẩn: 'post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'. deliverableScope = 'per_kol' nếu số lượng tính theo từng creator/community, 'campaign' nếu tính tổng cả phase.
+6. category: lĩnh vực chính của phase; platform: nền tảng chính (TikTok/YouTube/Facebook/Instagram/Threads) hoặc chuỗi rỗng nếu đa nền tảng/không rõ.
+7. description: mô tả ngắn yêu cầu riêng của phase theo brief (angle nội dung, tiêu chí chọn đối tác...), tối đa ~500 ký tự.
+8. Số phase hợp lý: 1-10. Không tách vụn một hạng mục thành nhiều phase nếu chúng cùng loại đối tác và cùng yêu cầu.`;
+    const prompt = `HÃY BÓC TÁCH BRIEF TỔNG DỰ ÁN SAU ĐÂY THÀNH CÁC PHASE:\n\"\"\"\n${briefText.trim()}\n\"\"\"\n\nTrả về JSON đúng schema.`;
+    const response = await callAiWithRetry(() => aiClient!.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: [prompt],
+      config: {
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            phases: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING, description: 'Tên phase ngắn gọn' },
+                  kind: { type: Type.STRING, description: 'creator | community | seeding | other' },
+                  description: { type: Type.STRING },
+                  budget: { type: Type.NUMBER, description: 'Ngân sách VND của phase hoặc null' },
+                  targetCount: { type: Type.INTEGER, description: 'Số lượng đối tác mục tiêu của phase hoặc null' },
+                  category: { type: Type.STRING },
+                  platform: { type: Type.STRING },
+                  deliverableScope: { type: Type.STRING, description: "'per_kol' | 'campaign'" },
+                  deliverables: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        format: { type: Type.STRING, description: 'post, video, shorts, livestream, thamDuSuKien, sdha' },
+                        soLuong: { type: Type.INTEGER },
+                      },
+                      required: ['format', 'soLuong'],
+                    },
+                  },
+                },
+                required: ['name', 'kind'],
+              },
+            },
+          },
+          required: ['phases'],
+        },
+      },
+    }));
+    const outputText = response.text || '{}';
+    let parsedData: any = {};
+    try {
+      parsedData = JSON.parse(outputText);
+    } catch {
+      parsedData = JSON.parse(outputText.replace(/```json/g, '').replace(/```/g, '').trim());
+    }
+    const rawPhases = Array.isArray(parsedData?.phases) ? parsedData.phases.map((p: any) => ({
+      ...p,
+      budget: typeof p?.budget === 'number' ? Math.round(p.budget) : null,
+      deliverables: Array.isArray(p?.deliverables) ? p.deliverables.map((d: any) => ({ format: d?.format, quantity: d?.soLuong })) : [],
+    })) : [];
+    const phases = normalizePhaseDrafts(rawPhases);
+    if (!phases.length) {
+      return res.json({ success: false, useFallback: true, message: 'AI không bóc tách được phase nào từ brief này. Vui lòng tạo phase thủ công.' });
+    }
+    return res.json({ success: true, phases });
+  } catch (error: any) {
+    console.error('Breakdown phases error:', error);
+    return res.status(500).json({ success: false, message: 'AI không bóc tách được brief lúc này. Vui lòng thử lại hoặc tạo phase thủ công.' });
+  }
+});
+
 app.get('/api/sheets/fetch-csv', async (req, res) => {
   try {
     const rawSheetId = req.query.sheetId as string | undefined;
