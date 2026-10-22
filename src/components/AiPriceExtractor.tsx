@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { KolProfile, PriceFormatKey, PRICE_FORMAT_LABELS } from '../types/kol';
 import { formatVND } from '../utils/formatters';
+import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { StorageService } from '../services/storageService';
 
 interface AiPriceExtractorProps {
@@ -725,10 +726,14 @@ export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onData
                       <td className="px-3 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <input
-                            type="number"
-                            value={item.giaMoiVND}
-                            onChange={(e) => handleUpdateItem(item.id, 'giaMoiVND', Number(e.target.value))}
-                            className="w-28 text-right px-2 py-1 bg-white border border-indigo-300 rounded-md font-bold text-indigo-700 text-xs"
+                            type="text"
+                            inputMode="numeric"
+                            value={item.giaMoiVND === 0 ? '' : formatMoneyInput(item.giaMoiVND)}
+                            onChange={(e) => {
+                              const parsed = parseMoneyInput(e.target.value);
+                              handleUpdateItem(item.id, 'giaMoiVND', parsed === '' ? 0 : parsed);
+                            }}
+                            className="w-32 text-right px-2 py-1 bg-white border border-indigo-300 rounded-md font-bold text-indigo-700 text-xs"
                           />
                           <span className="text-slate-400">đ</span>
                         </div>

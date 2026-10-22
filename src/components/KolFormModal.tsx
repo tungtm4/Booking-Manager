@@ -27,6 +27,7 @@ import {
   SocialChannel 
 } from '../types/kol';
 import { formatVND, POPULAR_CATEGORIES } from '../utils/formatters';
+import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 
 interface KolFormModalProps {
   isOpen: boolean;
@@ -197,9 +198,8 @@ export const KolFormModal: React.FC<KolFormModalProps> = ({
   };
 
   // Cập nhật giá format
-  const handlePriceChange = (key: PriceFormatKey, val: string) => {
-    const num = val === '' ? '' : Number(val);
-    setBangGia({ ...bangGia, [key]: num });
+  const handlePriceChange = (key: PriceFormatKey, val: number | '') => {
+    setBangGia({ ...bangGia, [key]: val });
   };
 
   // Kiểm tra & Lưu dữ liệu
@@ -523,16 +523,14 @@ export const KolFormModal: React.FC<KolFormModalProps> = ({
                           Số lượng Follower
                         </label>
                         <input
-                          type="number"
-                          placeholder="Vd: 500000"
-                          value={ch.soFollower || ''}
-                          onChange={(e) =>
-                            handleUpdateChannel(
-                              idx,
-                              'soFollower',
-                              e.target.value ? Number(e.target.value) : 0
-                            )
-                          }
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="Vd: 500.000"
+                          value={formatMoneyInput(ch.soFollower || '')}
+                          onChange={(e) => {
+                            const parsed = parseMoneyInput(e.target.value);
+                            handleUpdateChannel(idx, 'soFollower', parsed === '' ? 0 : parsed);
+                          }}
                           className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
                         />
                       </div>
@@ -583,10 +581,11 @@ export const KolFormModal: React.FC<KolFormModalProps> = ({
                       </div>
                       <div className="relative">
                         <input
-                          type="number"
-                          placeholder="Vd: 15000000"
-                          value={val}
-                          onChange={(e) => handlePriceChange(key, e.target.value)}
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="Vd: 15.000.000"
+                          value={formatMoneyInput(val ?? '')}
+                          onChange={(e) => handlePriceChange(key, parseMoneyInput(e.target.value))}
                           className="w-full pl-3 pr-8 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:border-indigo-500 focus:outline-hidden"
                         />
                         <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">

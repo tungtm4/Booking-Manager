@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { KolProfile, PlatformType, PriceFormatKey, PRICE_FORMAT_LABELS } from '../types/kol';
 import { formatDateVN, formatVND, POPULAR_CATEGORIES } from '../utils/formatters';
+import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { StorageService } from '../services/storageService';
 
 interface BulkPriceUpdateProps {
@@ -359,16 +360,21 @@ export const BulkPriceUpdate: React.FC<BulkPriceUpdateProps> = ({ kols, onDataSa
                     {/* 6 Cột Giá */}
                     {formatsList.map((f) => {
                       const modified = isCellModified(kol.id, f);
-                      const currentVal = editedPrices[kol.id]?.[f] ?? '';
+                      const rawVal = editedPrices[kol.id]?.[f];
+                      const currentVal = rawVal === null || rawVal === undefined ? '' : rawVal;
 
                       return (
                         <td key={f} className="px-2 py-2 text-right">
                           <div className="relative">
                             <input
-                              type="number"
+                              type="text"
+                              inputMode="numeric"
                               placeholder="Chưa có"
-                              value={currentVal === null ? '' : currentVal}
-                              onChange={(e) => handleCellChange(kol.id, f, e.target.value)}
+                              value={formatMoneyInput(currentVal === '' ? '' : Number(currentVal))}
+                              onChange={(e) => {
+                                const parsed = parseMoneyInput(e.target.value);
+                                handleCellChange(kol.id, f, parsed === '' ? '' : String(parsed));
+                              }}
                               className={`w-full text-right px-2 py-1.5 text-xs rounded-lg border transition-all ${
                                 modified
                                   ? 'bg-amber-50 border-amber-400 text-amber-950 font-bold ring-2 ring-amber-200'
@@ -376,7 +382,7 @@ export const BulkPriceUpdate: React.FC<BulkPriceUpdateProps> = ({ kols, onDataSa
                               }`}
                             />
                             {/* Hiển thị tooltip gợi ý nếu có số tiền lớn */}
-                            {currentVal && Number(currentVal) > 0 && (
+                            {currentVal !== '' && Number(currentVal) > 0 && (
                               <span className="block text-[9px] text-slate-400 font-mono text-right pr-1">
                                 {formatVND(Number(currentVal))}
                               </span>

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { KolProfile, PriceFormatKey, PRICE_FORMAT_LABELS, SowLineItem, SowQuote } from '../types/kol';
 import { formatDateVN, formatFollowers, formatVND } from '../utils/formatters';
+import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 
 interface SowQuoteBuilderProps {
   kols: KolProfile[];
@@ -676,10 +677,14 @@ export const SowQuoteBuilder: React.FC<SowQuoteBuilderProps> = ({
                             )}
                             <div className="flex items-center justify-end gap-1">
                               <input
-                                type="number"
-                                value={item.donGia}
-                                onChange={(e) => handleUpdateItem(item.id, 'donGia', e.target.value)}
-                                className={`w-32 text-right px-2 py-1 bg-white border rounded-md text-xs font-semibold ${
+                                type="text"
+                                inputMode="numeric"
+                                value={formatMoneyInput(item.donGia)}
+                                onChange={(e) => {
+                                  const val = parseMoneyInput(e.target.value);
+                                  handleUpdateItem(item.id, 'donGia', val === '' ? 0 : val);
+                                }}
+                                className={`w-36 text-right px-2 py-1 bg-white border rounded-md text-xs font-semibold ${
                                   item.laGiaTam ? 'border-red-300 bg-red-50/30 text-red-700' : 'border-slate-300'
                                 }`}
                               />
@@ -765,11 +770,12 @@ export const SowQuoteBuilder: React.FC<SowQuoteBuilderProps> = ({
                   <div className="flex items-center gap-1.5">
                     <span className="text-slate-600">Phụ phí / Quản lý:</span>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
                       placeholder="0"
-                      value={phuPhi}
-                      onChange={(e) => setPhuPhi(e.target.value ? Number(e.target.value) : '')}
-                      className="w-24 text-right px-2 py-0.5 border rounded-md font-semibold text-xs"
+                      value={formatMoneyInput(phuPhi)}
+                      onChange={(e) => setPhuPhi(parseMoneyInput(e.target.value))}
+                      className="w-28 text-right px-2 py-0.5 border rounded-md font-semibold text-xs"
                     />
                     <span className="text-slate-500">đ</span>
                   </div>

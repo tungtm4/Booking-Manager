@@ -6,8 +6,7 @@ import {calculateProjectFinance} from '../src/domain/projectFinance';
 const project = {id:'p1',organizationId:'org',name:'Dự án',contentWorkflowEnabled:false};
 const user = (id:string, role:'admin'|'member'='member'):UserIdentity => ({id,organizationId:'org',active:true,organizationRole:role});
 const members:ProjectMembership[] = [
-  ...['a1','a2'].map(id => ({projectId:'p1',userId:id,roles:['admin'] as const,duties:[],grants:[],active:true})).map(m=>({...m,roles:[...m.roles]})),
-  ...['pm1','pm2'].map(id => ({projectId:'p1',userId:id,roles:['pm'] as const,duties:[],grants:[],active:true})).map(m=>({...m,roles:[...m.roles]})),
+  ...['pm1','pm2','pm3','pm4'].map(id => ({projectId:'p1',userId:id,roles:['pm'] as const,duties:[],grants:[],active:true})).map(m=>({...m,roles:[...m.roles]})),
   {projectId:'p1',userId:'b1',roles:['booking'],duties:['pricing'],grants:[],active:true},
   {projectId:'p1',userId:'b2',roles:['booking'],duties:['paperwork','creator_support'],grants:[],active:true},
 ];
@@ -15,13 +14,18 @@ const members:ProjectMembership[] = [
 test('nhiều Admin toàn công ty có quyền đầy đủ',()=>{
   for(const id of ['admin1','admin2']) assert.equal(canAccessProject(user(id,'admin'),project,[],'view_pnl'),true);
 });
-test('nhiều Admin dự án, nhiều PM và Booking cùng làm việc',()=>{
-  for(const id of ['a1','a2','pm1','pm2']) assert.equal(canAccessProject(user(id),project,members,'view_pnl'),true);
+test('nhiều PM và Booking cùng làm việc',()=>{
+  for(const id of ['pm1','pm2','pm3','pm4']) assert.equal(canAccessProject(user(id),project,members,'view_pnl'),true);
   for(const id of ['b1','b2']) {
     assert.equal(canAccessProject(user(id),project,members,'manage_contracts'),true);
     assert.equal(canAccessProject(user(id),project,members,'manage_payments'),true);
     assert.equal(canAccessProject(user(id),project,members,'view_pnl'),false);
   }
+});
+test('membership mang role cũ admin vẫn được quyền leadership nhờ normalize',()=>{
+  const legacyMember = {projectId:'p1',userId:'legacy_admin',roles:['admin' as any],duties:[],grants:[],active:true};
+  assert.equal(canAccessProject(user('legacy_admin'),project,[legacyMember],'view_pnl'),true);
+  assert.equal(canAccessProject(user('legacy_admin'),project,[legacyMember],'manage_members'),true);
 });
 test('PM không truy cập project chưa được giao',()=>{
   assert.equal(canAccessProject(user('pm1'),{...project,id:'p2'},members,'view_project'),false);

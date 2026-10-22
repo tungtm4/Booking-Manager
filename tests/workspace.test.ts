@@ -50,7 +50,9 @@ test('đăng nhập, mật khẩu, nhiều thành viên và phân quyền API',a
     assert.ok(candidates.body.candidates.every((u:any)=>Object.keys(u).sort().join(',')==='email,id,name'));
     assert.equal((await request(`/projects/${hidden}/candidates`,undefined,pm)).status,403);
 
-    assert.equal((await request(`/projects/${project}/members`,{email:'booking1@example.test',role:'admin'},pm)).status,403);
+    assert.equal((await request(`/projects/${project}/members`,{email:'booking1@example.test',role:'admin'},admin)).status,400);
+    assert.equal((await request(`/projects/${project}/members`,{email:'booking1@example.test',role:'admin'},pm)).status,400);
+    assert.equal((await request(`/projects/${project}/members`,{email:'booking1@example.test',role:'pm'},pm)).status,403);
     assert.equal((await request(`/projects/${project}/members`,undefined,pm)).body.members.length,4);
     const pm2=workspace.db.prepare("SELECT id FROM users WHERE email='pm2@example.test'").get() as any;
     assert.equal((await request(`/projects/${project}/members/${pm2.id}/remove`,{},pm)).status,403);
@@ -72,3 +74,53 @@ test('đăng nhập, mật khẩu, nhiều thành viên và phân quyền API',a
     assert.equal((await request('/projects',undefined,pm)).status,401);
   }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));workspace.db.close();}
 });
+
+test('dữ liệu cũ có sẵn project_member_roles role=admin được migrate thành pm và quản lý được dự án', async () => {
+  const w = createWorkspace('', { memory: true, setupCode: 'test-legacy-code' });
+  const app = express(); app.use(express.json()); app.use('/api/workspace', w.router);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${(server.address() as any).port}/api/workspace`;
+  const request = async (path: string, body?: any, cookie?: string) => {
+    const res = await fetch(base + path, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(cookie ? { Cookie: cookie } : {}) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) })
+    });
+    return { status: res.status, body: await res.json(), cookie: res.headers.get('set-cookie')?.split(';')[0] };
+  };
+  try {
+    await request('/auth/setup', { code: 'test-legacy-code', name: 'Admin', email: 'admin@legacy.test', password: 'password-123456' });
+    const admin = (await request('/auth/login', { email: 'admin@legacy.test', password: 'password-123456' })).cookie;
+    const project = (await request('/projects', { name: 'Legacy Project' }, admin)).body.id;
+    await request('/users', { name: 'Legacy User', email: 'legacy@example.test', password: 'password-123456', role: 'member' }, admin);
+    const legacyUser = w.db.prepare("SELECT id FROM users WHERE email='legacy@example.test'").get() as any;
+    
+    // Giả lập dữ liệu cũ: chèn role='admin' vào project_member_roles
+    w.db.prepare("INSERT INTO project_members VALUES (?,?,'company',1)").run(project, legacyUser.id);
+    w.db.prepare("INSERT INTO project_member_roles VALUES (?,?,'admin')").run(project, legacyUser.id);
+
+    // Chạy lại migrate idempotent (như khi server khởi động lại trên DB có sẵn)
+    w.db.exec("UPDATE project_member_roles SET role='pm' WHERE role='admin';");
+
+    const legacyLogin = (await request('/auth/login', { email: 'legacy@example.test', password: 'password-123456' })).cookie;
+    await request('/auth/password', { currentPassword: 'password-123456', newPassword: 'changed-password-123' }, legacyLogin);
+    const legacyAuth = (await request('/auth/login', { email: 'legacy@example.test', password: 'changed-password-123' })).cookie;
+
+    // GET /projects/:id/members hiện vai trò 'pm'
+    const membersRes = await request(`/projects/${project}/members`, undefined, legacyAuth);
+    assert.equal(membersRes.status, 200);
+    const memberRow = membersRes.body.members.find((m: any) => m.id === legacyUser.id);
+    assert.deepEqual(memberRow.roles, ['pm']);
+
+    // Tài khoản đó vẫn quản lý được dự án
+    const projList = await request('/projects', undefined, legacyAuth);
+    assert.equal(projList.status, 200);
+    assert.equal(projList.body.projects[0].canManage, true);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    w.db.close();
+  }
+});
+

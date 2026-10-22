@@ -22,16 +22,8 @@ export function formatNumberOnly(amount: number | null | undefined): string {
 }
 
 export function formatFollowers(count: number | undefined | null): string {
-  if (!count || isNaN(count)) return '0';
-  if (count >= 1_000_000) {
-    const val = (count / 1_000_000).toFixed(1).replace('.0', '');
-    return `${val}M`;
-  }
-  if (count >= 1_000) {
-    const val = (count / 1_000).toFixed(1).replace('.0', '');
-    return `${val}K`;
-  }
-  return count.toLocaleString('vi-VN');
+  if (count === null || count === undefined || isNaN(count)) return '0';
+  return formatNumberOnly(count);
 }
 
 export function formatDateVN(dateStr: string | undefined): string {

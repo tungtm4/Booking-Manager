@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { CollaborationHistory, KolProfile, PRICE_FORMAT_LABELS, PriceFormatKey } from '../types/kol';
 import { formatDateVN, formatFollowers, formatVND, getCategoryBadgeClass } from '../utils/formatters';
+import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 
 interface KolDetailModalProps {
   kol: KolProfile | null;
@@ -565,13 +566,14 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
                     Chi Phí Thực Tế (VND)
                   </label>
                   <input
-                    type="number"
-                    placeholder="Vd: 15000000"
-                    value={collabForm.chiPhiThucTe}
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="Vd: 15.000.000"
+                    value={formatMoneyInput(collabForm.chiPhiThucTe)}
                     onChange={(e) =>
                       setCollabForm({
                         ...collabForm,
-                        chiPhiThucTe: e.target.value ? Number(e.target.value) : '',
+                        chiPhiThucTe: parseMoneyInput(e.target.value),
                       })
                     }
                     className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-indigo-500"

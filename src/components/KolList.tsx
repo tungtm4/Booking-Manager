@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { KolProfile, PlatformType, PriceFormatKey, PRICE_FORMAT_LABELS, SowQuote, SowLineItem } from '../types/kol';
 import { formatFollowers, formatVND, formatNumberOnly, getCategoryBadgeClass, POPULAR_CATEGORIES } from '../utils/formatters';
+import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { StorageService } from '../services/storageService';
 import { KolCompareModal } from './KolCompareModal';
 
@@ -594,10 +595,11 @@ export const KolList: React.FC<KolListProps> = ({
               </label>
               <div className="relative">
                 <input
-                  type="number"
-                  placeholder="Vd: 20000000"
-                  value={maxBudget}
-                  onChange={(e) => setMaxBudget(e.target.value ? Number(e.target.value) : '')}
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="Vd: 20.000.000"
+                  value={formatMoneyInput(maxBudget)}
+                  onChange={(e) => setMaxBudget(parseMoneyInput(e.target.value))}
                   className="w-full pl-3 pr-8 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
                 />
                 <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">đ</span>
@@ -628,18 +630,20 @@ export const KolList: React.FC<KolListProps> = ({
               <label className="block text-xs font-semibold text-slate-600 mb-1">Khoảng Followers</label>
               <div className="flex items-center gap-2">
                 <input
-                  type="number"
-                  placeholder="Min (vd 100000)"
-                  value={minFollowers}
-                  onChange={(e) => setMinFollowers(e.target.value ? Number(e.target.value) : '')}
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="Min (vd 100.000)"
+                  value={formatMoneyInput(minFollowers)}
+                  onChange={(e) => setMinFollowers(parseMoneyInput(e.target.value))}
                   className="w-1/2 px-2.5 py-1.5 bg-white text-slate-800 text-xs border border-slate-200 rounded-lg"
                 />
                 <span className="text-slate-400 text-xs">-</span>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
                   placeholder="Max"
-                  value={maxFollowers}
-                  onChange={(e) => setMaxFollowers(e.target.value ? Number(e.target.value) : '')}
+                  value={formatMoneyInput(maxFollowers)}
+                  onChange={(e) => setMaxFollowers(parseMoneyInput(e.target.value))}
                   className="w-1/2 px-2.5 py-1.5 bg-white text-slate-800 text-xs border border-slate-200 rounded-lg"
                 />
               </div>
