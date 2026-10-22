@@ -1,77 +1,515 @@
-import React,{useEffect,useState} from 'react';
-import {ProjectKolCard} from './ProjectKolCard';
-import {StorageService} from '../services/storageService';
-import {PRICE_FORMAT_LABELS} from '../types/kol';
-import {formatMoneyInput,parseMoneyInput} from '../utils/moneyInput';
-const formats=Object.entries(PRICE_FORMAT_LABELS);
-const field='w-full rounded-lg border border-slate-300 px-3 py-2 bg-white';
-const button='rounded-lg bg-indigo-600 text-white px-3 py-2 text-sm font-semibold disabled:opacity-50';
-async function request(path:string,body?:unknown){
-  const r=await fetch('/api/workspace'+path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(r.status===401)window.dispatchEvent(new Event('workspace_session_expired'));
-  const d=await r.json();if(!r.ok)throw new Error(d.message||'Không thực hiện được yêu cầu.');return d;
+import React, { useEffect, useState } from 'react';
+import { ProjectKolCard } from './ProjectKolCard';
+import { StorageService } from '../services/storageService';
+import { PRICE_FORMAT_LABELS } from '../types/kol';
+import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
+import { paginateItems, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../utils/pagination';
+
+const formats = Object.entries(PRICE_FORMAT_LABELS);
+const field = 'w-full rounded-lg border border-slate-300 px-3 py-2 bg-white';
+const button = 'rounded-lg bg-indigo-600 text-white px-3 py-2 text-sm font-semibold disabled:opacity-50';
+
+async function request(path: string, body?: unknown) {
+  const r = await fetch('/api/workspace' + path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (r.status === 401) window.dispatchEvent(new Event('workspace_session_expired'));
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.message || 'Không thực hiện được yêu cầu.');
+  return d;
 }
-function PriceEditor({row,format,busy,onSave}:{row:any;format:string;busy:boolean;onSave:(body:any)=>void}){
-  const [value,setValue]=useState<number|''>(''),[source,setSource]=useState('');
-  useEffect(()=>{setValue(row.prices[format].value??'');setSource(row.prices[format].source);},[row.revision,format]);
-  const price=row.prices[format];
-  return <div className="space-y-2">
-    <p className={'text-xs '+(price.status==='confirmed'?'text-emerald-700':'text-amber-700')}>{price.status==='confirmed'?'Đã xác nhận':price.status==='waiting'?'Chưa có giá':'Có giá, chưa xác nhận'}{price.checkedAt?' · '+new Date(price.checkedAt).toLocaleString('vi-VN'):''}</p>
-    <label className="block text-xs">Giá đầu vào / đơn vị<input className={field} inputMode="numeric" placeholder="Chưa có giá" value={formatMoneyInput(value)} onChange={e=>setValue(parseMoneyInput(e.target.value))}/></label>
-    <label className="block text-xs">Nguồn kiểm tra giá<input className={field} maxLength={1000} placeholder="VD: Creator xác nhận qua Zalo ngày…" value={source} onChange={e=>setSource(e.target.value)}/></label>
-    <div className="flex gap-2 flex-wrap"><button className="border rounded-lg p-2 text-xs" disabled={busy} onClick={()=>onSave({revision:row.revision,format,value:value===''?null:value,source,confirm:false})}>Lưu giá chưa xác nhận</button><button className={button} disabled={busy||value===''||!source.trim()} onClick={()=>onSave({revision:row.revision,format,value,source,confirm:true})}>Xác nhận giá</button></div>
-  </div>;
+
+function PriceEditor({ row, format, busy, onSave }: { row: any; format: string; busy: boolean; onSave: (body: any) => void }) {
+  const [value, setValue] = useState<number | ''>(''), [source, setSource] = useState('');
+  useEffect(() => { setValue(row.prices[format].value ?? ''); setSource(row.prices[format].source); }, [row.revision, format]);
+  const price = row.prices[format];
+  return (
+    <div className="space-y-2">
+      <p className={'text-xs ' + (price.status === 'confirmed' ? 'text-emerald-700' : 'text-amber-700')}>
+        {price.status === 'confirmed' ? 'Đã xác nhận' : price.status === 'waiting' ? 'Chưa có giá' : 'Có giá, chưa xác nhận'}
+        {price.checkedAt ? ' · ' + new Date(price.checkedAt).toLocaleString('vi-VN') : ''}
+      </p>
+      <label className="block text-xs">
+        Giá đầu vào / đơn vị
+        <input className={field} inputMode="numeric" placeholder="Chưa có giá" value={formatMoneyInput(value)} onChange={e => setValue(parseMoneyInput(e.target.value))} />
+      </label>
+      <label className="block text-xs">
+        Nguồn kiểm tra giá
+        <input className={field} maxLength={1000} placeholder="VD: Creator xác nhận qua Zalo ngày…" value={source} onChange={e => setSource(e.target.value)} />
+      </label>
+      <div className="flex gap-2 flex-wrap">
+        <button className="border rounded-lg p-2 text-xs" disabled={busy} onClick={() => onSave({ revision: row.revision, format, value: value === '' ? null : value, source, confirm: false })}>
+          Lưu giá chưa xác nhận
+        </button>
+        <button className={button} disabled={busy || value === '' || !source.trim()} onClick={() => onSave({ revision: row.revision, format, value, source, confirm: true })}>
+          Xác nhận giá
+        </button>
+      </div>
+    </div>
+  );
 }
-export function ProjectShortlistPanel({projectId,onOpenQuotes}:{projectId:string;onOpenQuotes:()=>void}){
-  const [data,setData]=useState<any>(null),[brief,setBrief]=useState<any>(null),[options,setOptions]=useState<any[]>([]);
-  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[dirty,setDirty]=useState(false);
-  const [catalogIds,setCatalogIds]=useState<string[]>([]),[selected,setSelected]=useState<string[]>([]),[quoteId,setQuoteId]=useState(''),[format,setFormat]=useState('video'),[quantity,setQuantity]=useState(1);
-  const base=`/projects/${projectId}`;
-  async function refresh(){const [d,o]=await Promise.all([request(base+'/shortlist'),request(base+'/options')]);setData(d);setBrief(d.brief);setOptions(o.options);setDirty(false);setCatalogIds([]);setSelected([]);}
-  useEffect(()=>{let active=true;Promise.all([request(base+'/shortlist'),request(base+'/options')]).then(([d,o])=>{if(active){setData(d);setBrief(d.brief);setOptions(o.options);}}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;};},[projectId]);
-  async function run(work:()=>Promise<void>){setBusy(true);setError('');setNotice('');try{await work();}catch(e){setError(e instanceof Error?e.message:'Không thể xử lý yêu cầu.');}finally{setBusy(false);}}
-  function change(k:string,v:any){setBrief((b:any)=>({...b,[k]:v}));setDirty(true);}
-  const toggle=(list:string[],id:string)=>list.includes(id)?list.filter(x=>x!==id):[...list,id];
-  if(!data)return <p>{error||'Đang tải brief và danh sách dự án…'}</p>;
-  const drafts=options.flatMap(o=>o.versions.filter((q:any)=>['draft','changes_requested'].includes(q.status)).map((q:any)=>({...q,label:o.name+' · V'+q.number}))) as any[];
-  const target=drafts.find(q=>q.id===quoteId);
-  const existingCount=target?new Set(target.items.filter((i:any)=>i.included&&i.kind==='kol').map((i:any)=>i.shortlistId||i.creator)).size:0;
-  return <div className="space-y-6">
-    <div><h3 className="text-lg font-bold">Brief chung & Danh sách KOL</h3><p className="text-sm text-slate-500">Brief → danh sách sơ bộ → Booking xác nhận giá → PM chọn vào phương án → khách chốt.</p></div>
-    {data.brief.deliverables?.length>0&&<div className="bg-indigo-50 border border-indigo-100 p-3 rounded-xl text-xs text-indigo-900"><strong>Brief đã duyệt · {data.brief.deliverableScope==='campaign'?'Tổng chiến dịch':'Mỗi KOL'}:</strong> {data.brief.deliverables.map((d:any)=>PRICE_FORMAT_LABELS[d.format as keyof typeof PRICE_FORMAT_LABELS]+' '+d.quantity.toLocaleString('vi-VN')).join(' · ')}<p className="mt-1">{data.brief.targetCount?'Mục tiêu '+data.brief.targetCount+' KOL. ':''}{data.brief.deliverableScope==='campaign'?'PM phân bổ hạng mục trong từng phương án; không tự chia cho mỗi KOL.':'PM chọn và duyệt phân công trong từng phương án.'}</p></div>}
-    {error&&<p role="alert" className="p-3 bg-red-50 text-red-700 rounded-lg">{error}</p>}{notice&&<p role="status" className="p-3 bg-emerald-50 text-emerald-800 rounded-lg">{notice}</p>}
-    <details open={!data.brief.text} className="border rounded-xl p-4 space-y-3"><summary className="font-semibold cursor-pointer">1. Brief và tiêu chí đã duyệt</summary><p className="text-xs text-slate-500">Duyệt tiêu chí và hạng mục trước khi tìm KOL. Số KOL mục tiêu chỉ để đối chiếu khi chọn phương án, không giới hạn kết quả tìm kiếm.</p>
-      <fieldset disabled={!data.canManage||busy} className="space-y-3">
-        <label className="block text-sm">Brief chung<textarea className={field} rows={4} maxLength={10000} value={brief.text} onChange={e=>change('text',e.target.value)}/></label>
-        <div className="grid sm:grid-cols-2 gap-3"><label className="text-sm">Lĩnh vực nội dung<input className={field} placeholder="VD: Ẩm thực" value={brief.category} onChange={e=>change('category',e.target.value)}/></label><label className="text-sm">Từ khóa trong hồ sơ KOL<input className={field} placeholder="Để trống để không lọc thêm" value={brief.keyword} onChange={e=>change('keyword',e.target.value)}/></label>
-          <label className="text-sm">Nền tảng<select className={field} value={brief.platform} onChange={e=>change('platform',e.target.value)}><option value="">Tất cả nền tảng</option>{['TikTok','YouTube','Facebook','Instagram','Khác'].map(p=><option key={p}>{p}</option>)}</select></label>
-          <label className="text-sm">Follower tối thiểu<input className={field} inputMode="numeric" value={formatMoneyInput(brief.minFollowers||'')} onChange={e=>change('minFollowers',parseMoneyInput(e.target.value)||0)}/></label>
-          <label className="text-sm">Số KOL mục tiêu — chỉ để đối chiếu<input className={field} type="number" min={1} value={brief.targetCount??''} onChange={e=>change('targetCount',e.target.value===''?null:Number(e.target.value))}/></label>
-          <label className="text-sm">Ngân sách chiến dịch (VND)<input className={field} inputMode="numeric" value={formatMoneyInput(brief.budget??'')} onChange={e=>{const v=parseMoneyInput(e.target.value);change('budget',v===''?null:v);}}/></label>
+
+function PaginationBar({
+  page,
+  totalPages,
+  totalItems,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+  itemName = 'KOL',
+}: {
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (newPage: number) => void;
+  onPageSizeChange?: (newSize: number) => void;
+  itemName?: string;
+}) {
+  if (totalItems === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-200 text-xs text-slate-600">
+      <div className="flex items-center gap-2">
+        <span>
+          Trang <strong>{page}</strong> / <strong>{totalPages}</strong> (tổng <strong>{totalItems.toLocaleString('vi-VN')}</strong> {itemName})
+        </span>
+        {onPageSizeChange && (
+          <select
+            aria-label="Số lượng mỗi trang"
+            value={pageSize}
+            onChange={(e) => onPageSizeChange(Number(e.target.value))}
+            className="rounded border border-slate-300 px-2 py-1 bg-white text-xs cursor-pointer"
+          >
+            {PAGE_SIZE_OPTIONS.map((sz) => (
+              <option key={sz} value={sz}>{sz} / trang</option>
+            ))}
+          </select>
+        )}
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+          className="px-2.5 py-1 rounded border border-slate-300 bg-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer"
+        >
+          Trang trước
+        </button>
+        {Array.from({ length: totalPages }, (_, i) => i + 1)
+          .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
+          .map((p, idx, arr) => (
+            <React.Fragment key={p}>
+              {idx > 0 && p - arr[idx - 1] > 1 && <span className="px-1 text-slate-400">…</span>}
+              <button
+                type="button"
+                onClick={() => onPageChange(p)}
+                className={`px-2.5 py-1 rounded border text-xs font-medium cursor-pointer ${
+                  p === page
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {p}
+              </button>
+            </React.Fragment>
+          ))}
+        <button
+          type="button"
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(page + 1)}
+          className="px-2.5 py-1 rounded border border-slate-300 bg-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer"
+        >
+          Trang sau
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function ProjectShortlistPanel({ projectId, onOpenQuotes }: { projectId: string; onOpenQuotes: () => void }) {
+  const [data, setData] = useState<any>(null), [brief, setBrief] = useState<any>(null), [options, setOptions] = useState<any[]>([]);
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [dirty, setDirty] = useState(false);
+  const [catalogIds, setCatalogIds] = useState<string[]>([]), [selected, setSelected] = useState<string[]>([]), [quoteId, setQuoteId] = useState(''), [format, setFormat] = useState('video'), [quantity, setQuantity] = useState(1);
+
+  // Phân trang cho cả hai danh sách
+  const [matchesPage, setMatchesPage] = useState(1);
+  const [matchesPageSize, setMatchesPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+  const [rowsPage, setRowsPage] = useState(1);
+  const [rowsPageSize, setRowsPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+
+  const base = `/projects/${projectId}`;
+
+  async function refresh() {
+    const [d, o] = await Promise.all([request(base + '/shortlist'), request(base + '/options')]);
+    setData(d);
+    setBrief(d.brief);
+    setOptions(o.options);
+    setDirty(false);
+    setCatalogIds([]);
+    setSelected([]);
+    setMatchesPage(1);
+    setRowsPage(1);
+  }
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([request(base + '/shortlist'), request(base + '/options')]).then(([d, o]) => {
+      if (active) {
+        setData(d);
+        setBrief(d.brief);
+        setOptions(o.options);
+        setMatchesPage(1);
+        setRowsPage(1);
+      }
+    }).catch(e => {
+      if (active) setError(e.message);
+    });
+    return () => { active = false; };
+  }, [projectId]);
+
+  async function run(work: () => Promise<void>) {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await work();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Không thể xử lý yêu cầu.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function change(k: string, v: any) {
+    setBrief((b: any) => ({ ...b, [k]: v }));
+    setDirty(true);
+    setMatchesPage(1);
+  }
+
+  const toggle = (list: string[], id: string) => list.includes(id) ? list.filter(x => x !== id) : [...list, id];
+
+  if (!data) return <p>{error || 'Đang tải brief và danh sách dự án…'}</p>;
+
+  const drafts = options.flatMap(o => o.versions.filter((q: any) => ['draft', 'changes_requested'].includes(q.status)).map((q: any) => ({ ...q, label: o.name + ' · V' + q.number }))) as any[];
+  const target = drafts.find(q => q.id === quoteId);
+  const existingCount = target ? new Set(target.items.filter((i: any) => i.included && i.kind === 'kol').map((i: any) => i.shortlistId || i.creator)).size : 0;
+
+  // Phân trang dữ liệu
+  const paginatedMatches = paginateItems(data.matches || [], matchesPage, matchesPageSize);
+  const paginatedRows = paginateItems(data.rows || [], rowsPage, rowsPageSize);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-lg font-bold">Brief chung & Danh sách KOL</h3>
+        <p className="text-sm text-slate-500">Brief → danh sách sơ bộ → Booking xác nhận giá → PM chọn vào phương án → khách chốt.</p>
+      </div>
+
+      {data.brief.deliverables?.length > 0 && (
+        <div className="bg-indigo-50 border border-indigo-100 p-3 rounded-xl text-xs text-indigo-900">
+          <strong>Brief đã duyệt · {data.brief.deliverableScope === 'campaign' ? 'Tổng chiến dịch' : 'Mỗi KOL'}:</strong>{' '}
+          {data.brief.deliverables.map((d: any) => PRICE_FORMAT_LABELS[d.format as keyof typeof PRICE_FORMAT_LABELS] + ' ' + d.quantity.toLocaleString('vi-VN')).join(' · ')}
+          <p className="mt-1">
+            {data.brief.targetCount ? 'Mục tiêu ' + data.brief.targetCount + ' KOL. ' : ''}
+            {data.brief.deliverableScope === 'campaign' ? 'PM phân bổ hạng mục trong từng phương án; không tự chia cho mỗi KOL.' : 'PM chọn và duyệt phân công trong từng phương án.'}
+          </p>
         </div>
-        <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 space-y-3"><label className="block text-sm font-semibold">Phạm vi hạng mục trong brief<select className={field} value={brief.deliverableScope??'campaign'} onChange={e=>change('deliverableScope',e.target.value)}><option value="campaign">Tổng toàn chiến dịch</option><option value="per_kol">Mỗi KOL thực hiện</option></select></label><p className="text-xs text-slate-500">Nhập 0 hoặc để trống nếu brief không yêu cầu. Tổng chiến dịch không tự chia đều cho từng KOL.</p><div className="grid grid-cols-2 sm:grid-cols-3 gap-3">{formats.map(([key,label])=><label key={key} className="text-xs">{label}<input aria-label={'Số lượng brief '+label} className={field} type="number" min={0} max={100000} step={1} value={(brief.deliverables??[]).find((d:any)=>d.format===key)?.quantity??''} onChange={e=>{const quantity=Number(e.target.value);change('deliverables',[...(brief.deliverables??[]).filter((d:any)=>d.format!==key),...(quantity>0?[{format:key,quantity}]:[])]);}}/></label>)}</div></div>
-        {data.canManage&&<button className={button} disabled={!dirty||busy} onClick={()=>run(async()=>{await request(base+'/brief',{brief,revision:data.briefRevision});await refresh();setNotice('Đã lưu brief chung và cập nhật toàn bộ kết quả phù hợp.');})}>Lưu brief & Lọc KOL</button>}
-      </fieldset>
-      {dirty&&<p className="text-sm text-amber-700">Tiêu chí chưa lưu. Kết quả phía dưới theo tiêu chí đã lưu trước đó.</p>}
-    </details>
-    <details open={data.rows.length===0} className="border rounded-xl p-4 space-y-3"><summary className="font-semibold cursor-pointer">2. Tìm từ thư viện chung — {data.matches.length.toLocaleString('vi-VN')} kết quả / {data.catalogCount.toLocaleString('vi-VN')} KOL</summary>
-      <p className="text-xs text-slate-500">Lọc theo nội dung hồ sơ và tiêu chí đã duyệt; chưa dùng AI để đánh giá ngữ nghĩa. Thiếu giá vẫn xuất hiện. Không áp dụng Top N hoặc lọc theo giá.</p>
-      {data.canImport&&<button disabled={busy||dirty} className="border rounded-lg px-3 py-2 text-sm" onClick={()=>run(async()=>{const profiles=StorageService.getKols().filter(p=>!p.isSample);if(!profiles.length){setNotice('Không có KOL thật trên trình duyệt này để nhập. Có thể thêm KOL mới bên dưới.');return;}let added=0,updated=0,unchanged=0,onlyInCatalog=0;for(let i=0;i<profiles.length;i+=500){const r=await request(base+'/catalog/import',{profiles:profiles.slice(i,i+500)});added+=r.added;updated+=r.updated;unchanged+=r.unchanged;onlyInCatalog=r.onlyInCatalog;}await refresh();const extra=onlyInCatalog>0?` Thư viện còn ${onlyInCatalog} KOL không có trong dữ liệu trình duyệt này (được giữ nguyên).`:'';setNotice(`Đã đồng bộ thư viện: thêm mới ${added}, cập nhật ${updated}, không đổi ${unchanged}.${extra}`);})}>Đồng bộ toàn bộ KOL từ trình duyệt vào thư viện</button>}
-      <div className="space-y-4">{data.matches.map((p:any)=>{const kept=data.rows.find((r:any)=>r.catalogId===p.id);return <ProjectKolCard key={p.id} profile={p} brief={data.brief} prices={kept?.prices} selected={catalogIds.includes(p.id)||Boolean(kept)} disabled={busy||dirty||Boolean(kept)} selectionLabel="Giữ KOL vào danh sách sơ bộ" onSelect={()=>setCatalogIds(toggle(catalogIds,p.id))} badge={kept?'Đã có trong danh sách sơ bộ':undefined}/>;})}{!data.matches.length&&<p className="py-3 text-sm text-slate-500">Chưa có kết quả. Bổ sung thư viện hoặc điều chỉnh tiêu chí nội dung.</p>}</div>
-      <button className={button} disabled={busy||dirty||!catalogIds.length} onClick={()=>run(async()=>{const r=await request(base+'/shortlist/add',{ids:catalogIds});await refresh();setNotice(`Đã thêm ${r.added} KOL vào danh sách sơ bộ dùng chung.`);})}>Thêm {catalogIds.length} KOL vào danh sách sơ bộ</button>
-      <details><summary className="cursor-pointer text-sm text-indigo-700">Thêm hồ sơ KOL mới vào thư viện chung</summary><form className="grid sm:grid-cols-2 gap-3 mt-3" onSubmit={e=>{e.preventDefault();const form=e.currentTarget,f=new FormData(form);run(async()=>{await request(base+'/catalog/create',{profile:{ten:f.get('name'),linhVuc:String(f.get('category')).split(',').map(s=>s.trim()).filter(Boolean),nenTang:[{tenNenTang:f.get('platform'),linkProfile:f.get('url'),soFollower:parseMoneyInput(String(f.get('followers')))||0}],reviewSoBo:f.get('notes'),bangGia:{}}});form.reset();await refresh();setNotice('Đã thêm KOL vào thư viện. Chọn KOL ở kết quả phù hợp để đưa vào dự án.');});}}>
-        <input aria-label="Tên KOL mới" name="name" required maxLength={200} placeholder="Tên KOL" className={field}/><input aria-label="Lĩnh vực KOL mới" name="category" required placeholder="Lĩnh vực, ngăn bằng dấu phẩy" className={field}/><select aria-label="Nền tảng KOL mới" name="platform" className={field}>{['TikTok','YouTube','Facebook','Instagram','Khác'].map(p=><option key={p}>{p}</option>)}</select><input aria-label="Link hồ sơ KOL mới" name="url" type="url" placeholder="Link hồ sơ (tùy chọn)" className={field}/><input aria-label="Follower KOL mới" name="followers" placeholder="Follower" inputMode="numeric" className={field} onChange={e=>{e.target.value=formatMoneyInput(parseMoneyInput(e.target.value));}}/><textarea aria-label="Nội dung hồ sơ KOL mới" name="notes" placeholder="Nội dung chuyên môn / phong cách" className={field}/><button className={button} disabled={busy||dirty}>Thêm vào thư viện</button>
-      </form></details>
-    </details>
-    <section className="space-y-3"><h4 className="font-semibold">3. Danh sách sơ bộ — Booking kiểm tra giá ({data.rows.length} KOL)</h4><p className="text-xs text-slate-500">Giá có sẵn trong thư viện chưa được coi là đã xác nhận. Kiểm tra từng hạng mục, ghi nguồn rồi xác nhận. Việc cập nhật không tự thay đổi báo giá đã lập.</p>
-      {data.rows.map((row:any)=><ProjectKolCard key={row.id} profile={row.profile} brief={data.brief} prices={row.prices} selected={selected.includes(row.id)} disabled={busy||dirty} selectionLabel="Chọn vào phương án" onSelect={data.canManage?()=>setSelected(toggle(selected,row.id)):undefined} renderPriceEditor={format=><PriceEditor row={row} format={format} busy={busy||dirty} onSave={body=>run(async()=>{await request(base+`/shortlist/${row.id}/prices`,body);await refresh();setNotice('Đã lưu giá đầu vào của dự án. Các phương án cũ giữ nguyên giá đã chụp.');})}/>}/>)}
-      {!data.rows.length&&<p className="text-sm border border-dashed rounded-xl p-4">Thêm KOL từ thư viện ở bước 2. Danh sách này dùng chung cho cả PM và Booking.</p>}
-    </section>
-    {data.canManage&&<section className="border border-indigo-200 bg-indigo-50 rounded-xl p-4 space-y-3"><h4 className="font-semibold">4. Đưa KOL đã chọn vào phương án</h4><p className="text-sm">Mục tiêu brief: {brief.targetCount??'Chưa đặt'} KOL · Đang tích {selected.length} KOL. Có thể dùng một KOL trong nhiều phương án.</p>
-      <div className="grid sm:grid-cols-3 gap-3"><label className="text-sm">Bản nháp phương án<select aria-label="Phương án nhận KOL" className={field} value={quoteId} onChange={e=>setQuoteId(e.target.value)}><option value="">Chọn phương án / phiên bản…</option>{drafts.map(q=><option key={q.id} value={q.id}>{q.label}</option>)}</select></label><label className="text-sm">Hạng mục cần lấy giá<select aria-label="Hạng mục đưa vào phương án" className={field} value={format} onChange={e=>setFormat(e.target.value)}>{formats.map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><label className="text-sm">Số lượng hạng mục / KOL<input className={field} type="number" min={1} max={100000} value={quantity} onChange={e=>setQuantity(Number(e.target.value))}/></label></div>
-      {target&&<p className="text-sm">Phương án hiện có {existingCount} KOL. Giá bán từng dòng được PM nhập tại báo giá; ngân sách tổng kiểm tra theo phương án.</p>}
-      <div className="flex gap-2 flex-wrap"><button className={button} disabled={busy||dirty||!target||!selected.length} onClick={()=>run(async()=>{await request(base+'/shortlist/to-option',{quoteId,revision:target.revision,selections:selected.map(id=>({id,format,quantity}))});await refresh();setNotice('Đã đưa KOL và giá đã xác nhận vào phương án. Mở báo giá để PM điền giá bán.');})}>Đưa KOL đã chọn vào phương án</button><button className="border rounded-lg p-2 text-sm" onClick={onOpenQuotes}>Mở / Tạo phương án & Báo giá</button><button className="border rounded-lg p-2 text-sm" disabled={busy||dirty} onClick={()=>run(refresh)}>Tải lại dữ liệu</button></div>
-      <p className="text-xs text-slate-500">Chỉ lấy giá hạng mục đã xác nhận; không tự tạo phương án, không tự chia đều SOW toàn chiến dịch. Thêm lần lượt các hạng mục và điều chỉnh số lượng từng KOL tại báo giá.</p>
-    </section>}
-  </div>;
+      )}
+
+      {error && <p role="alert" className="p-3 bg-red-50 text-red-700 rounded-lg">{error}</p>}
+      {notice && <p role="status" className="p-3 bg-emerald-50 text-emerald-800 rounded-lg">{notice}</p>}
+
+      <details open={!data.brief.text} className="border rounded-xl p-4 space-y-3">
+        <summary className="font-semibold cursor-pointer">1. Brief và tiêu chí đã duyệt</summary>
+        <p className="text-xs text-slate-500">Duyệt tiêu chí và hạng mục trước khi tìm KOL. Số KOL mục tiêu chỉ để đối chiếu khi chọn phương án, không giới hạn kết quả tìm kiếm.</p>
+        <fieldset disabled={!data.canManage || busy} className="space-y-3">
+          <label className="block text-sm">
+            Brief chung
+            <textarea className={field} rows={4} maxLength={10000} value={brief.text} onChange={e => change('text', e.target.value)} />
+          </label>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <label className="text-sm">
+              Lĩnh vực nội dung
+              <input className={field} placeholder="VD: Ẩm thực" value={brief.category} onChange={e => change('category', e.target.value)} />
+            </label>
+            <label className="text-sm">
+              Từ khóa trong hồ sơ KOL
+              <input className={field} placeholder="Để trống để không lọc thêm" value={brief.keyword} onChange={e => change('keyword', e.target.value)} />
+            </label>
+            <label className="text-sm">
+              Nền tảng
+              <select className={field} value={brief.platform} onChange={e => change('platform', e.target.value)}>
+                <option value="">Tất cả nền tảng</option>
+                {['TikTok', 'YouTube', 'Facebook', 'Instagram', 'Khác'].map(p => <option key={p}>{p}</option>)}
+              </select>
+            </label>
+            <label className="text-sm">
+              Follower tối thiểu
+              <input className={field} inputMode="numeric" value={formatMoneyInput(brief.minFollowers || '')} onChange={e => change('minFollowers', parseMoneyInput(e.target.value) || 0)} />
+            </label>
+            <label className="text-sm">
+              Số KOL mục tiêu — chỉ để đối chiếu
+              <input className={field} type="number" min={1} value={brief.targetCount ?? ''} onChange={e => change('targetCount', e.target.value === '' ? null : Number(e.target.value))} />
+            </label>
+            <label className="text-sm">
+              Ngân sách chiến dịch (VND)
+              <input className={field} inputMode="numeric" value={formatMoneyInput(brief.budget ?? '')} onChange={e => { const v = parseMoneyInput(e.target.value); change('budget', v === '' ? null : v); }} />
+            </label>
+          </div>
+          <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 space-y-3">
+            <label className="block text-sm font-semibold">
+              Phạm vi hạng mục trong brief
+              <select className={field} value={brief.deliverableScope ?? 'campaign'} onChange={e => change('deliverableScope', e.target.value)}>
+                <option value="campaign">Tổng toàn chiến dịch</option>
+                <option value="per_kol">Mỗi KOL thực hiện</option>
+              </select>
+            </label>
+            <p className="text-xs text-slate-500">Nhập 0 hoặc để trống nếu brief không yêu cầu. Tổng chiến dịch không tự chia đều cho từng KOL.</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {formats.map(([key, label]) => (
+                <label key={key} className="text-xs">
+                  {label}
+                  <input
+                    aria-label={'Số lượng brief ' + label}
+                    className={field}
+                    type="number"
+                    min={0}
+                    max={100000}
+                    step={1}
+                    value={(brief.deliverables ?? []).find((d: any) => d.format === key)?.quantity ?? ''}
+                    onChange={e => {
+                      const quantity = Number(e.target.value);
+                      change('deliverables', [
+                        ...(brief.deliverables ?? []).filter((d: any) => d.format !== key),
+                        ...(quantity > 0 ? [{ format: key, quantity }] : []),
+                      ]);
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+          {data.canManage && (
+            <button
+              className={button}
+              disabled={!dirty || busy}
+              onClick={() => run(async () => {
+                await request(base + '/brief', { brief, revision: data.briefRevision });
+                await refresh();
+                setNotice('Đã lưu brief chung và cập nhật toàn bộ kết quả phù hợp.');
+              })}
+            >
+              Lưu brief & Lọc KOL
+            </button>
+          )}
+        </fieldset>
+        {dirty && <p className="text-sm text-amber-700">Tiêu chí chưa lưu. Kết quả phía dưới theo tiêu chí đã lưu trước đó.</p>}
+      </details>
+
+      <details open={data.rows.length === 0} className="border rounded-xl p-4 space-y-3">
+        <summary className="font-semibold cursor-pointer">
+          2. Tìm từ thư viện chung — {data.matches.length.toLocaleString('vi-VN')} kết quả / {data.catalogCount.toLocaleString('vi-VN')} KOL
+        </summary>
+        <p className="text-xs text-slate-500">Lọc theo nội dung hồ sơ và tiêu chí đã duyệt; chưa dùng AI để đánh giá ngữ nghĩa. Thiếu giá vẫn xuất hiện. Không áp dụng Top N hoặc lọc theo giá.</p>
+        {data.canImport && (
+          <button
+            disabled={busy || dirty}
+            className="border rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-slate-50"
+            onClick={() => run(async () => {
+              const profiles = StorageService.getKols().filter(p => !p.isSample);
+              if (!profiles.length) {
+                setNotice('Không có KOL thật trên trình duyệt này để nhập. Có thể thêm KOL mới bên dưới.');
+                return;
+              }
+              let added = 0, updated = 0, unchanged = 0, onlyInCatalog = 0;
+              for (let i = 0; i < profiles.length; i += 500) {
+                const r = await request(base + '/catalog/import', { profiles: profiles.slice(i, i + 500) });
+                added += r.added;
+                updated += r.updated;
+                unchanged += r.unchanged;
+                onlyInCatalog = r.onlyInCatalog;
+              }
+              await refresh();
+              const extra = onlyInCatalog > 0 ? ` Thư viện còn ${onlyInCatalog} KOL không có trong dữ liệu trình duyệt này (được giữ nguyên).` : '';
+              setNotice(`Đã đồng bộ thư viện: thêm mới ${added}, cập nhật ${updated}, không đổi ${unchanged}.${extra}`);
+            })}
+          >
+            Đồng bộ toàn bộ KOL từ trình duyệt vào thư viện
+          </button>
+        )}
+
+        <div className="space-y-4">
+          {paginatedMatches.pageItems.map((p: any) => {
+            const kept = data.rows.find((r: any) => r.catalogId === p.id);
+            return (
+              <ProjectKolCard
+                key={p.id}
+                profile={p}
+                brief={data.brief}
+                prices={kept?.prices}
+                selected={catalogIds.includes(p.id) || Boolean(kept)}
+                disabled={busy || dirty || Boolean(kept)}
+                selectionLabel="Giữ KOL vào danh sách sơ bộ"
+                onSelect={() => setCatalogIds(toggle(catalogIds, p.id))}
+                badge={kept ? 'Đã có trong danh sách sơ bộ' : undefined}
+              />
+            );
+          })}
+          {!data.matches.length && (
+            <p className="py-3 text-sm text-slate-500">Chưa có kết quả. Bổ sung thư viện hoặc điều chỉnh tiêu chí nội dung.</p>
+          )}
+
+          <PaginationBar
+            page={paginatedMatches.page}
+            totalPages={paginatedMatches.totalPages}
+            totalItems={paginatedMatches.totalItems}
+            pageSize={paginatedMatches.pageSize}
+            onPageChange={setMatchesPage}
+            onPageSizeChange={(sz) => {
+              setMatchesPageSize(sz);
+              setMatchesPage(1);
+            }}
+          />
+        </div>
+
+        <button
+          className={button}
+          disabled={busy || dirty || !catalogIds.length}
+          onClick={() => run(async () => {
+            const r = await request(base + '/shortlist/add', { ids: catalogIds });
+            await refresh();
+            setNotice(`Đã thêm ${r.added} KOL vào danh sách sơ bộ dùng chung.`);
+          })}
+        >
+          Thêm {catalogIds.length} KOL vào danh sách sơ bộ
+        </button>
+
+        <details>
+          <summary className="cursor-pointer text-sm text-indigo-700">Thêm hồ sơ KOL mới vào thư viện chung</summary>
+          <form
+            className="grid sm:grid-cols-2 gap-3 mt-3"
+            onSubmit={e => {
+              e.preventDefault();
+              const form = e.currentTarget, f = new FormData(form);
+              run(async () => {
+                await request(base + '/catalog/create', {
+                  profile: {
+                    ten: f.get('name'),
+                    linhVuc: String(f.get('category')).split(',').map(s => s.trim()).filter(Boolean),
+                    nenTang: [{ tenNenTang: f.get('platform'), linkProfile: f.get('url'), soFollower: parseMoneyInput(String(f.get('followers'))) || 0 }],
+                    reviewSoBo: f.get('notes'),
+                    bangGia: {},
+                  },
+                });
+                form.reset();
+                await refresh();
+                setNotice('Đã thêm KOL vào thư viện. Chọn KOL ở kết quả phù hợp để đưa vào dự án.');
+              });
+            }}
+          >
+            <input aria-label="Tên KOL mới" name="name" required maxLength={200} placeholder="Tên KOL" className={field} />
+            <input aria-label="Lĩnh vực KOL mới" name="category" required placeholder="Lĩnh vực, ngăn bằng dấu phẩy" className={field} />
+            <select aria-label="Nền tảng KOL mới" name="platform" className={field}>
+              {['TikTok', 'YouTube', 'Facebook', 'Instagram', 'Khác'].map(p => <option key={p}>{p}</option>)}
+            </select>
+            <input aria-label="Link hồ sơ KOL mới" name="url" type="url" placeholder="Link hồ sơ (tùy chọn)" className={field} />
+            <input aria-label="Follower KOL mới" name="followers" placeholder="Follower" inputMode="numeric" className={field} onChange={e => { e.target.value = formatMoneyInput(parseMoneyInput(e.target.value)); }} />
+            <textarea aria-label="Nội dung hồ sơ KOL mới" name="notes" placeholder="Nội dung chuyên môn / phong cách" className={field} />
+            <button className={button} disabled={busy || dirty}>Thêm vào thư viện</button>
+          </form>
+        </details>
+      </details>
+
+      <section className="space-y-3">
+        <h4 className="font-semibold">3. Danh sách sơ bộ — Booking kiểm tra giá ({data.rows.length} KOL)</h4>
+        <p className="text-xs text-slate-500">Giá có sẵn trong thư viện chưa được coi là đã xác nhận. Kiểm tra từng hạng mục, ghi nguồn rồi xác nhận. Việc cập nhật không tự thay đổi báo giá đã lập.</p>
+        <div className="space-y-4">
+          {paginatedRows.pageItems.map((row: any) => (
+            <ProjectKolCard
+              key={row.id}
+              profile={row.profile}
+              brief={data.brief}
+              prices={row.prices}
+              selected={selected.includes(row.id)}
+              disabled={busy || dirty}
+              selectionLabel="Chọn vào phương án"
+              onSelect={data.canManage ? () => setSelected(toggle(selected, row.id)) : undefined}
+              renderPriceEditor={format => (
+                <PriceEditor
+                  row={row}
+                  format={format}
+                  busy={busy || dirty}
+                  onSave={body => run(async () => {
+                    await request(base + `/shortlist/${row.id}/prices`, body);
+                    await refresh();
+                    setNotice('Đã lưu giá đầu vào của dự án. Các phương án cũ giữ nguyên giá đã chụp.');
+                  })}
+                />
+              )}
+            />
+          ))}
+          {!data.rows.length && (
+            <p className="text-sm border border-dashed rounded-xl p-4">Thêm KOL từ thư viện ở bước 2. Danh sách này dùng chung cho cả PM và Booking.</p>
+          )}
+
+          <PaginationBar
+            page={paginatedRows.page}
+            totalPages={paginatedRows.totalPages}
+            totalItems={paginatedRows.totalItems}
+            pageSize={paginatedRows.pageSize}
+            onPageChange={setRowsPage}
+            onPageSizeChange={(sz) => {
+              setRowsPageSize(sz);
+              setRowsPage(1);
+            }}
+          />
+        </div>
+      </section>
+
+      {data.canManage && (
+        <section className="border border-indigo-200 bg-indigo-50 rounded-xl p-4 space-y-3">
+          <h4 className="font-semibold">4. Đưa KOL đã chọn vào phương án</h4>
+          <p className="text-sm">Mục tiêu brief: {brief.targetCount ?? 'Chưa đặt'} KOL · Đang tích {selected.length} KOL. Có thể dùng một KOL trong nhiều phương án.</p>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <label className="text-sm">
+              Bản nháp phương án
+              <select aria-label="Phương án nhận KOL" className={field} value={quoteId} onChange={e => setQuoteId(e.target.value)}>
+                <option value="">Chọn phương án / phiên bản…</option>
+                {drafts.map(q => <option key={q.id} value={q.id}>{q.label}</option>)}
+              </select>
+            </label>
+            <label className="text-sm">
+              Hạng mục cần lấy giá
+              <select aria-label="Hạng mục đưa vào phương án" className={field} value={format} onChange={e => setFormat(e.target.value)}>
+                {formats.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </label>
+            <label className="text-sm">
+              Số lượng hạng mục / KOL
+              <input className={field} type="number" min={1} max={100000} value={quantity} onChange={e => setQuantity(Number(e.target.value))} />
+            </label>
+          </div>
+          {target && <p className="text-sm">Phương án hiện có {existingCount} KOL. Giá bán từng dòng được PM nhập tại báo giá; ngân sách tổng kiểm tra theo phương án.</p>}
+          <div className="flex gap-2 flex-wrap">
+            <button
+              className={button}
+              disabled={busy || dirty || !target || !selected.length}
+              onClick={() => run(async () => {
+                await request(base + '/shortlist/to-option', { quoteId, revision: target.revision, selections: selected.map(id => ({ id, format, quantity })) });
+                await refresh();
+                setNotice('Đã đưa KOL và giá đã xác nhận vào phương án. Mở báo giá để PM điền giá bán.');
+              })}
+            >
+              Đưa KOL đã chọn vào phương án
+            </button>
+            <button className="border rounded-lg p-2 text-sm cursor-pointer hover:bg-slate-50" onClick={onOpenQuotes}>
+              Mở / Tạo phương án & Báo giá
+            </button>
+            <button className="border rounded-lg p-2 text-sm cursor-pointer hover:bg-slate-50" disabled={busy || dirty} onClick={() => run(refresh)}>
+              Tải lại dữ liệu
+            </button>
+          </div>
+          <p className="text-xs text-slate-500">Chỉ lấy giá hạng mục đã xác nhận; không tự tạo phương án, không tự chia đều SOW toàn chiến dịch. Thêm lần lượt các hạng mục và điều chỉnh số lượng từng KOL tại báo giá.</p>
+        </section>
+      )}
+    </div>
+  );
 }

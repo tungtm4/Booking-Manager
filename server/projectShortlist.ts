@@ -15,7 +15,7 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
   function profile(p:any){
     if(!p||!str(p.id,100)||!p.id.trim()||!str(p.ten,200)||!p.ten.trim()||!Array.isArray(p.linhVuc)||p.linhVuc.length>50||p.linhVuc.some((v:any)=>!str(v,100))||!Array.isArray(p.nenTang)||p.nenTang.length>30||!p.bangGia||formats.some(f=>!money(p.bangGia[f]??null)))return null;
     if(p.nenTang.some((c:any)=>!c||!str(c.tenNenTang,50)||!str(c.linkProfile??'',2000)||!Number.isSafeInteger(c.soFollower)||c.soFollower<0)||!str(p.reviewSoBo??'',5000))return null;
-    return {id:p.id,ten:p.ten.trim(),linhVuc:p.linhVuc,nenTang:p.nenTang.map((c:any)=>({tenNenTang:c.tenNenTang,linkProfile:c.linkProfile??'',soFollower:c.soFollower})),reviewSoBo:p.reviewSoBo??'',anhDaiDien:typeof p.anhDaiDien==='string'&&/^https?:\/\//i.test(p.anhDaiDien)?p.anhDaiDien:undefined,bangGia:Object.fromEntries(formats.map(f=>[f,p.bangGia[f]??null]))};
+    return {id:p.id,ten:p.ten.trim(),linhVuc:p.linhVuc,nenTang:p.nenTang.map((c:any)=>({tenNenTang:c.tenNenTang,linkProfile:c.linkProfile??'',soFollower:c.soFollower})),reviewSoBo:p.reviewSoBo??'',anhDaiDien:typeof p.anhDaiDien==='string'&&/^https?:\/\//i.test(p.anhDaiDien)?p.anhDaiDien:undefined,bangGia:Object.fromEntries(formats.map(f=>[f,p.bangGia[f]??null])),ngayCapNhat:typeof p.ngayCapNhat==='string'?p.ngayCapNhat:undefined};
   }
   const emptyBrief=emptyProjectBrief;
   router.get('/projects/:id/shortlist',(req,res)=>{
@@ -66,7 +66,7 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
   });
   router.post('/projects/:id/catalog/create',(req,res)=>{
     const u=res.locals.user;if(!access(u,req.params.id))return res.status(403).json({message:'Bạn không có quyền thêm KOL trong dự án này.'});
-    const p=profile({...req.body.profile,id:randomUUID()});if(!p)return res.status(400).json({message:'Kiểm tra tên, lĩnh vực, nền tảng, follower và giá KOL.'});
+    const p=profile({...req.body.profile,id:randomUUID(),ngayCapNhat:req.body.profile?.ngayCapNhat||new Date().toISOString()});if(!p)return res.status(400).json({message:'Kiểm tra tên, lĩnh vực, nền tảng, follower và giá KOL.'});
     db.prepare('INSERT INTO kol_catalog VALUES (?,?,?)').run(p.id,u.organization_id,JSON.stringify(p));audit(u.id,'create_catalog_kol',p.id);res.json({id:p.id});
   });
   router.post('/projects/:id/shortlist/add',(req,res)=>{

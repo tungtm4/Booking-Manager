@@ -1,35 +1,332 @@
-import React,{useState} from 'react';
-import {Check,CheckCircle2,AlertCircle,ExternalLink,ChevronDown} from 'lucide-react';
-import {PRICE_FORMAT_LABELS,type PriceFormatKey} from '../types/kol';
-import {assessProjectKol,type ProjectBrief} from '../domain/projectBrief';
-import {formatMoneyInput} from '../utils/moneyInput';
-const shortLabels:Record<PriceFormatKey,string>={post:'Post / Ảnh',video:'Video review / dài',shorts:'Clip ngắn',livestream:'Livestream',thamDuSuKien:'Tham dự sự kiện',sdha:'Sử dụng hình ảnh'};
-const safeUrl=(v:any)=>typeof v==='string'&&/^https?:\/\//i.test(v)?v:undefined;
-export function ProjectKolCard({profile,brief,prices,selected,disabled,selectionLabel,onSelect,badge,renderPriceEditor}:{profile:any;brief:ProjectBrief;prices?:any;selected:boolean;disabled:boolean;selectionLabel:string;onSelect?:()=>void;badge?:string;renderPriceEditor?:(format:PriceFormatKey)=>React.ReactNode}){
-  const [editing,setEditing]=useState<PriceFormatKey|null>(null);
-  const assessment=assessProjectKol(profile,brief);
-  const needed=brief.deliverables??[];
-  return <article className={'rounded-2xl border bg-white shadow-sm overflow-hidden '+(selected?'border-indigo-500 ring-2 ring-indigo-100':'border-slate-200')} aria-label={'Hồ sơ KOL '+profile.ten}>
-    <div className="p-4 sm:p-5 space-y-4">
-      <header className="flex items-start gap-3">
-        {onSelect&&<input type="checkbox" aria-label={selectionLabel+' '+profile.ten} checked={selected} disabled={disabled} onChange={onSelect} className="mt-3 w-4 h-4 accent-indigo-600 shrink-0"/>}
-        {safeUrl(profile.anhDaiDien)?<img src={profile.anhDaiDien} alt={'Ảnh '+profile.ten} className="w-12 h-12 rounded-full object-cover" referrerPolicy="no-referrer"/>:<div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 font-bold grid place-items-center shrink-0">{profile.ten.slice(0,2).toUpperCase()}</div>}
-        <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h5 className="font-bold text-slate-900">{profile.ten}</h5>{badge&&<span className="rounded-full bg-slate-100 text-slate-600 px-2 py-1 text-[11px]">{badge}</span>}</div><div className="flex flex-wrap gap-1 mt-1">{profile.linhVuc?.map((c:string)=><span key={c} className="text-xs rounded-md px-2 py-0.5 bg-indigo-50 text-indigo-700">{c}</span>)}</div></div>
-      </header>
-      <div className="flex flex-wrap gap-2">{profile.nenTang?.map((c:any,n:number)=><div key={n} className="rounded-lg border border-slate-100 px-2.5 py-1.5 text-xs text-slate-600"><strong className="text-slate-800">{c.tenNenTang}</strong> · {formatMoneyInput(c.soFollower)} follower{safeUrl(c.linkProfile)&&<a href={safeUrl(c.linkProfile)} target="_blank" rel="noopener noreferrer" className="inline-flex ml-2 text-indigo-600" aria-label={'Mở kênh '+c.tenNenTang+' của '+profile.ten}><ExternalLink size={12}/></a>}</div>)}{!profile.nenTang?.length&&<span className="text-xs text-slate-500">Chưa có thông tin kênh</span>}</div>
-      <div className={'rounded-xl p-3 border '+(assessment.matches?'bg-emerald-50/60 border-emerald-100':'bg-amber-50 border-amber-200')}><h6 className="font-semibold text-xs text-slate-800 mb-2">{assessment.hasCriteria?'Đối chiếu với brief đã duyệt':'Cần bổ sung tiêu chí để đánh giá phù hợp'}</h6><ul className="space-y-1.5 text-xs">{assessment.checks.map((c,n)=><li key={n} className="flex items-start gap-2">{c.met?<Check size={14} className="text-emerald-600 shrink-0"/>:<AlertCircle size={14} className="text-amber-600 shrink-0"/>}<span>{c.met?'Đạt: ':'Chưa đạt: '}{c.label}</span></li>)}</ul>{profile.reviewSoBo&&<p className="text-xs mt-2 text-slate-600"><strong>Ghi chú hồ sơ:</strong> {profile.reviewSoBo}</p>}{!assessment.matches&&<p className="text-xs mt-2 text-amber-800">KOL đã giữ trong danh sách nhưng chưa đáp ứng tiêu chí brief hiện tại.</p>}</div>
-      <div><div className="flex justify-between items-center gap-2 mb-2"><h6 className="font-semibold text-xs text-slate-800">Giá đầu vào / đơn vị</h6><span className="text-[11px] text-indigo-700">Viền tím: brief yêu cầu</span></div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{(Object.keys(PRICE_FORMAT_LABELS) as PriceFormatKey[]).map(format=>{
-          const task=needed.find(d=>d.format===format),price=prices?.[format],value=prices?price?.value:profile.bangGia?.[format];
-          const status=price?.status??(value==null?'waiting':'unconfirmed');
-          const box='text-left p-3 rounded-xl border min-w-0 '+(task?'border-indigo-400 bg-indigo-50 ring-1 ring-indigo-200':'border-slate-200 bg-slate-50/60');
-          const content=<><div className="font-semibold text-xs text-slate-700">{shortLabels[format]}</div><div className={'font-bold mt-1 text-sm '+(value==null?'text-amber-700':'text-slate-900')}>{value==null?'Chưa có giá':formatMoneyInput(value)+' ₫'}</div>{task&&<div className="text-[10px] text-indigo-700 font-medium mt-1">Brief yêu cầu · {task.quantity.toLocaleString('vi-VN')}{brief.deliverableScope==='campaign'?' toàn chiến dịch':' / KOL'}</div>}<div className={'text-[10px] mt-1 flex items-center gap-1 '+(status==='confirmed'?'text-emerald-700':'text-slate-500')}>{status==='confirmed'&&<CheckCircle2 size={11}/>} {status==='confirmed'?'Đã xác nhận':status==='waiting'?'Chờ bổ sung giá':'Chưa xác nhận'}</div>{price?.checkedAt&&<div className="text-[10px] mt-1 text-slate-500">{new Date(price.checkedAt).toLocaleDateString('vi-VN')}</div>}{renderPriceEditor&&<div className="text-[10px] mt-2 text-indigo-700 flex items-center gap-1">Kiểm tra giá <ChevronDown size={10}/></div>}</>;
-          return renderPriceEditor?<button type="button" key={format} className={box} disabled={disabled} aria-label={'Kiểm tra giá '+PRICE_FORMAT_LABELS[format]+' của '+profile.ten} aria-expanded={editing===format} onClick={()=>setEditing(editing===format?null:format)}>{content}</button>:<div key={format} className={box}>{content}</div>;
-        })}</div>
-        {!needed.length&&<p className="text-xs text-slate-500 mt-2">Brief chưa xác định hạng mục cần làm. Bổ sung ở phần brief để làm nổi bật giá liên quan.</p>}
-        {needed.length>0&&<p className="text-[11px] text-slate-500 mt-2">{brief.deliverableScope==='campaign'?'Số lượng hiển thị là tổng chiến dịch, chưa phân công cho từng KOL.':'Định mức theo brief; PM phân công thực tế trong phương án.'}</p>}
+import React, { useState } from 'react';
+import { Check, AlertCircle, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+  PRICE_FORMAT_LABELS,
+  PRICE_FORMAT_ORDER,
+  PRICE_SHORT_LABELS,
+  PRICE_FORMAT_STYLES,
+  type PriceFormatKey,
+} from '../types/kol';
+import { assessProjectKol, type ProjectBrief } from '../domain/projectBrief';
+import { formatNumberOnly, formatFollowers, formatDateTimeVN, getCategoryBadgeClass } from '../utils/formatters';
+
+const safeUrl = (v: any) => (typeof v === 'string' && /^https?:\/\//i.test(v) ? v : undefined);
+
+export function ProjectKolCard({
+  profile,
+  brief,
+  prices,
+  selected,
+  disabled,
+  selectionLabel,
+  onSelect,
+  badge,
+  renderPriceEditor,
+}: {
+  profile: any;
+  brief: ProjectBrief;
+  prices?: any;
+  selected: boolean;
+  disabled: boolean;
+  selectionLabel: string;
+  onSelect?: () => void;
+  badge?: string;
+  renderPriceEditor?: (format: PriceFormatKey) => React.ReactNode;
+}) {
+  const [editing, setEditing] = useState<PriceFormatKey | null>(null);
+  const [showAssessment, setShowAssessment] = useState(false);
+
+  const assessment = assessProjectKol(profile, brief);
+  const needed = brief.deliverables ?? [];
+  const updateTimeStr = formatDateTimeVN(profile.ngayCapNhat);
+
+  // Brief assessment chip logic
+  const failedChecksCount = assessment.checks.filter((c) => !c.met).length;
+  let chipLabel = '';
+  let chipClass = '';
+  if (!assessment.hasCriteria) {
+    chipLabel = 'Cần bổ sung tiêu chí để đánh giá';
+    chipClass = 'bg-slate-100 text-slate-600 border-slate-200';
+  } else if (assessment.matches) {
+    chipLabel = 'Đạt tiêu chí brief';
+    chipClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  } else {
+    chipLabel = `Chưa đạt ${failedChecksCount} tiêu chí`;
+    chipClass = 'bg-amber-50 text-amber-700 border-amber-200';
+  }
+
+  return (
+    <article
+      className={
+        'rounded-xl border bg-white shadow-xs p-4 transition-all ' +
+        (selected ? 'border-indigo-500 ring-2 ring-indigo-100' : 'border-slate-200 hover:border-slate-300')
+      }
+      aria-label={'Hồ sơ KOL ' + profile.ten}
+    >
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        {/* Khối trái: Thông tin KOL */}
+        <div className="flex items-start gap-3 min-w-0 flex-1 w-full">
+          {onSelect && (
+            <input
+              type="checkbox"
+              aria-label={selectionLabel + ' ' + profile.ten}
+              checked={selected}
+              disabled={disabled}
+              onChange={onSelect}
+              className="mt-1.5 w-4 h-4 accent-indigo-600 text-indigo-600 rounded border-slate-300 shrink-0 cursor-pointer disabled:cursor-not-allowed"
+            />
+          )}
+
+          {safeUrl(profile.anhDaiDien) ? (
+            <img
+              src={profile.anhDaiDien}
+              alt={'Ảnh ' + profile.ten}
+              className="w-11 h-11 rounded-full object-cover shrink-0"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                (e.target as HTMLElement).style.display = 'none';
+              }}
+            />
+          ) : (
+            <div className="w-11 h-11 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0 text-sm">
+              {profile.ten?.slice(0, 2).toUpperCase()}
+            </div>
+          )}
+
+          <div className="min-w-0 flex-1">
+            {/* Tên KOL + Badge */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <h5 className="font-bold text-slate-900 text-sm sm:text-base truncate">
+                {profile.ten}
+              </h5>
+              {badge && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium border border-slate-200 shrink-0">
+                  {badge}
+                </span>
+              )}
+            </div>
+
+            {/* Dòng inline: Nền tảng · Followers · Link Profile + Lĩnh vực */}
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              {profile.nenTang && profile.nenTang.length > 0 ? (
+                profile.nenTang.map((c: any, idx: number) => (
+                  <React.Fragment key={c.id || `${c.tenNenTang}-${idx}`}>
+                    {idx > 0 && <span className="text-slate-300">•</span>}
+                    <span className="text-xs text-slate-500 inline-flex items-center gap-1">
+                      {c.tenNenTang}: <strong className="text-slate-700 font-medium">{formatFollowers(c.soFollower)}</strong>
+                      {safeUrl(c.linkProfile) && (
+                        <a
+                          href={safeUrl(c.linkProfile)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-600 hover:text-indigo-800"
+                          aria-label={'Mở kênh ' + c.tenNenTang + ' của ' + profile.ten}
+                        >
+                          <ExternalLink size={12} />
+                        </a>
+                      )}
+                    </span>
+                  </React.Fragment>
+                ))
+              ) : (
+                <span className="text-xs text-slate-400">Chưa có kênh</span>
+              )}
+
+              {profile.linhVuc && profile.linhVuc.length > 0 && (
+                <>
+                  <span className="text-slate-300 hidden sm:inline">•</span>
+                  <div className="hidden sm:flex items-center gap-1">
+                    {profile.linhVuc.slice(0, 3).map((cat: string) => (
+                      <span
+                        key={cat}
+                        className={`text-[10px] px-2 py-0.5 rounded-md font-medium ${getCategoryBadgeClass(cat)}`}
+                      >
+                        {cat}
+                      </span>
+                    ))}
+                    {profile.linhVuc.length > 3 && (
+                      <span className="text-[10px] text-slate-400">+{profile.linhVuc.length - 3}</span>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Dòng giờ cập nhật */}
+            {updateTimeStr && (
+              <div className="text-[11px] text-slate-400 mt-1">
+                Cập nhật: {updateTimeStr}
+              </div>
+            )}
+
+            {/* Dòng đánh giá brief gọn: chip + link Đối chiếu */}
+            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+              <span className={`text-[11px] px-2 py-0.5 rounded-md border font-medium ${chipClass}`}>
+                {chipLabel}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowAssessment(!showAssessment)}
+                className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800 underline inline-flex items-center gap-0.5 cursor-pointer"
+                aria-expanded={showAssessment}
+              >
+                <span>Đối chiếu</span>
+                {showAssessment ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+            </div>
+
+            {/* Danh sách tiêu chí brief chi tiết khi mở Đối chiếu */}
+            {showAssessment && (
+              <div className="mt-2 rounded-xl p-3 border bg-slate-50/80 border-slate-200 text-xs space-y-1.5">
+                <div className="font-semibold text-slate-800 mb-1">
+                  {assessment.hasCriteria ? 'Đối chiếu với brief đã duyệt' : 'Cần bổ sung tiêu chí để đánh giá phù hợp'}
+                </div>
+                <ul className="space-y-1">
+                  {assessment.checks.map((c, n) => (
+                    <li key={n} className="flex items-start gap-1.5">
+                      {c.met ? (
+                        <Check size={13} className="text-emerald-600 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertCircle size={13} className="text-amber-600 shrink-0 mt-0.5" />
+                      )}
+                      <span className={c.met ? 'text-slate-700' : 'text-amber-800'}>
+                        {c.met ? 'Đạt: ' : 'Chưa đạt: '}
+                        {c.label}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {profile.reviewSoBo && (
+                  <p className="mt-2 text-slate-600 italic">
+                    <strong>Ghi chú hồ sơ:</strong> "{profile.reviewSoBo}"
+                  </p>
+                )}
+                {!assessment.matches && assessment.hasCriteria && (
+                  <p className="mt-1 text-amber-800 text-[11px]">
+                    KOL đã giữ trong danh sách nhưng chưa đáp ứng tiêu chí brief hiện tại.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Khối phải: Bảng giá 2 cột x 3 hàng */}
+        <div className="w-full md:w-[430px] shrink-0 flex flex-col gap-2">
+          <div className="grid grid-cols-2 gap-1.5">
+            {PRICE_FORMAT_ORDER.map((format) => {
+              const task = needed.find((d) => d.format === format);
+              const price = prices?.[format];
+              const value = prices ? price?.value : profile.bangGia?.[format];
+              const hasPrice = value !== null && value !== undefined;
+              const status = price?.status ?? (value == null ? 'waiting' : 'unconfirmed');
+
+              // Xây dựng title của ô
+              const titleParts: string[] = [];
+              if (task) {
+                titleParts.push(
+                  `Brief yêu cầu · ${task.quantity.toLocaleString('vi-VN')}${
+                    brief.deliverableScope === 'campaign' ? ' toàn chiến dịch' : ' / KOL'
+                  }`
+                );
+              }
+              if (status === 'confirmed') {
+                titleParts.push('Đã xác nhận');
+              } else if (status === 'unconfirmed') {
+                titleParts.push('Chưa xác nhận');
+              } else {
+                titleParts.push('Chưa có giá');
+              }
+              if (price?.checkedAt) {
+                try {
+                  titleParts.push(`Kiểm tra gần nhất: ${new Date(price.checkedAt).toLocaleDateString('vi-VN')}`);
+                } catch {}
+              }
+              const cellTitle = titleParts.join(' · ');
+
+              // Style ô
+              const isRequired = Boolean(task);
+              const ringClass = isRequired ? 'ring-2 ring-indigo-500 border-indigo-400' : 'border';
+              const baseColor = hasPrice
+                ? PRICE_FORMAT_STYLES[format]
+                : 'bg-slate-50 border-slate-200 text-slate-400';
+
+              const boxClass = `text-xs px-2.5 py-1 rounded-md ${ringClass} ${baseColor} text-left truncate transition-all ${
+                renderPriceEditor ? 'cursor-pointer hover:shadow-xs' : ''
+              } ${editing === format ? 'ring-2 ring-indigo-600' : ''}`;
+
+              const content = (
+                <>
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="truncate">
+                      <span className={hasPrice ? 'font-medium' : 'font-normal'}>
+                        {PRICE_SHORT_LABELS[format]}:{' '}
+                      </span>
+                      <span className={hasPrice ? 'font-bold' : 'text-amber-600 font-medium'}>
+                        {hasPrice ? `${formatNumberOnly(value)}đ` : 'Chưa có giá'}
+                      </span>
+                      {status === 'confirmed' && (
+                        <span title="Đã xác nhận" className="inline-flex items-center">
+                          <Check
+                            size={12}
+                            className="inline text-emerald-600 ml-1 stroke-[3]"
+                          />
+                        </span>
+                      )}
+                    </span>
+                    {renderPriceEditor && (
+                      <ChevronDown size={11} className="text-slate-400 shrink-0 opacity-70" />
+                    )}
+                  </div>
+                  {status === 'unconfirmed' && (
+                    <div className="text-[10px] text-slate-500 font-normal leading-tight">
+                      Chưa xác nhận
+                    </div>
+                  )}
+                </>
+              );
+
+              return renderPriceEditor ? (
+                <button
+                  type="button"
+                  key={format}
+                  className={boxClass}
+                  disabled={disabled}
+                  title={cellTitle}
+                  aria-label={'Kiểm tra giá ' + PRICE_FORMAT_LABELS[format] + ' của ' + profile.ten}
+                  aria-expanded={editing === format}
+                  onClick={() => setEditing(editing === format ? null : format)}
+                >
+                  {content}
+                </button>
+              ) : (
+                <div key={format} className={boxClass} title={cellTitle}>
+                  {content}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
-      {editing&&renderPriceEditor&&<div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-3"><h6 className="text-sm font-semibold mb-3">Kiểm tra giá — {PRICE_FORMAT_LABELS[editing]}</h6>{renderPriceEditor(editing)}</div>}
-    </div>
-  </article>;
+
+      {/* Form kiểm tra giá bung ra dưới thẻ */}
+      {editing && renderPriceEditor && (
+        <div className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50/40 p-3">
+          <div className="flex justify-between items-center mb-3">
+            <h6 className="text-sm font-semibold text-slate-800">
+              Kiểm tra giá — {PRICE_FORMAT_LABELS[editing]}
+            </h6>
+            <button
+              type="button"
+              onClick={() => setEditing(null)}
+              className="text-xs text-slate-500 hover:text-slate-800 cursor-pointer"
+            >
+              Đóng
+            </button>
+          </div>
+          {renderPriceEditor(editing)}
+        </div>
+      )}
+    </article>
+  );
 }

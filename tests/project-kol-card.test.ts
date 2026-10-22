@@ -15,11 +15,12 @@ test('lý do dựa trên tiêu chí hồ sơ, follower đúng kênh, không đá
   assert.equal(assessProjectKol({...profile,reviewSoBo:'ĐỒ ĂN'}, {...brief,keyword:'do an'}).matches,true);
   assert.equal(assessProjectKol(profile,readProjectBrief(null)).hasCriteria,false);
 });
-test('thẻ hiển thị 6 giá, làm nổi bật tổng brief không gán cho mỗi KOL, giá 0 hợp lệ, link an toàn',()=>{
-  const html=renderToStaticMarkup(React.createElement(ProjectKolCard,{profile:{...profile,engagementRate:99},brief,selected:false,disabled:false,selectionLabel:'Giữ KOL'}));
-  assert.match(html,/250.000/);assert.match(html,/12.000.000/);assert.match(html,/>0 ₫</);
-  assert.match(html,/10 toàn chiến dịch/);assert.match(html,/15 toàn chiến dịch/);assert.match(html,/chưa phân công cho từng KOL/);
-  assert.equal((html.match(/Chưa xác nhận/g)||[]).length,2);assert.equal((html.match(/Chờ bổ sung giá/g)||[]).length,4);
+test('thẻ hiển thị 6 giá gọn, làm nổi bật tổng brief, giá 0 hợp lệ, link an toàn, hiện giờ cập nhật',()=>{
+  const html=renderToStaticMarkup(React.createElement(ProjectKolCard,{profile:{...profile,engagementRate:99,ngayCapNhat:'2026-10-22T14:30:00.000Z'},brief,selected:false,disabled:false,selectionLabel:'Giữ KOL'}));
+  assert.match(html,/250.000/);assert.match(html,/12.000.000/);assert.match(html,/>0đ</);
+  assert.match(html,/10 toàn chiến dịch/);assert.match(html,/15 toàn chiến dịch/);
+  assert.match(html,/Chưa xác nhận/);assert.match(html,/Chưa có giá/);
+  assert.match(html,/Cập nhật:/);
   assert.doesNotMatch(html,/engagement|ER:|javascript:/);assert.match(html,/href="https:\/\/example.test\/creator"/);
   const perKol=renderToStaticMarkup(React.createElement(ProjectKolCard,{profile,brief:{...brief,deliverableScope:'per_kol'},selected:false,disabled:false,selectionLabel:'Giữ KOL'}));
   assert.match(perKol,/10 \/ KOL/);assert.doesNotMatch(perKol,/10 toàn chiến dịch/);

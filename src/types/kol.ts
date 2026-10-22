@@ -32,6 +32,26 @@ export const PRICE_FORMAT_LABELS: Record<PriceFormatKey, string> = {
   sdha: 'Sử dụng hình ảnh (SDHA)',
 };
 
+export const PRICE_FORMAT_ORDER: PriceFormatKey[] = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
+
+export const PRICE_SHORT_LABELS: Record<PriceFormatKey, string> = {
+  post: 'Post/Ảnh',
+  video: 'Video dài',
+  shorts: 'Video ngắn',
+  livestream: 'Livestream',
+  thamDuSuKien: 'Tham dự sự kiện',
+  sdha: 'SDHA',
+};
+
+export const PRICE_FORMAT_STYLES: Record<PriceFormatKey, string> = {
+  post: 'bg-sky-50 border-sky-200 text-sky-700',
+  video: 'bg-violet-50 border-violet-200 text-violet-700',
+  shorts: 'bg-rose-50 border-rose-200 text-rose-700',
+  livestream: 'bg-orange-50 border-orange-200 text-orange-700',
+  thamDuSuKien: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+  sdha: 'bg-amber-50 border-amber-200 text-amber-700',
+};
+
 export interface ContactInfo {
   tenNguoiLienHe?: string;
   soDienThoai?: string;

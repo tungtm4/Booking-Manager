@@ -30,29 +30,21 @@ import {
   CheckCircle2,
   Scale
 } from 'lucide-react';
-import { KolProfile, PlatformType, PriceFormatKey, PRICE_FORMAT_LABELS, SowQuote, SowLineItem } from '../types/kol';
-import { formatFollowers, formatVND, formatNumberOnly, getCategoryBadgeClass, POPULAR_CATEGORIES } from '../utils/formatters';
+import { 
+  KolProfile, 
+  PlatformType, 
+  PriceFormatKey, 
+  PRICE_FORMAT_LABELS, 
+  PRICE_FORMAT_ORDER,
+  PRICE_SHORT_LABELS,
+  PRICE_FORMAT_STYLES,
+  SowQuote, 
+  SowLineItem 
+} from '../types/kol';
+import { formatFollowers, formatVND, formatNumberOnly, formatDateTimeVN, getCategoryBadgeClass, POPULAR_CATEGORIES } from '../utils/formatters';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { StorageService } from '../services/storageService';
 import { KolCompareModal } from './KolCompareModal';
-
-const PRICE_FORMAT_ORDER: PriceFormatKey[] = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
-const PRICE_SHORT_LABELS: Record<PriceFormatKey, string> = {
-  post: 'Post/Ảnh',
-  video: 'Video dài',
-  shorts: 'Video ngắn',
-  livestream: 'Livestream',
-  thamDuSuKien: 'Tham dự sự kiện',
-  sdha: 'SDHA',
-};
-const PRICE_FORMAT_STYLES: Record<PriceFormatKey, string> = {
-  post: 'bg-sky-50 border-sky-200 text-sky-700',
-  video: 'bg-violet-50 border-violet-200 text-violet-700',
-  shorts: 'bg-rose-50 border-rose-200 text-rose-700',
-  livestream: 'bg-orange-50 border-orange-200 text-orange-700',
-  thamDuSuKien: 'bg-emerald-50 border-emerald-200 text-emerald-700',
-  sdha: 'bg-amber-50 border-amber-200 text-amber-700',
-};
 
 interface KolListProps {
   kols: KolProfile[];
@@ -873,6 +865,13 @@ export const KolList: React.FC<KolListProps> = ({
                       )}
                     </div>
 
+                    {/* Dòng ngày giờ cập nhật */}
+                    {kol.ngayCapNhat && formatDateTimeVN(kol.ngayCapNhat) ? (
+                      <div className="text-[11px] text-slate-400 mt-1">
+                        Cập nhật: {formatDateTimeVN(kol.ngayCapNhat)}
+                      </div>
+                    ) : null}
+
                     {/* Nhận xét sơ bộ */}
                     {kol.reviewSoBo && (
                       <p className="mt-2 text-xs text-slate-500 line-clamp-2 leading-relaxed italic">
@@ -1054,6 +1053,11 @@ export const KolList: React.FC<KolListProps> = ({
                             <div className="text-xs text-slate-400">
                               {kol.lienHe?.tenNguoiLienHe || 'Trực tiếp'}
                             </div>
+                            {kol.ngayCapNhat && formatDateTimeVN(kol.ngayCapNhat) ? (
+                              <div className="text-[10px] text-slate-400 mt-0.5">
+                                Cập nhật: {formatDateTimeVN(kol.ngayCapNhat)}
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                       </td>

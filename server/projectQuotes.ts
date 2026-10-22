@@ -62,7 +62,7 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     return {...common,client:p.client,campaign:p.campaign,items:p.items.map(i=>({id:i.id,creator:i.creator,description:i.description,phase:i.phase,kind:i.kind,quantity:i.quantity,buyUnitPrice:i.buyUnitPrice,included:i.included,shortlistId:i.shortlistId,format:i.format,priceSnapshot:i.priceSnapshot}))};
   };
   router.post('/projects/:id/details',(req,res)=>{
-    const u=res.locals.user;if(!access(u,req.params.id,true))return res.status(403).json({message:'Chỉ PM/Admin dự án được cập nhật thông tin.'});
+    const u=res.locals.user;if(!access(u,req.params.id,true))return res.status(403).json({message:'Chỉ PM hoặc Admin hệ thống được cập nhật thông tin.'});
     const {name,client,campaign}=req.body;
     if(!text(name,200)||!text(client,200)||!text(campaign,200))return res.status(400).json({message:'Nhập tên dự án, khách hàng và tên chiến dịch.'});
     db.prepare('UPDATE projects SET name=?,client_name=?,campaign_name=?,version=version+1 WHERE id=?').run(name.trim(),client.trim(),campaign.trim(),req.params.id);
