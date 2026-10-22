@@ -41,8 +41,28 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     const u=res.locals.user;if(!access(u,req.params.id)||u.organization_role!=='admin')return res.status(403).json({message:'Chỉ Admin được nhập thư viện từ trình duyệt.'});
     if(!Array.isArray(req.body.profiles)||req.body.profiles.length>500)return res.status(400).json({message:'Mỗi lần nhập tối đa 500 KOL.'});
     const profiles=req.body.profiles.map(profile);if(profiles.some((p:any)=>!p)||new Set(profiles.map((p:any)=>p!.id)).size!==profiles.length)return res.status(400).json({message:'Dữ liệu KOL không hợp lệ hoặc trùng mã. Không có thay đổi nào được lưu.'});
-    let added=0;db.exec('BEGIN');try{for(const p of profiles)added+=Number(db.prepare('INSERT OR IGNORE INTO kol_catalog VALUES (?,?,?)').run(p!.id,u.organization_id,JSON.stringify(p)).changes);audit(u.id,'import_kol_catalog',req.params.id);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
-    res.json({added,skipped:profiles.length-added});
+    let added=0,updated=0,unchanged=0;
+    db.exec('BEGIN');try{
+      for(const p of profiles){
+        const row=db.prepare('SELECT profile_json FROM kol_catalog WHERE id=? AND organization_id=?').get(p!.id,u.organization_id) as any;
+        const newJson=JSON.stringify(p);
+        if(!row){
+          db.prepare('INSERT INTO kol_catalog VALUES (?,?,?)').run(p!.id,u.organization_id,newJson);
+          added++;
+        }else if(row.profile_json!==newJson){
+          db.prepare('UPDATE kol_catalog SET profile_json=? WHERE id=? AND organization_id=?').run(newJson,p!.id,u.organization_id);
+          updated++;
+        }else{
+          unchanged++;
+        }
+      }
+      const catalogRows=db.prepare('SELECT id FROM kol_catalog WHERE organization_id=?').all(u.organization_id) as any[];
+      const payloadIds=new Set(profiles.map((p:any)=>p!.id));
+      const onlyInCatalog=catalogRows.filter((r:any)=>!payloadIds.has(r.id)).length;
+      audit(u.id,'sync_kol_catalog',req.params.id);
+      db.exec('COMMIT');
+      res.json({added,updated,unchanged,onlyInCatalog});
+    }catch(e){db.exec('ROLLBACK');throw e;}
   });
   router.post('/projects/:id/catalog/create',(req,res)=>{
     const u=res.locals.user;if(!access(u,req.params.id))return res.status(403).json({message:'Bạn không có quyền thêm KOL trong dự án này.'});

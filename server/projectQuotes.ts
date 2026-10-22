@@ -85,7 +85,7 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     if(!text(req.body.name,200)||text(req.body.brief??'',10000)===null)return res.status(400).json({message:'Nhập tên phương án, brief tối đa 10.000 ký tự.'});
     const p=project(pid);if(!p.client_name||!p.campaign_name)return res.status(400).json({message:'Bổ sung khách hàng và tên chiến dịch trước khi tạo phương án.'});
     const oid=randomUUID(),qid=randomUUID(),now=new Date().toISOString();
-    const payload:QuotePayload={client:p.client_name,campaign:p.campaign_name,items:[],discount:{mode:'fixed',value:0},agencyFee:{mode:'percent',value:0},taxRate:0};
+    const payload:QuotePayload={client:p.client_name,campaign:p.campaign_name,items:[],discount:{mode:'fixed',value:0},agencyFee:{mode:'percent',value:12},taxRate:0};
     db.exec('BEGIN');try{
       db.prepare('INSERT INTO project_options VALUES (?,?,?,?,?,?)').run(oid,pid,req.body.name.trim(),String(req.body.brief??'').trim(),u.id,now);
       db.prepare('INSERT INTO project_quote_versions VALUES (?,?,1,\'draft\',1,?,?,?,NULL)').run(qid,oid,JSON.stringify(payload),u.id,now);

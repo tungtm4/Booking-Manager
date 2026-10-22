@@ -100,3 +100,41 @@ test('hạng mục brief giữ tổng campaign / mỗi KOL, bỏ ER cũ và ki�
   assert.equal((await call(`/projects/${pid}/brief`,{revision:2,brief:{...brief,deliverableScope:'per_kol',deliverables:perKol}},cookies.pm)).status,200);
   assert.deepEqual((await call(`/projects/${pid}/shortlist`,undefined,cookies.pm)).body.brief.deliverables,perKol);
 }));
+
+test('đồng bộ toàn bộ kho KOL vào thư viện: thêm mới, cập nhật, không đổi, đếm onlyInCatalog, snapshot isolation và nguyên tử',()=>fixture(async(f:any)=>{
+  const {call,pid,cookies}=f;
+  assert.equal((await call(`/projects/${pid}/catalog/import`,{profiles},cookies.pm)).status,403);
+  assert.equal((await call(`/projects/${pid}/catalog/import`,{profiles},cookies.booking)).status,403);
+
+  const sync1=await call(`/projects/${pid}/catalog/import`,{profiles},cookies.admin);
+  assert.equal(sync1.status,200);
+  assert.deepEqual(sync1.body,{added:8,updated:0,unchanged:0,onlyInCatalog:0});
+
+  await call(`/projects/${pid}/shortlist/add`,{ids:['kol-1']},cookies.booking);
+  const shortlistBefore=(await call(`/projects/${pid}/shortlist`,undefined,cookies.booking)).body;
+  const initialShortlistPrice=shortlistBefore.rows[0].prices.video.value;
+
+  const updatedProfiles=profiles.map(p=>p.id==='kol-1'?{...p,bangGia:{...p.bangGia,video:5000000}}:p);
+  const sync2=await call(`/projects/${pid}/catalog/import`,{profiles:updatedProfiles},cookies.admin);
+  assert.equal(sync2.status,200);
+  assert.deepEqual(sync2.body,{added:0,updated:1,unchanged:7,onlyInCatalog:0});
+
+  const shortlistAfter=(await call(`/projects/${pid}/shortlist`,undefined,cookies.booking)).body;
+  assert.equal(shortlistAfter.rows[0].prices.video.value,initialShortlistPrice);
+  const catalogKol1=shortlistAfter.matches.find((m:any)=>m.id==='kol-1');
+  assert.equal(catalogKol1.bangGia.video,5000000);
+
+  const subsetProfiles=updatedProfiles.filter(p=>p.id!=='kol-7');
+  const sync3=await call(`/projects/${pid}/catalog/import`,{profiles:subsetProfiles},cookies.admin);
+  assert.equal(sync3.status,200);
+  assert.deepEqual(sync3.body,{added:0,updated:0,unchanged:7,onlyInCatalog:1});
+  const afterSync3=(await call(`/projects/${pid}/shortlist`,undefined,cookies.booking)).body;
+  assert.equal(afterSync3.catalogCount,8);
+
+  const badBatch=[...subsetProfiles,{id:'bad-kol',ten:'',linhVuc:[],nenTang:[],reviewSoBo:'',bangGia:{}}];
+  const badRes=await call(`/projects/${pid}/catalog/import`,{profiles:badBatch},cookies.admin);
+  assert.equal(badRes.status,400);
+  const afterBad=(await call(`/projects/${pid}/shortlist`,undefined,cookies.booking)).body;
+  assert.equal(afterBad.catalogCount,8);
+}));
+

@@ -31,6 +31,8 @@ test('phương án song song, giá mua/bán và Booking không nhận dữ liệ
   const a=await call(`/projects/${pid}/options`,{name:'Phương án A',brief:'Brief A'},cookies.pm);
   const b=await call(`/projects/${pid}/options`,{name:'Phương án B',brief:'Brief B'},cookies.pm);
   assert.equal(a.status,200);assert.equal(b.status,200);
+  const initOpt=(await call(`/projects/${pid}/options`,undefined,cookies.pm)).body;
+  assert.deepEqual(initOpt.options[0].versions[0].agencyFee,{mode:'percent',value:12});
   const saved=await call(`/projects/${pid}/quotes/${a.body.quoteId}/save`,{revision:1,payload},cookies.pm);
   assert.equal(saved.status,200);assert.equal(saved.body.quote.finance.agencyFee,10_800_000);assert.equal(saved.body.quote.finance.profit,40_800_000);
   const manager=await call(`/projects/${pid}/options`,undefined,cookies.pm);assert.equal(manager.body.options.length,2);
