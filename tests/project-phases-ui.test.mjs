@@ -15,6 +15,17 @@ test('panel có đủ luồng phase của Đợt 9A', () => {
   assert.ok(panel.includes('phaseRollup'), 'phải có tổng quan theo phase cho PM');
 });
 
+test('Đợt 9B: tạo phương án từ phase, bản khách nhóm theo phase và in PDF', () => {
+  const quotes = readFileSync(new URL('../src/components/ProjectQuotesPanel.tsx', import.meta.url), 'utf8');
+  const server = readFileSync(new URL('../server/projectQuotes.ts', import.meta.url), 'utf8');
+  assert.ok(server.includes('/options/from-phases'), 'server có route tạo phương án từ phase');
+  assert.ok(quotes.includes('/options/from-phases'), 'panel gọi route from-phases');
+  assert.ok(quotes.includes('customerGroups'), 'bản khách được nhóm theo phase');
+  assert.ok(quotes.includes('quote-print-doc'), 'có bản in PDF tách riêng');
+  assert.ok(quotes.includes('In / Lưu PDF'), 'có nút In / Lưu PDF');
+  assert.ok(quotes.includes("'/phases'") || quotes.includes('/phases'), 'panel tải danh sách phase');
+});
+
 test('trang Đề xuất KOL mở cho thành viên, dùng lại engine đề xuất và thư viện chung', () => {
   assert.ok(shell.includes("setPage('proposal')"), 'shell phải có trang proposal');
   assert.ok(shell.includes('Đề xuất KOL'), 'điều hướng phải có mục Đề xuất KOL');

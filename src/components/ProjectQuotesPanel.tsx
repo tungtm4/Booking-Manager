@@ -17,21 +17,24 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
   const [discount,setDiscount]=useState<any>({mode:'fixed',value:0}),[fee,setFee]=useState<any>({mode:'percent',value:0}),[tax,setTax]=useState(0);
   const [optionId,setOptionId]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[dirty,setDirty]=useState(false);
   const [customer,setCustomer]=useState<any>(null),[legacyId,setLegacyId]=useState('');
+  const [phases,setPhases]=useState<any[]>([]),[fromName,setFromName]=useState(''),[fromPhaseIds,setFromPhaseIds]=useState<string[]>([]),[showPrint,setShowPrint]=useState(false);
   const base=`/projects/${projectId}`;
   function loadQuote(q:any){setQuote(q);setItems(q?.items??[]);setDiscount(q?.discount??{mode:'fixed',value:0});setFee(q?.agencyFee??{mode:'percent',value:0});setTax(q?.taxRate??0);setDirty(false);setCustomer(null);}
   async function refresh(preferred?:string){
     const result=await request(base+'/options');setData(result);
+    request(base+'/phases').then(r=>{setPhases(r.phases??[]);setFromPhaseIds(prev=>prev.length?prev:(r.phases??[]).map((x:any)=>x.id));}).catch(()=>{});
     const all=result.options.flatMap((o:any)=>o.versions);
     const selected=all.find((q:any)=>q.id===(preferred??quote?.id))??all[0]??null;
     loadQuote(selected);setOptionId(selected?.optionId??'');
   }
-  useEffect(()=>{let active=true;setData(null);loadQuote(null);setError('');setNotice('');request(base+'/options').then(d=>{if(active){setData(d);const first=d.options[0]?.versions[0]??null;loadQuote(first);setOptionId(first?.optionId??'');}}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;};},[projectId]);
+  useEffect(()=>{let active=true;setData(null);loadQuote(null);setError('');setNotice('');request(base+'/options').then(d=>{if(active){setData(d);const first=d.options[0]?.versions[0]??null;loadQuote(first);setOptionId(first?.optionId??'');}});request(base+'/phases').then(r=>{if(active){setPhases(r.phases??[]);setFromPhaseIds((r.phases??[]).map((x:any)=>x.id));}}).catch(()=>{}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;};},[projectId]);
   async function run(work:()=>Promise<void>){setBusy(true);setError('');setNotice('');try{await work();}catch(e){setError(e instanceof Error?e.message:'Không thể xử lý.');}finally{setBusy(false);}}
   if(!data)return <div className="py-6 text-slate-500">{error||'Đang tải phương án và báo giá…'}</div>;
   const manage=data.canManage;
   const editable=quote&&['draft','changes_requested'].includes(quote.status);
   const currentOption=data.options.find((o:any)=>o.id===optionId);
   const baseline=data.options.flatMap((o:any)=>o.versions).find((q:any)=>q.id===data.baselineId);
+  const customerGroups=(()=>{if(!customer)return [] as any[];const groups:any[]=[];for(const i of customer.items){const key=i.phase??'';let g=groups.find(x=>x.phase===key);if(!g){g={phase:key,items:[],subtotal:0};groups.push(g);}g.items.push(i);g.subtotal+=(i.total??0);}const multi=groups.length>1;for(const g of groups)g.showHeader=multi||Boolean(g.phase);return groups;})();
   function updateItem(id:string,key:string,value:unknown){setItems(prev=>prev.map(i=>i.id===id?{...i,[key]:value}:i));setDirty(true);}
   function choose(q:any){if(dirty&&!window.confirm('Các chỉnh sửa chưa lưu sẽ bị bỏ. Tiếp tục chuyển phiên bản?'))return;loadQuote(q);setOptionId(q.optionId);}
   async function save(){
@@ -61,6 +64,17 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
       <label className="text-sm sm:col-span-2">Ghi chú riêng phương án<textarea name="brief" maxLength={10000} placeholder="Hướng lựa chọn KOL của phương án; brief chung nằm ở danh sách dự án" className={field}/></label>
       <button className={button} disabled={busy||dirty}>Tạo phương án KOL</button>
     </form>}
+    {manage&&phases.length>0&&<section className="p-4 border border-indigo-200 bg-indigo-50/50 rounded-xl space-y-3">
+      <h3 className="font-semibold">Tạo phương án từ các phase (Đợt 9B)</h3>
+      <p className="text-xs text-slate-500">Sinh sẵn các dòng báo giá từ danh sách KOL và brief của từng phase: brief “mỗi KOL” lấy đúng số lượng; brief “tổng toàn phase” chia tổng cho các KOL (phần dư cho các KOL đầu danh sách). Giá đầu vào lấy từ danh sách của phase — dòng thiếu giá vẫn được tạo để PM biết, nhưng báo giá chỉ gửi duyệt được khi giá đã xác nhận đủ. Giá bán để trống cho PM điền.</p>
+      <div className="flex flex-wrap gap-2">
+        {phases.map((ph:any)=><label key={ph.id} className="flex items-center gap-1 text-sm bg-white border rounded-lg px-2 py-1"><input type="checkbox" checked={fromPhaseIds.includes(ph.id)} onChange={()=>setFromPhaseIds(prev=>prev.includes(ph.id)?prev.filter(x=>x!==ph.id):[...prev,ph.id])}/>{ph.name}</label>)}
+      </div>
+      <div className="flex flex-wrap gap-2 items-center">
+        <input aria-label="Tên phương án tạo từ phase" className={field+' sm:w-72'} maxLength={200} value={fromName} onChange={e=>setFromName(e.target.value)} placeholder="Tên phương án, VD: Phương án từ phase — R1"/>
+        <button type="button" className={button} disabled={busy||dirty||!fromPhaseIds.length||!fromName.trim()} onClick={()=>run(async()=>{const r=await request(base+'/options/from-phases',{name:fromName.trim(),phaseIds:fromPhaseIds});await refresh(r.quoteId);setNotice(`Đã tạo phương án từ phase: ${r.itemCount} dòng báo giá.${r.missingPrice?` ${r.missingPrice} dòng đang thiếu giá đầu vào.`:''}${r.unconfirmedPrice?` ${r.unconfirmedPrice} dòng giá chưa xác nhận.`:''}${r.skippedPhases?.length?` Bỏ qua phase chưa có KOL/hạng mục: ${r.skippedPhases.join(', ')}.` :''} Điền giá bán rồi lưu.`);})}>Tạo phương án từ {fromPhaseIds.length} phase</button>
+      </div>
+    </section>}
     {data.options.length===0?<p className="p-5 border border-dashed rounded-xl text-slate-500">Chưa có phương án. PM/Admin bổ sung thông tin chiến dịch rồi tạo phương án đầu tiên.</p>:<>
       <div className="flex gap-2 flex-wrap">{data.options.map((o:any)=><button key={o.id} className={'border px-3 py-2 rounded-lg text-sm '+(optionId===o.id?'bg-indigo-50 border-indigo-500 text-indigo-800':'bg-white')} onClick={()=>choose(o.versions[0])}>{o.name}{o.versions.some((q:any)=>q.id===data.baselineId)?' · Đã chốt':''}</button>)}</div>
       {quote&&<section className="space-y-4"><p className="text-sm text-indigo-800">Đã chọn {new Set(items.filter(i=>i.included&&i.kind==='kol').map(i=>i.shortlistId||i.creator)).size} KOL · {items.filter(i=>i.included).reduce((n,i)=>n+i.quantity,0)} đơn vị hạng mục.</p>
@@ -92,7 +106,31 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
         {dirty&&<p className="text-sm text-amber-800">Có chỉnh sửa chưa lưu. Tổng phía dưới là kết quả của bản đã lưu gần nhất.</p>}
         {manage&&quote.finance&&<section className="bg-indigo-50 border border-indigo-100 rounded-xl p-5"><h3 className="font-bold mb-3">P&L dự kiến — {currentOption.name} / V{quote.number}</h3><div className="grid sm:grid-cols-2 gap-2 text-sm">{[['Tổng hạng mục báo khách',quote.finance.knownSellTotal],['Chiết khấu khách hàng',quote.finance.discount],['Cơ sở tính agency fee',quote.finance.feeBase],['Agency fee',quote.finance.agencyFee],['Doanh thu trước thuế',quote.finance.revenueBeforeTax],['Chi phí đầu vào đã biết',quote.finance.knownBuyTotal],['Lợi nhuận dự kiến',quote.finance.profit],['Thuế',quote.finance.tax],['Tổng khách thanh toán',quote.finance.totalWithTax]].map(([label,value])=><div key={label as string} className="flex justify-between gap-4"><span>{label}</span><strong>{money(value as number|null)}</strong></div>)}</div><p className="text-sm mt-3">Biên lợi nhuận: {quote.finance.marginPercent===null?'Chưa đủ dữ liệu':quote.finance.marginPercent.toLocaleString('vi-VN',{maximumFractionDigits:2})+'%'} · Thiếu giá mua: {quote.finance.missingBuy} · Thiếu giá bán: {quote.finance.missingSell}</p><p className="text-xs text-slate-500 mt-2">P&L từng phương án không cộng dồn. Chi phí thực tế, hợp đồng và thanh toán sẽ được bổ sung ở bước sau.</p></section>}
         {isAdmin&&editable&&<section className="border rounded-xl p-4 space-y-3"><h3 className="font-semibold">Lấy hạng mục từ SOW cũ trên trình duyệt</h3><p className="text-xs text-slate-500">Chỉ sao chép vào phương án đang mở, không xóa bản cũ. Giữ giá SOW cũ là giá báo khách; giá đầu vào để trống chờ xác nhận. Không sao chép chiết khấu/phụ phí cũ tự động.</p><select aria-label="Chọn báo giá cũ" className={field} value={legacyId} onChange={e=>setLegacyId(e.target.value)}><option value="">Chọn báo giá cũ…</option>{legacyQuotes.map(q=><option key={q.id} value={q.id}>{q.tenChienDich} — {q.maBaoGia}</option>)}</select><button className="border rounded-lg px-3 py-2 text-sm" disabled={!legacyId||busy} onClick={()=>{const old=legacyQuotes.find(q=>q.id===legacyId);if(!old)return;setItems(prev=>[...prev,...old.items.map(i=>({id:crypto.randomUUID(),creator:i.kolName,description:i.formatLabel+(i.ghiChu?' · '+i.ghiChu:''),phase:'',kind:'kol',quantity:i.soLuong,buyUnitPrice:null,sellUnitPrice:i.donGia,included:true}))]);setDirty(true);setLegacyId('');setNotice('Đã lấy các dòng vào bản nháp. Kiểm tra rồi bấm Lưu báo giá.');}}>Lấy hạng mục vào phương án này</button></section>}
-        {customer&&<section className="border rounded-xl p-5 bg-white"><h3 className="font-bold">Bản xem trước báo khách</h3><p>{customer.client} · {customer.campaign} · V{customer.version}</p><table className="w-full text-sm mt-4"><thead><tr className="border-b"><th className="text-left">Hạng mục</th><th>SL</th><th>Đơn giá</th><th>Thành tiền</th></tr></thead><tbody>{customer.items.map((i:any,index:number)=><tr key={index} className="border-b"><td className="py-2">{i.creator} — {i.description}</td><td className="text-center">{i.quantity}</td><td className="text-center">{money(i.sellUnitPrice)}</td><td className="text-right">{money(i.total)}</td></tr>)}</tbody></table><div className="mt-4 text-sm text-right"><p>Chiết khấu: {money(customer.discount)}</p><p>Agency fee: {money(customer.agencyFee)}</p><p>Trước thuế: {money(customer.revenueBeforeTax)}</p><p>Thuế: {money(customer.tax)}</p><strong>Tổng thanh toán: {money(customer.totalWithTax)}</strong></div></section>}
+        {customer&&<section className="border rounded-xl p-5 bg-white"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Bản xem trước báo khách</h3><button type="button" className={button} onClick={()=>setShowPrint(true)}>In / Lưu PDF</button></div><p>{customer.client} · {customer.campaign} · V{customer.version}</p><table className="w-full text-sm mt-4"><thead><tr className="border-b"><th className="text-left">Hạng mục</th><th>SL</th><th>Đơn giá</th><th>Thành tiền</th></tr></thead><tbody>{customerGroups.map((g:any)=>{return <React.Fragment key={g.phase||'__'}>{(g.showHeader)&&<tr className="bg-slate-50"><td colSpan={4} className="py-2 font-semibold">{g.phase?('Phase: '+g.phase):'Hạng mục khác'}</td></tr>}{g.items.map((i:any,index:number)=><tr key={index} className="border-b"><td className="py-2">{i.creator} — {i.description}</td><td className="text-center">{i.quantity}</td><td className="text-center">{money(i.sellUnitPrice)}</td><td className="text-right">{money(i.total)}</td></tr>)}{(g.showHeader)&&<tr className="border-b"><td colSpan={3} className="py-1 text-right text-xs text-slate-500">Tiểu tổng {g.phase||'nhóm'}:</td><td className="py-1 text-right font-medium">{money(g.subtotal)}</td></tr>}</React.Fragment>})}</tbody></table><div className="mt-4 text-sm text-right"><p>Chiết khấu: {money(customer.discount)}</p><p>Agency fee: {money(customer.agencyFee)}</p><p>Trước thuế: {money(customer.revenueBeforeTax)}</p><p>Thuế: {money(customer.tax)}</p><strong>Tổng thanh toán: {money(customer.totalWithTax)}</strong></div></section>}
+        {showPrint&&customer&&<div className="fixed inset-0 z-50 bg-black/50 overflow-y-auto print:bg-white print:overflow-visible">
+          <style>{`@media print{body *{visibility:hidden}.quote-print-doc,.quote-print-doc *{visibility:visible}.quote-print-doc{position:absolute;inset:0;padding:0!important}@page{margin:14mm}}`}</style>
+          <div className="min-h-full py-6 px-3">
+            <div className="max-w-3xl mx-auto mb-3 flex justify-between items-center print:hidden">
+              <span className="text-white font-semibold text-sm">Bản in báo giá — {customer.campaign} · V{customer.version}</span>
+              <span className="flex gap-2"><button type="button" className={button} onClick={()=>window.print()}>In / Lưu PDF</button><button type="button" className="rounded-lg bg-white px-3 py-2 text-sm font-semibold" onClick={()=>setShowPrint(false)}>Đóng</button></span>
+            </div>
+            <div className="quote-print-doc max-w-3xl mx-auto bg-white text-slate-800 p-8 sm:p-10 shadow print:shadow-none">
+              <h1 className="text-xl font-bold">BÁO GIÁ CHIẾN DỊCH</h1>
+              <p className="text-sm mt-1">Khách hàng: <strong>{customer.client}</strong> · Chiến dịch: <strong>{customer.campaign}</strong> · Phiên bản: V{customer.version}</p>
+              <table className="w-full text-sm mt-5">
+                <thead><tr className="border-b-2 border-slate-700"><th className="text-left py-2">Hạng mục</th><th className="py-2">SL</th><th className="py-2">Đơn giá</th><th className="text-right py-2">Thành tiền</th></tr></thead>
+                <tbody>{customerGroups.map((g:any)=>{return <React.Fragment key={g.phase||'__'}>{(g.showHeader)&&<tr className="bg-slate-100"><td colSpan={4} className="py-2 px-1 font-semibold">{g.phase?('Phase: '+g.phase):'Hạng mục khác'}</td></tr>}{g.items.map((i:any,index:number)=><tr key={index} className="border-b border-slate-200"><td className="py-2">{i.creator} — {i.description}</td><td className="text-center">{i.quantity}</td><td className="text-center">{money(i.sellUnitPrice)}</td><td className="text-right">{money(i.total)}</td></tr>)}{(g.showHeader)&&<tr className="border-b border-slate-200"><td colSpan={3} className="py-1 text-right text-xs text-slate-500">Tiểu tổng {g.phase||'nhóm'}:</td><td className="py-1 text-right font-medium">{money(g.subtotal)}</td></tr>}</React.Fragment>})}</tbody>
+              </table>
+              <div className="mt-5 text-sm text-right space-y-1">
+                <p>Chiết khấu: {money(customer.discount)}</p>
+                <p>Agency fee: {money(customer.agencyFee)}</p>
+                <p>Trước thuế: {money(customer.revenueBeforeTax)}</p>
+                <p>Thuế ({customer.taxRate}%): {money(customer.tax)}</p>
+                <p className="text-base"><strong>Tổng thanh toán: {money(customer.totalWithTax)}</strong></p>
+              </div>
+            </div>
+          </div>
+        </div>}
       </section>}
     </>}
   </div>;

@@ -2,6 +2,8 @@ import type {Router} from 'express';
 import type {DatabaseSync} from 'node:sqlite';
 import {randomUUID} from 'node:crypto';
 import {calculateProjectFinance, type Adjustment} from '../src/domain/projectFinance';
+import {readProjectBrief} from '../src/domain/projectBrief';
+import {buildPhaseQuoteItems, type PhaseQuotePhase} from '../src/domain/phaseQuote';
 
 export interface ProjectQuoteItem {
   id:string; creator:string; description:string; phase:string;
@@ -143,6 +145,38 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     if(!access(u,pid,true))return res.status(403).json({message:'Chỉ PM/Admin được chốt phương án.'});
     const q=quote(req.params.quoteId,pid);if(!q||q.status!=='approved')return res.status(400).json({message:'Chỉ được chốt một phiên bản đã duyệt trong dự án.'});
     db.prepare('INSERT INTO project_baselines VALUES (?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET quote_id=excluded.quote_id,selected_by=excluded.selected_by,selected_at=excluded.selected_at').run(pid,q.id,u.id,new Date().toISOString());audit(u.id,'select_baseline',q.id);res.json({success:true});
+  });
+  // Đợt 9B: tạo phương án + V1 từ các phase đã chọn (PM/Admin).
+  router.post('/projects/:id/options/from-phases',(req,res)=>{
+    const u=res.locals.user;const pid=req.params.id;
+    if(!access(u,pid,true))return res.status(403).json({message:'Chỉ PM/Admin được tạo phương án từ phase.'});
+    if(!text(req.body.name,200))return res.status(400).json({message:'Nhập tên phương án.'});
+    const phaseIds=req.body.phaseIds;
+    if(!Array.isArray(phaseIds)||!phaseIds.length||phaseIds.length>20||phaseIds.some((x:any)=>typeof x!=='string'))return res.status(400).json({message:'Chọn ít nhất một phase.'});
+    const p=project(pid);if(!p.client_name||!p.campaign_name)return res.status(400).json({message:'Bổ sung khách hàng và tên chiến dịch trước khi tạo phương án.'});
+    const allPhases=db.prepare('SELECT * FROM project_phases WHERE project_id=? ORDER BY sort_order,rowid').all(pid) as any[];
+    const byId=new Map(allPhases.map((x:any)=>[x.id,x]));
+    if(phaseIds.some((id:string)=>!byId.has(id)))return res.status(400).json({message:'Có phase không thuộc dự án này.'});
+    const firstPhaseId=allPhases[0]?.id;
+    const input:PhaseQuotePhase[]=phaseIds.map((id:string)=>{
+      const ph=byId.get(id);
+      const rows=db.prepare('SELECT * FROM project_shortlist WHERE project_id=? AND (phase_id=? OR (phase_id IS NULL AND ?=?)) ORDER BY rowid').all(pid,id,id,firstPhaseId).map((r:any)=>({shortlistId:r.id,creator:JSON.parse(r.profile_json).ten,prices:JSON.parse(r.prices_json)}));
+      let brief=null;
+      if(ph.brief_json){try{const b=readProjectBrief(JSON.parse(ph.brief_json));brief={deliverableScope:b.deliverableScope,deliverables:b.deliverables.map((d:any)=>({format:d.format,quantity:d.quantity}))};}catch{brief=null;}}
+      return {name:ph.name,brief,rows};
+    });
+    const built=buildPhaseQuoteItems(input,()=>randomUUID());
+    if(!built.items.length)return res.status(400).json({message:'Các phase đã chọn chưa có KOL hoặc chưa có hạng mục trong brief của phase. Bổ sung danh sách/brief của phase trước.'});
+    if(built.items.length>500)return res.status(400).json({message:'Phương án vượt quá 500 hạng mục. Tách bớt phase hoặc giảm số KOL.'});
+    const oid=randomUUID(),qid=randomUUID(),now=new Date().toISOString();
+    const payload:QuotePayload={client:p.client_name,campaign:p.campaign_name,items:built.items as ProjectQuoteItem[],discount:{mode:'fixed',value:0},agencyFee:{mode:'percent',value:12},taxRate:0};
+    if(!validate(payload))return res.status(400).json({message:'Dữ liệu sinh từ phase không hợp lệ.'});
+    db.exec('BEGIN');try{
+      db.prepare('INSERT INTO project_options VALUES (?,?,?,?,?,?)').run(oid,pid,req.body.name.trim(),'',u.id,now);
+      db.prepare('INSERT INTO project_quote_versions VALUES (?,?,1,\'draft\',1,?,?,?,NULL)').run(qid,oid,JSON.stringify(payload),u.id,now);
+      audit(u.id,'create_option_from_phases',oid);db.exec('COMMIT');
+    }catch{db.exec('ROLLBACK');return res.status(400).json({message:'Không thể tạo phương án từ phase.'});}
+    res.json({optionId:oid,quoteId:qid,itemCount:built.items.length,missingPrice:built.missingPrice,unconfirmedPrice:built.unconfirmedPrice,skippedPhases:built.skippedPhases});
   });
   router.get('/projects/:id/quotes/:quoteId/customer',(req,res)=>{
     const u=res.locals.user;const pid=req.params.id;
