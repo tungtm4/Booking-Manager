@@ -9,3 +9,6 @@ coverage/
 
 # Database và mã khởi tạo chỉ ở máy local
 .local/
+
+# Tài liệu review chỉ ở máy local
+review/
