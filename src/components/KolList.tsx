@@ -761,7 +761,7 @@ export const KolList: React.FC<KolListProps> = ({
               return (
                 <div
                   key={kol.id}
-                  className={`bg-white rounded-xl border p-4 flex flex-col md:flex-row md:items-center gap-4 transition-all ${
+                  className={`bg-white rounded-xl border p-2 flex flex-col md:flex-row md:items-center gap-3 transition-all ${
                     isSelected
                       ? 'border-indigo-500 ring-2 ring-indigo-100 bg-indigo-50/15'
                       : 'border-slate-200 hover:border-indigo-300'
@@ -770,7 +770,7 @@ export const KolList: React.FC<KolListProps> = ({
                   {/* Khối trái: flex items-start gap-3 min-w-0 flex-1 */}
                   <div className="flex items-start gap-3 min-w-0 flex-1">
                     {/* Checkbox chọn hàng loạt */}
-                    <div className="mt-3 shrink-0">
+                    <div className="shrink-0 self-center">
                       <input
                         type="checkbox"
                         checked={isSelected}
@@ -787,7 +787,7 @@ export const KolList: React.FC<KolListProps> = ({
                     </div>
 
                     {/* Avatar: w-12 h-12 */}
-                    <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-100 border border-slate-200 shrink-0">
+                    <div className="w-9 h-9 rounded-full overflow-hidden bg-slate-100 border border-slate-200 shrink-0">
                     {kol.anhDaiDien ? (
                       <img
                         src={kol.anhDaiDien}
@@ -798,7 +798,7 @@ export const KolList: React.FC<KolListProps> = ({
                         }}
                       />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-indigo-100 text-indigo-700 font-bold text-sm">
+                      <div className="w-full h-full flex items-center justify-center bg-indigo-100 text-indigo-700 font-bold text-xs">
                         {kol.ten.slice(0, 2).toUpperCase()}
                       </div>
                     )}
@@ -809,7 +809,7 @@ export const KolList: React.FC<KolListProps> = ({
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3
                         onClick={() => onSelectKol(kol)}
-                        className="font-bold text-slate-900 text-sm sm:text-base truncate hover:text-indigo-600 cursor-pointer"
+                        className="font-bold text-slate-900 text-sm truncate hover:text-indigo-600 cursor-pointer"
                       >
                         {kol.ten}
                       </h3>
@@ -832,12 +832,12 @@ export const KolList: React.FC<KolListProps> = ({
                     </div>
 
                     {/* Dòng thông tin: kênh, lĩnh vực */}
-                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       {kol.nenTang && kol.nenTang.length > 0 ? (
                         kol.nenTang.map((nt, idx) => (
                           <React.Fragment key={nt.id || `${nt.tenNenTang}-${idx}`}>
                             {idx > 0 && <span className="text-slate-300">•</span>}
-                            <span className="text-xs text-slate-500">
+                            <span className="text-[11px] text-slate-500">
                               {nt.tenNenTang}: <strong className="text-slate-700 font-medium">{formatFollowers(nt.soFollower)}</strong>
                             </span>
                           </React.Fragment>
@@ -865,26 +865,27 @@ export const KolList: React.FC<KolListProps> = ({
                       )}
                     </div>
 
-                    {/* Dòng ngày giờ cập nhật */}
-                    {kol.ngayCapNhat && formatDateTimeVN(kol.ngayCapNhat) ? (
-                      <div className="text-[11px] text-slate-400 mt-1">
-                        Cập nhật: {formatDateTimeVN(kol.ngayCapNhat)}
+                    {/* Dòng meta gọn: giờ cập nhật · nhận xét sơ bộ (cắt 1 dòng, title xem đủ) */}
+                    {(kol.ngayCapNhat || kol.reviewSoBo) && (
+                      <div className="flex items-center gap-1.5 mt-0.5 text-[11px] min-w-0">
+                        {kol.ngayCapNhat && formatDateTimeVN(kol.ngayCapNhat) ? (
+                          <span className="text-slate-400 shrink-0">Cập nhật: {formatDateTimeVN(kol.ngayCapNhat)}</span>
+                        ) : null}
+                        {kol.ngayCapNhat && kol.reviewSoBo && <span className="text-slate-300">•</span>}
+                        {kol.reviewSoBo && (
+                          <span className="text-slate-500 italic truncate" title={kol.reviewSoBo}>
+                            "{kol.reviewSoBo}"
+                          </span>
+                        )}
                       </div>
-                    ) : null}
-
-                    {/* Nhận xét sơ bộ */}
-                    {kol.reviewSoBo && (
-                      <p className="mt-2 text-xs text-slate-500 line-clamp-2 leading-relaxed italic">
-                        "{kol.reviewSoBo}"
-                      </p>
                     )}
                   </div>
                 </div>
 
-                {/* Khối phải: Bảng giá cố định 2 cột x 3 hàng + Hàng nút thao tác */}
-                <div className="w-full md:w-[430px] shrink-0 flex flex-col gap-2.5">
-                  {/* Bảng giá 2 cột x 3 hàng */}
-                  <div className="grid grid-cols-2 gap-1.5">
+                {/* Khối phải: Bảng giá gọn 3 cột x 2 hàng + Cột nút thao tác ở rìa phải */}
+                <div className="w-full md:w-[480px] shrink-0 flex gap-2">
+                  {/* Bảng giá 3 cột x 2 hàng */}
+                  <div className="grid grid-cols-3 gap-1 flex-1 self-center">
                     {PRICE_FORMAT_ORDER.map((fmt) => {
                       const val = kol.bangGia ? kol.bangGia[fmt] : null;
                       const hasPrice = val !== null && val !== undefined && val > 0;
@@ -893,7 +894,7 @@ export const KolList: React.FC<KolListProps> = ({
                       return (
                         <div
                           key={fmt}
-                          className={`text-xs px-2.5 py-1 rounded-md border truncate whitespace-nowrap transition-all ${
+                          className={`text-[11px] px-1.5 py-0.5 rounded-md border truncate whitespace-nowrap transition-all ${
                             hasPrice
                               ? `${PRICE_FORMAT_STYLES[fmt]} ${isSelectedFilter ? 'ring-2 ring-slate-700/50' : ''}`
                               : `bg-slate-50 border-slate-200 text-slate-400 ${isSelectedFilter ? 'ring-2 ring-slate-700/50' : ''}`
@@ -912,38 +913,39 @@ export const KolList: React.FC<KolListProps> = ({
                     })}
                   </div>
 
-                  {/* Hàng nút thao tác */}
-                  <div className="flex items-center gap-1.5 justify-end">
+                  {/* Cột nút thao tác ở rìa phải thẻ */}
+                  <div className="flex flex-col gap-1 shrink-0 w-[78px] justify-center">
                     {/* Nút So sánh */}
                     <button
                       type="button"
                       onClick={() => handleToggleCompare(kol.id)}
                       title={compareKolIds.includes(kol.id) ? "Bỏ so sánh" : "Thêm vào so sánh (tối đa 3)"}
-                      className={`flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
+                      className={`flex items-center justify-center gap-1 px-1.5 py-1 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer w-full ${
                         compareKolIds.includes(kol.id)
                           ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
                           : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-300'
                       }`}
                     >
                       <Scale className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">
+                      <span>
                         {compareKolIds.includes(kol.id) ? 'Đã chọn' : 'So sánh'}
                       </span>
                     </button>
 
                     <button
                       onClick={() => onSelectKol(kol)}
-                      className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
+                      className="flex items-center justify-center gap-1 px-1.5 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors w-full"
                     >
                       <Eye className="w-3.5 h-3.5" />
                       <span>Chi tiết</span>
                     </button>
 
+                    <div className="flex gap-0.5 justify-between">
                     {onAddToSow && (
                       <button
                         onClick={() => onAddToSow(kol)}
                         title="Đưa vào Báo giá SOW"
-                        className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg border border-transparent hover:border-emerald-200 transition-colors"
+                        className="p-1 text-emerald-700 hover:bg-emerald-50 rounded-lg border border-transparent hover:border-emerald-200 transition-colors"
                       >
                         <FileSpreadsheet className="w-4 h-4" />
                       </button>
@@ -952,7 +954,7 @@ export const KolList: React.FC<KolListProps> = ({
                     <button
                       onClick={() => onEditKol(kol)}
                       title="Chỉnh sửa hồ sơ"
-                      className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors"
+                      className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
@@ -960,10 +962,11 @@ export const KolList: React.FC<KolListProps> = ({
                     <button
                       onClick={() => onDeleteKol(kol)}
                       title="Xóa hồ sơ"
-                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -978,7 +981,7 @@ export const KolList: React.FC<KolListProps> = ({
             <table className="w-full text-left text-sm text-slate-700">
               <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500 font-semibold uppercase">
                 <tr>
-                  <th className="px-3.5 py-3.5 w-10 text-center">
+                  <th className="px-3.5 py-2 w-10 text-center">
                     <input
                       type="checkbox"
                       checked={sortedKols.length > 0 && sortedKols.every((k) => selectedKolIds.includes(k.id))}
@@ -996,12 +999,12 @@ export const KolList: React.FC<KolListProps> = ({
                       title={sortedKols.length > 0 && sortedKols.every((k) => selectedKolIds.includes(k.id)) ? "Bỏ chọn tất cả" : "Chọn tất cả"}
                     />
                   </th>
-                  <th className="px-4 py-3.5">KOL / Nghệ danh</th>
-                  <th className="px-4 py-3.5">Kênh & Followers</th>
-                  <th className="px-4 py-3.5">Lĩnh vực</th>
-                  <th className="px-4 py-3.5">Giá {PRICE_FORMAT_LABELS[budgetFormat]}</th>
-                  <th className="px-4 py-3.5">Đánh giá</th>
-                  <th className="px-4 py-3.5 text-right">Thao tác</th>
+                  <th className="px-4 py-2">KOL / Nghệ danh</th>
+                  <th className="px-4 py-2">Kênh & Followers</th>
+                  <th className="px-4 py-2">Lĩnh vực</th>
+                  <th className="px-4 py-2">Giá {PRICE_FORMAT_LABELS[budgetFormat]}</th>
+                  <th className="px-4 py-2">Đánh giá</th>
+                  <th className="px-4 py-2 text-right">Thao tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1017,7 +1020,7 @@ export const KolList: React.FC<KolListProps> = ({
                       }`}
                     >
                       {/* Checkbox */}
-                      <td className="px-3.5 py-3 text-center">
+                      <td className="px-3.5 py-2 text-center">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -1032,7 +1035,7 @@ export const KolList: React.FC<KolListProps> = ({
                       </td>
 
                       {/* KOL name & avatar */}
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2">
                         <div
                           onClick={() => onSelectKol(kol)}
                           className="flex items-center gap-3 cursor-pointer group"
@@ -1063,7 +1066,7 @@ export const KolList: React.FC<KolListProps> = ({
                       </td>
 
                       {/* Platforms */}
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2">
                         <div className="flex flex-col gap-1">
                           {kol.nenTang?.map((nt) => (
                             <span key={nt.id} className="text-xs text-slate-600">
@@ -1075,7 +1078,7 @@ export const KolList: React.FC<KolListProps> = ({
                       </td>
 
                       {/* Categories */}
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2">
                         <div className="flex flex-wrap gap-1 max-w-[200px]">
                           {kol.linhVuc.map((cat) => (
                             <span
@@ -1089,7 +1092,7 @@ export const KolList: React.FC<KolListProps> = ({
                       </td>
 
                       {/* Price for format */}
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2">
                         <span
                           className={`font-semibold ${
                             priceForFormat ? 'text-indigo-600' : 'text-amber-600 text-xs'
@@ -1100,7 +1103,7 @@ export const KolList: React.FC<KolListProps> = ({
                       </td>
 
                       {/* Rating */}
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2">
                         {kol.danhGiaHieuQua?.diem ? (
                           <div className="flex items-center gap-1 text-xs text-amber-600 font-bold">
                             <Star className="w-3.5 h-3.5 fill-amber-400" />
@@ -1160,7 +1163,7 @@ export const KolList: React.FC<KolListProps> = ({
 
       {/* Thanh Thao Tác Hàng Loạt (Hiện ở cả 2 dạng hiển thị khi có KOL được chọn) */}
       {selectedKolIds.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[95%] max-w-2xl bg-slate-900/95 backdrop-blur-md text-white rounded-2xl shadow-2xl border border-slate-700/80 px-4 py-3 sm:px-6 sm:py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[95%] max-w-2xl bg-slate-900/95 backdrop-blur-md text-white rounded-2xl shadow-2xl border border-slate-700/80 px-4 py-3 sm:px-6 sm:py-2 flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-xs border border-indigo-500/30">
               {selectedKolIds.length}

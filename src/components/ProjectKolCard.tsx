@@ -43,29 +43,29 @@ export function ProjectKolCard({
   // Brief assessment chip logic
   const failedChecksCount = assessment.checks.filter((c) => !c.met).length;
   let chipLabel = '';
-  let chipClass = '';
+  let chipTextClass = '';
   if (!assessment.hasCriteria) {
     chipLabel = 'Cần bổ sung tiêu chí để đánh giá';
-    chipClass = 'bg-slate-100 text-slate-600 border-slate-200';
+    chipTextClass = 'text-slate-500';
   } else if (assessment.matches) {
     chipLabel = 'Đạt tiêu chí brief';
-    chipClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    chipTextClass = 'text-emerald-700';
   } else {
     chipLabel = `Chưa đạt ${failedChecksCount} tiêu chí`;
-    chipClass = 'bg-amber-50 text-amber-700 border-amber-200';
+    chipTextClass = 'text-amber-700';
   }
 
   return (
     <article
       className={
-        'rounded-xl border bg-white shadow-xs p-4 transition-all ' +
+        'rounded-xl border bg-white shadow-xs p-2.5 transition-all ' +
         (selected ? 'border-indigo-500 ring-2 ring-indigo-100' : 'border-slate-200 hover:border-slate-300')
       }
       aria-label={'Hồ sơ KOL ' + profile.ten}
     >
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="flex items-center gap-3">
         {/* Khối trái: Thông tin KOL */}
-        <div className="flex items-start gap-3 min-w-0 flex-1 w-full">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
           {onSelect && (
             <input
               type="checkbox"
@@ -73,7 +73,7 @@ export function ProjectKolCard({
               checked={selected}
               disabled={disabled}
               onChange={onSelect}
-              className="mt-1.5 w-4 h-4 accent-indigo-600 text-indigo-600 rounded border-slate-300 shrink-0 cursor-pointer disabled:cursor-not-allowed"
+              className="w-4 h-4 accent-indigo-600 text-indigo-600 rounded border-slate-300 shrink-0 cursor-pointer disabled:cursor-not-allowed"
             />
           )}
 
@@ -81,14 +81,14 @@ export function ProjectKolCard({
             <img
               src={profile.anhDaiDien}
               alt={'Ảnh ' + profile.ten}
-              className="w-11 h-11 rounded-full object-cover shrink-0"
+              className="w-8 h-8 rounded-full object-cover shrink-0"
               referrerPolicy="no-referrer"
               onError={(e) => {
                 (e.target as HTMLElement).style.display = 'none';
               }}
             />
           ) : (
-            <div className="w-11 h-11 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0 text-sm">
+            <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0 text-xs">
               {profile.ten?.slice(0, 2).toUpperCase()}
             </div>
           )}
@@ -96,7 +96,7 @@ export function ProjectKolCard({
           <div className="min-w-0 flex-1">
             {/* Tên KOL + Badge */}
             <div className="flex items-center gap-2 flex-wrap">
-              <h5 className="font-bold text-slate-900 text-sm sm:text-base truncate">
+              <h5 className="font-bold text-slate-900 text-[13px] truncate">
                 {profile.ten}
               </h5>
               {badge && (
@@ -107,12 +107,12 @@ export function ProjectKolCard({
             </div>
 
             {/* Dòng inline: Nền tảng · Followers · Link Profile + Lĩnh vực */}
-            <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <div className="flex items-center gap-1.5 mt-0.5 flex-nowrap overflow-hidden">
               {profile.nenTang && profile.nenTang.length > 0 ? (
                 profile.nenTang.map((c: any, idx: number) => (
                   <React.Fragment key={c.id || `${c.tenNenTang}-${idx}`}>
                     {idx > 0 && <span className="text-slate-300">•</span>}
-                    <span className="text-xs text-slate-500 inline-flex items-center gap-1">
+                    <span className="text-[11px] text-slate-500 inline-flex items-center gap-1">
                       {c.tenNenTang}: <strong className="text-slate-700 font-medium">{formatFollowers(c.soFollower)}</strong>
                       {safeUrl(c.linkProfile) && (
                         <a
@@ -129,7 +129,7 @@ export function ProjectKolCard({
                   </React.Fragment>
                 ))
               ) : (
-                <span className="text-xs text-slate-400">Chưa có kênh</span>
+                <span className="text-[11px] text-slate-400">Chưa có kênh</span>
               )}
 
               {profile.linhVuc && profile.linhVuc.length > 0 && (
@@ -152,16 +152,11 @@ export function ProjectKolCard({
               )}
             </div>
 
-            {/* Dòng giờ cập nhật */}
-            {updateTimeStr && (
-              <div className="text-[11px] text-slate-400 mt-1">
-                Cập nhật: {updateTimeStr}
-              </div>
-            )}
-
-            {/* Dòng đánh giá brief gọn: chip + link Đối chiếu */}
-            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-              <span className={`text-[11px] px-2 py-0.5 rounded-md border font-medium ${chipClass}`}>
+            {/* Dòng meta gọn: giờ cập nhật · chip đối chiếu brief · nút Đối chiếu */}
+            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap text-[11px]">
+              {updateTimeStr && <span className="text-slate-400">Cập nhật: {updateTimeStr}</span>}
+              {updateTimeStr && <span className="text-slate-300">•</span>}
+              <span className={`font-medium ${chipTextClass}`}>
                 {chipLabel}
               </span>
               <button
@@ -211,15 +206,16 @@ export function ProjectKolCard({
           </div>
         </div>
 
-        {/* Khối phải: Bảng giá 2 cột x 3 hàng */}
-        <div className="w-full md:w-[430px] shrink-0 flex flex-col gap-2">
-          <div className="grid grid-cols-2 gap-1.5">
+        {/* Khối phải: Bảng giá gọn 3 cột x 2 hàng, ô 2 dòng siêu nhỏ */}
+        <div className="w-[380px] shrink-0">
+          <div className="grid grid-cols-3 gap-1">
             {PRICE_FORMAT_ORDER.map((format) => {
               const task = needed.find((d) => d.format === format);
               const price = prices?.[format];
               const value = prices ? price?.value : profile.bangGia?.[format];
               const hasPrice = value !== null && value !== undefined;
               const status = price?.status ?? (value == null ? 'waiting' : 'unconfirmed');
+              const statusText = status === 'confirmed' ? 'Đã xác nhận' : status === 'unconfirmed' ? 'Chưa xác nhận' : 'Chờ bổ sung giá';
 
               // Xây dựng title của ô
               const titleParts: string[] = [];
@@ -251,7 +247,7 @@ export function ProjectKolCard({
                 ? PRICE_FORMAT_STYLES[format]
                 : 'bg-slate-50 border-slate-200 text-slate-400';
 
-              const boxClass = `text-xs px-2.5 py-1 rounded-md ${ringClass} ${baseColor} text-left truncate transition-all ${
+              const boxClass = `text-[11px] px-1.5 py-0.5 rounded-md ${ringClass} ${baseColor} text-left truncate transition-all ${
                 renderPriceEditor ? 'cursor-pointer hover:shadow-xs' : ''
               } ${editing === format ? 'ring-2 ring-indigo-600' : ''}`;
 
@@ -278,11 +274,17 @@ export function ProjectKolCard({
                       <ChevronDown size={11} className="text-slate-400 shrink-0 opacity-70" />
                     )}
                   </div>
-                  {status === 'unconfirmed' && (
-                    <div className="text-[10px] text-slate-500 font-normal leading-tight">
-                      Chưa xác nhận
-                    </div>
-                  )}
+                  <div
+                    className={`text-[9px] font-normal leading-tight truncate ${
+                      status === 'confirmed' ? 'text-emerald-600' : status === 'waiting' ? 'text-amber-600' : 'text-slate-500'
+                    }`}
+                    title={cellTitle}
+                  >
+                    {task
+                      ? `${task.quantity.toLocaleString('vi-VN')} ${brief.deliverableScope === 'campaign' ? 'toàn chiến dịch' : '/ KOL'} · `
+                      : ''}
+                    {statusText}
+                  </div>
                 </>
               );
 
@@ -311,7 +313,7 @@ export function ProjectKolCard({
 
       {/* Form kiểm tra giá bung ra dưới thẻ */}
       {editing && renderPriceEditor && (
-        <div className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50/40 p-3">
+        <div className="mt-2 rounded-xl border border-indigo-200 bg-indigo-50/40 p-3">
           <div className="flex justify-between items-center mb-3">
             <h6 className="text-sm font-semibold text-slate-800">
               Kiểm tra giá — {PRICE_FORMAT_LABELS[editing]}

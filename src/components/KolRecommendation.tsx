@@ -1122,7 +1122,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                 return (
                   <div
                     key={kol.id}
-                    className={`bg-white rounded-2xl border transition-all p-5 shadow-xs ${
+                    className={`bg-white rounded-2xl border transition-all p-3 shadow-xs ${
                       isSelected
                         ? 'border-indigo-500 ring-2 ring-indigo-100'
                         : 'border-slate-200 hover:border-slate-300'
@@ -1131,17 +1131,17 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                     {/* Header Thẻ: Checkbox, Avatar, Info, Badges, Score */}
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                       {/* Checkbox + Avatar + Tên */}
-                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div className="flex items-center gap-2.5 flex-1 min-w-0">
                         <input
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => handleToggleSelectKol(kol.id)}
-                          className="w-5 h-5 mt-1 rounded-md text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                          className="w-4 h-4 rounded-md text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer shrink-0"
                         />
 
                         <div
                           onClick={() => onSelectKol(kol)}
-                          className="w-14 h-14 rounded-full overflow-hidden bg-slate-200 shrink-0 cursor-pointer border border-slate-200"
+                          className="w-9 h-9 rounded-full overflow-hidden bg-slate-200 shrink-0 cursor-pointer border border-slate-200"
                         >
                           {kol.anhDaiDien ? (
                             <img src={kol.anhDaiDien} alt={kol.ten} className="w-full h-full object-cover" />
@@ -1159,7 +1159,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                             </span>
                             <h3
                               onClick={() => onSelectKol(kol)}
-                              className="font-bold text-slate-900 text-base truncate hover:text-indigo-600 cursor-pointer"
+                              className="font-bold text-slate-900 text-sm truncate hover:text-indigo-600 cursor-pointer"
                             >
                               {kol.ten}
                             </h3>
@@ -1197,8 +1197,8 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
 
                       {/* Score Badge */}
                       <div className="text-right shrink-0 sm:self-center">
-                        <div className="inline-flex flex-col items-center justify-center px-4 py-2 rounded-xl bg-indigo-50 border border-indigo-200">
-                          <span className="text-2xl font-black text-indigo-700">{tongDiem}</span>
+                        <div className="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200">
+                          <span className="text-lg font-black text-indigo-700">{tongDiem}</span>
                           <span className="text-[10px] font-bold uppercase text-indigo-600 tracking-wider">
                             / 80 Điểm
                           </span>
@@ -1206,41 +1206,25 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                       </div>
                     </div>
 
-                    {/* Điểm chi tiết 3 tiêu chí */}
-                    <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-                      <div className="bg-slate-50 p-2 rounded-lg">
-                        <span className="text-slate-400 block text-[10px]">1. Lĩnh vực (Max 40)</span>
-                        <strong className="text-slate-800">{diemLinhVuc} / 40 đ</strong>
-                      </div>
-                      <div className="bg-slate-50 p-2 rounded-lg">
-                        <span className="text-slate-400 block text-[10px]">2. Giá format (Max 30)</span>
-                        <strong className="text-slate-800">{diemGia} / 30 đ</strong>
-                      </div>
-                      <div className="bg-slate-50 p-2 rounded-lg">
-                        <span className="text-slate-400 block text-[10px]">3. Lịch sử job (Max 10)</span>
-                        <strong className="text-slate-800">{diemHopTac} / 10 đ</strong>
-                      </div>
+                    {/* Điểm chi tiết 3 tiêu chí — nén thành 1 dòng */}
+                    <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+                      <span>1. Lĩnh vực: <strong className="text-slate-800">{diemLinhVuc} / 40 đ</strong></span>
+                      <span>2. Giá format: <strong className="text-slate-800">{diemGia} / 30 đ</strong></span>
+                      <span>3. Lịch sử job: <strong className="text-slate-800">{diemHopTac} / 10 đ</strong></span>
                     </div>
 
-                    {/* Lý do đề xuất (GIỮ NGUYÊN) */}
-                    <div className="mt-3 bg-amber-50/50 border border-amber-200/60 rounded-xl p-3">
-                      <span className="text-xs font-bold text-amber-900 block mb-1">
-                        Lý do đề xuất:
+                    {/* Lý do đề xuất — nén 1 dòng, title chứa toàn bộ */}
+                    <div className="mt-2 bg-amber-50/50 border border-amber-200/60 rounded-lg px-2 py-1.5 flex gap-1.5 min-w-0 text-[11px] text-amber-900">
+                      <span className="font-bold shrink-0">Lý do đề xuất:</span>
+                      <span className="truncate" title={lyDo.join(' · ')}>
+                        {lyDo.join(' · ')}
                       </span>
-                      <ul className="text-xs text-amber-900 space-y-1">
-                        {lyDo.map((r, i) => (
-                          <li key={i} className="flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-                            <span>{r}</span>
-                          </li>
-                        ))}
-                      </ul>
                     </div>
 
                     {/* (a) BẢNG GIÁ 6 Ô CỐ ĐỊNH (Theo đúng mẫu KolList, tô đậm theo SOW) */}
-                    <div className="mt-4 pt-3 border-t border-slate-100">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold text-slate-700">
+                    <div className="mt-2.5 pt-2 border-t border-slate-100">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[11px] font-bold text-slate-700">
                           Bảng giá 6 định dạng (Tô đậm các hạng mục SOW phân công):
                         </span>
                       </div>
@@ -1255,7 +1239,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                           return (
                             <div
                               key={fmt}
-                              className={`text-xs px-2.5 py-1.5 rounded-lg border transition-all flex items-center justify-between gap-1.5 ${
+                              className={`text-[11px] px-2 py-0.5 rounded-lg border transition-all flex items-center justify-between gap-1.5 ${
                                 isAssigned
                                   ? hasPrice
                                     ? 'bg-indigo-50 border-indigo-400 text-indigo-900 ring-2 ring-indigo-500 font-extrabold shadow-xs'
@@ -1298,7 +1282,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                     </div>
 
                     {/* (b) HÀNG CHỈNH "HẠNG MỤC KOL NÀY LÀM" (Sửa riêng cho từng KOL) */}
-                    <div className="mt-3 p-3 bg-slate-50/80 rounded-xl border border-slate-200/80 space-y-2">
+                    <div className="mt-2 p-2 bg-slate-50/80 rounded-xl border border-slate-200/80 space-y-1.5">
                       <div className="flex items-center justify-between flex-wrap gap-1">
                         <span className="text-[11px] font-bold text-slate-700">
                           Hạng mục KOL này làm trong SOW (Chỉnh số lượng):
@@ -1308,13 +1292,13 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
                         {PRICE_FORMAT_ORDER.map((fmt) => {
                           const qty = assignments[fmt] || 0;
                           return (
                             <div
                               key={fmt}
-                              className={`p-2 rounded-lg border bg-white flex items-center justify-between gap-1 transition-all ${
+                              className={`p-1.5 rounded-lg border bg-white flex items-center justify-between gap-1 transition-all ${
                                 qty > 0 ? 'border-indigo-300 ring-1 ring-indigo-200' : 'border-slate-200'
                               }`}
                             >
@@ -1348,7 +1332,7 @@ export const KolRecommendation: React.FC<KolRecommendationProps> = ({
                     </div>
 
                     {/* (c) DÒNG TÍNH TIỀN: Chi phí SOW của KOL */}
-                    <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2 text-xs">
+                    <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2 text-xs">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-slate-600">
                           Chi phí SOW của KOL:{' '}
