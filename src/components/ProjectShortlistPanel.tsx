@@ -152,6 +152,14 @@ function BriefExtrasFields({ brief, change, prefix }: { brief: any; change: (k: 
             <option value="both">Cả Creator và Community</option>
           </select>
         </label>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-sm">Số KOL cần
+            <input aria-label={prefix + ' số KOL cần'} className={field} type="number" min={0} max={10000} value={brief.kolTargetCount ?? ''} onChange={e => change('kolTargetCount', numOrNull(e.target.value))} placeholder="Số creator/KOL" />
+          </label>
+          <label className="text-sm">Số Community cần
+            <input aria-label={prefix + ' số Community cần'} className={field} type="number" min={0} max={10000} value={brief.communityTargetCount ?? ''} onChange={e => change('communityTargetCount', numOrNull(e.target.value))} placeholder="Số page/group" />
+          </label>
+        </div>
         <label className="text-sm">KPI: tổng số bài viết (topics)
           <input aria-label={prefix + ' KPI topics'} className={field} type="number" min={0} value={brief.kpiTopics ?? ''} onChange={e => change('kpiTopics', numOrNull(e.target.value))} placeholder="VD: 100 = tổng 100 bài toàn phase" />
         </label>
@@ -647,7 +655,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
               <button type="button" className={button} disabled={busy || !aiDrafts.some((d: any) => d.include)} onClick={() => run(async () => {
                 let created = 0;
                 for (const d of aiDrafts.filter((x: any) => x.include)) {
-                  await request(base + '/phases', { name: d.name, kind: d.kind, description: d.description, budget: d.budget === '' || d.budget == null ? null : d.budget, brief: { text: d.description || d.name, category: d.category, keyword: '', platform: d.platform, minFollowers: 0, deliverableScope: d.deliverableScope, deliverables: d.deliverables, targetCount: d.targetCount, budget: null, partnerType: d.partnerType ?? (d.kind === 'creator' ? 'kol' : d.kind === 'community' ? 'community' : null), kpiTopics: d.kpiTopics ?? null, kpiComments: d.kpiComments ?? null, kpiBuzz: d.kpiBuzz ?? null, pillars: d.pillars ?? [], services: d.services ?? [] } });
+                  await request(base + '/phases', { name: d.name, kind: d.kind, description: d.description, budget: d.budget === '' || d.budget == null ? null : d.budget, brief: { text: d.description || d.name, category: d.category, keyword: '', platform: d.platform, minFollowers: 0, deliverableScope: d.deliverableScope, deliverables: d.deliverables, targetCount: d.targetCount, kolTargetCount: d.kolTargetCount ?? null, communityTargetCount: d.communityTargetCount ?? null, budget: null, partnerType: d.partnerType ?? (d.kind === 'creator' ? 'kol' : d.kind === 'community' ? 'community' : null), kpiTopics: d.kpiTopics ?? null, kpiComments: d.kpiComments ?? null, kpiBuzz: d.kpiBuzz ?? null, pillars: d.pillars ?? [], services: d.services ?? [] } });
                   created++;
                 }
                 setAiDrafts(null);

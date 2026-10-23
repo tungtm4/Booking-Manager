@@ -279,10 +279,10 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
    - 'sdha': Sử dụng hình ảnh (quyền SDHA, quảng cáo Spark Ads, Whitelist, banner)
 6. Nền tảng (nenTang): Chỉ nhận một trong các giá trị: "TikTok", "YouTube", "Facebook", "Instagram", hoặc null nếu không nói rõ hoặc đa nền tảng.
 7. Lĩnh vực (linhVuc): Tên lĩnh vực chính của brief (ví dụ: "Ẩm thực", "Làm đẹp", "Công nghệ", "Thời trang", "Du lịch", "Mẹ & bé", "Giải trí", "Tài chính", "Sức khỏe & Gym", "Giáo dục", "Lifestyle", "Gaming"), hoặc null.
-8. Số lượng KOL (soLuongKol): Số nguyên (ví dụ: 3, 5, 10), hoặc null.
+8. SỐ LƯỢNG ĐỐI TÁC: soLuongKol = số creator/KOL cần; soLuongCommunity = số fanpage/group cần. Chỉ ghi khi brief nêu rõ số đối tác hoặc suy ra trực tiếp được; không rõ thì để null. Phân biệt rõ với kpiTopics và dichVu.soLuong (đó là số đầu việc, không phải số đối tác).
 9. Bỏ qua yêu cầu ER / tỷ lệ tương tác nếu brief có nhắc; không dùng làm tiêu chí đề xuất.
 10. Follower tối thiểu (followerToiThieu): Số người theo dõi tối thiểu dạng số nguyên (ví dụ 100000), hoặc null.
-11. LOẠI ĐỐI TÁC (doiTac): 'kol' nếu brief nói về creator/KOL/KOC cá nhân; 'community' nếu fanpage/group/cộng đồng đăng bài; 'both' nếu cả hai; null nếu brief không nói rõ — KHÔNG đoán.
+11. LOẠI ĐỐI TÁC (doiTac): brief về seeding topics/comments/buzz trên Threads/Facebook Community, fanpage/group đăng bài -> 'community'; brief có cả booking creator/KOL lẫn seeding community -> 'both'; brief nói về creator/KOL/KOC cá nhân -> 'kol'; chỉ khi thật sự không có tín hiệu nào mới trả null, không mặc định. Ví dụ: brief "Triển khai 100 topics và 8.000 comments trên Threads và Facebook Community theo 2 pillar…, cam kết KPI tổng 24.000 buzz" -> doiTac='community', kpiTopics=100, kpiComments=8000, kpiBuzz=24000.
 12. KPI MỤC TIÊU (chỉ khi brief nêu số rõ ràng, để null nếu không có): kpiTopics = TỔNG số bài viết (topics) toàn chiến dịch; kpiComments = TỔNG số bình luận; kpiBuzz = chỉ số buzz mục tiêu. Buzz = like + share + comment — comments ĐÃ nằm trong buzz: KHÔNG cộng số comments vào buzz, KHÔNG cộng số bài viết (topics) vào buzz. KPI là mục tiêu cần đạt, KHÔNG phải hạng mục tính tiền — không đưa KPI vào hangMucMoiKol/hangMucTongCampaign.
 13. PILLAR NỘI DUNG (pillars): mảng { name, percent } khi brief nêu tỷ lệ pillar (ví dụ lifestyle 40%, product review 60% thì hai phần tử 40 và 60; tổng không vượt 100). Không có thì mảng rỗng.
 14. DỊCH VỤ (dichVu): đầu việc/dịch vụ KHÔNG thuộc 6 format creator (đăng bài trên community, thuê ngoài comment, gói seeding…): mảng { ten, donVi, soLuong, phamVi } với phamVi = 'phase' (tổng toàn phase) hoặc 'per_partner' (mỗi đối tác). Chỉ ghi khi brief nêu rõ tên việc và số lượng; không suy diễn từ KPI.`;
@@ -313,6 +313,10 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
             soLuongKol: {
               type: Type.INTEGER,
               description: 'Số lượng KOL cần tìm (hoặc null)',
+            },
+            soLuongCommunity: {
+              type: Type.INTEGER,
+              description: 'Số lượng fanpage/group community cần tìm (hoặc null nếu brief không nói rõ số community)',
             },
             mucTieu: {
               type: Type.STRING,
@@ -441,6 +445,7 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
       linhVuc: parsedData.linhVuc ? String(parsedData.linhVuc).trim() : null,
       nenTang: validPlatforms.includes(parsedData.nenTang) ? parsedData.nenTang : null,
       soLuongKol: parsedData.soLuongKol && Number(parsedData.soLuongKol) > 0 ? Math.round(Number(parsedData.soLuongKol)) : null,
+      soLuongCommunity: parsedData.soLuongCommunity && Number(parsedData.soLuongCommunity) > 0 ? Math.round(Number(parsedData.soLuongCommunity)) : null,
       mucTieu: parsedData.mucTieu ? String(parsedData.mucTieu).trim() : null,
       nganSachTong: parsedData.nganSachTong && Number(parsedData.nganSachTong) > 0 ? Number(parsedData.nganSachTong) : null,
       nganSachMoiKol: parsedData.nganSachMoiKol && Number(parsedData.nganSachMoiKol) > 0 ? Number(parsedData.nganSachMoiKol) : null,
@@ -478,6 +483,8 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
     // Đối chiếu các số được ghi rõ trong brief, không tự suy ra ngân sách.
     const explicitCount = moTa.match(/(?:chọn|cần|tìm)\s*(\d+)\s*KOL/iu);
     if (explicitCount) sanitizedResult.soLuongKol = Number(explicitCount[1]);
+    const explicitCommCount = moTa.match(/(?:chọn|cần|tìm)\s*(\d+)\s*(?:community|fanpage|group|cộng đồng)/iu);
+    if (explicitCommCount) sanitizedResult.soLuongCommunity = Number(explicitCommCount[1]);
     const budgetAmount = (match: RegExpMatchArray | null) => match
       ? Math.round(Number(match[1].replace(',', '.')) * (/tỷ|tỉ/iu.test(match[2]) ? 1_000_000_000 : 1_000_000)) : null;
     const totalBudget = moTa.match(/ngân sách\s+(?:(?:tổng|toàn|cả)\s+(?:chiến dịch|campaign)?)[^\d.;:]{0,30}(\d+(?:[.,]\d+)?)\s*(triệu|tr|tỷ|tỉ)/iu);
@@ -524,7 +531,7 @@ QUY TẮC:
 1. kind của phase chỉ thuộc một trong: 'creator' (KOL/KOC/creator cá nhân), 'community' (fanpage/group/cộng đồng), 'seeding' (profile UGC đăng bài, comment, seeding trên Threads/Facebook...), 'other' (hạng mục còn lại như livestream mega, sản xuất...).
 2. CHỈ trích xuất điều brief nói rõ hoặc có căn cứ trực tiếp; thông tin không có thì để null/mảng rỗng — TUYỆT ĐỐI KHÔNG BỊA SỐ.
 3. budget: ngân sách brief GÁN RIÊNG cho phase đó (số nguyên VND; quy đổi "30tr" -> 30000000, "1,2 tỷ" -> 1200000000). Nếu brief chỉ có ngân sách tổng mà không phân bổ theo hạng mục thì để null cho mọi phase — KHÔNG tự chia.
-4. targetCount: số lượng creator/community/profile brief yêu cầu cho phase, hoặc null.
+4. targetCount: số lượng creator/community/profile brief yêu cầu cho phase (hoặc null); kolTargetCount: số lượng creator/KOL mục tiêu của phase (hoặc null); communityTargetCount: số lượng community/fanpage/group mục tiêu của phase (hoặc null).
 5. deliverables: các hạng mục công việc thuộc phase, ánh xạ về đúng 6 format key chuẩn: 'post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'. deliverableScope = 'per_kol' nếu số lượng tính theo từng creator/community, 'campaign' nếu tính tổng cả phase.
 6. category: lĩnh vực chính của phase; platform: nền tảng chính (TikTok/YouTube/Facebook/Instagram/Threads) hoặc chuỗi rỗng nếu đa nền tảng/không rõ.
 7. description: mô tả ngắn yêu cầu riêng của phase theo brief (angle nội dung, tiêu chí chọn đối tác...), tối đa ~500 ký tự.
@@ -553,6 +560,8 @@ QUY TẮC:
                   description: { type: Type.STRING },
                   budget: { type: Type.NUMBER, description: 'Ngân sách VND của phase hoặc null' },
                   targetCount: { type: Type.INTEGER, description: 'Số lượng đối tác mục tiêu của phase hoặc null' },
+                  kolTargetCount: { type: Type.INTEGER, description: 'Số lượng creator/KOL mục tiêu của phase hoặc null' },
+                  communityTargetCount: { type: Type.INTEGER, description: 'Số lượng community/fanpage/group mục tiêu của phase hoặc null' },
                   category: { type: Type.STRING },
                   platform: { type: Type.STRING },
                   deliverableScope: { type: Type.STRING, description: "'per_kol' | 'campaign'" },
@@ -614,6 +623,8 @@ QUY TẮC:
     const rawPhases = Array.isArray(parsedData?.phases) ? parsedData.phases.map((p: any) => ({
       ...p,
       budget: typeof p?.budget === 'number' ? Math.round(p.budget) : null,
+      kolTargetCount: typeof p?.kolTargetCount === 'number' ? Math.round(p.kolTargetCount) : null,
+      communityTargetCount: typeof p?.communityTargetCount === 'number' ? Math.round(p.communityTargetCount) : null,
       deliverables: Array.isArray(p?.deliverables) ? p.deliverables.map((d: any) => ({ format: d?.format, quantity: d?.soLuong })) : [],
       services: Array.isArray(p?.services) ? p.services.map((s: any) => ({ name: s?.name, unit: s?.unit, quantity: s?.soLuong, scope: s?.scope })) : [],
     })) : [];

@@ -8,7 +8,10 @@ export type BriefPillar={name:string;percent:number};
 export type BriefService={name:string;unit:string;quantity:number;scope:'phase'|'per_partner'};
 export interface ProjectBrief {
   text:string;category:string;keyword:string;platform:string;minFollowers:number;
-  targetCount:number|null;budget:number|null;deliverableScope:'campaign'|'per_kol';deliverables:BriefDeliverable[];
+  targetCount:number|null;
+  kolTargetCount?:number|null;
+  communityTargetCount?:number|null;
+  budget:number|null;deliverableScope:'campaign'|'per_kol';deliverables:BriefDeliverable[];
   partnerType:BriefPartnerType|null;
   /** KPI mục tiêu (KHÔNG phải kết quả thực tế, KHÔNG tự thành dòng chi phí):
    *  topics = tổng số bài viết; comments = tổng số bình luận; buzz = like + share + comment
@@ -17,13 +20,16 @@ export interface ProjectBrief {
   pillars:BriefPillar[];
   services:BriefService[];
 }
-export const emptyProjectBrief:ProjectBrief={text:'',category:'',keyword:'',platform:'',minFollowers:0,targetCount:null,budget:null,deliverableScope:'campaign',deliverables:[],partnerType:null,kpiTopics:null,kpiComments:null,kpiBuzz:null,pillars:[],services:[]};
+export const emptyProjectBrief:ProjectBrief={text:'',category:'',keyword:'',platform:'',minFollowers:0,targetCount:null,kolTargetCount:null,communityTargetCount:null,budget:null,deliverableScope:'campaign',deliverables:[],partnerType:null,kpiTopics:null,kpiComments:null,kpiBuzz:null,pillars:[],services:[]};
 // Chỉ đọc các trường đang sử dụng. Tiêu chí ER trong bản lưu cũ bị bỏ qua.
 const briefCount=(v:any)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=1&&v<=100_000_000?v:null;
+const targetCountRule=(v:any)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0&&v<=10000?v:null;
 export function readProjectBrief(raw:any):ProjectBrief {
   const base={...Object.fromEntries(Object.keys(emptyProjectBrief).map(k=>[k,raw?.[k]??emptyProjectBrief[k as keyof ProjectBrief]]))} as unknown as ProjectBrief;
   // Chuẩn hoá an toàn các trường mở rộng (Community/KPI): giá trị bẩn bị bỏ, không bịa thêm.
   base.partnerType=(['kol','community','both'] as const).includes(raw?.partnerType)?raw.partnerType:null;
+  base.kolTargetCount=targetCountRule(raw?.kolTargetCount);
+  base.communityTargetCount=targetCountRule(raw?.communityTargetCount);
   base.kpiTopics=briefCount(raw?.kpiTopics);
   base.kpiComments=briefCount(raw?.kpiComments);
   base.kpiBuzz=briefCount(raw?.kpiBuzz);

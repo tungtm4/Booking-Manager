@@ -24,6 +24,8 @@ export interface PhaseDraft {
   description: string;
   budget: number | null;
   targetCount: number | null;
+  kolTargetCount?: number | null;
+  communityTargetCount?: number | null;
   category: string;
   platform: string;
   deliverableScope: 'per_kol' | 'campaign';
@@ -91,12 +93,16 @@ export function normalizePhaseDraft(raw: any): PhaseDraft | null {
       if (services.length >= 10) break;
     }
   }
+  const cleanTargetCount = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= 10000 ? v : null;
   return {
     name,
     kind,
     description: cleanText(raw.description, 2000),
     budget: cleanMoney(raw.budget),
     targetCount: cleanCount(raw.targetCount),
+    kolTargetCount: cleanTargetCount(raw.kolTargetCount),
+    communityTargetCount: cleanTargetCount(raw.communityTargetCount),
     category: cleanText(raw.category, 100),
     platform: cleanText(raw.platform, 50),
     deliverableScope: raw.deliverableScope === 'campaign' ? 'campaign' : 'per_kol',
