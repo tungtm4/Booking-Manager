@@ -49,3 +49,31 @@ export function assessProjectKol(p:any,brief:ProjectBrief){
 export function briefDeliverableLabel(d:BriefDeliverable,scope:ProjectBrief['deliverableScope']){
   return `${PRICE_FORMAT_LABELS[d.format]}: ${d.quantity.toLocaleString('vi-VN')}${scope==='campaign'?' toàn chiến dịch':' / KOL'}`;
 }
+
+export function extractPillarsFromText(text: string): BriefPillar[] {
+  if (!text || typeof text !== 'string') return [];
+  const lower = text.toLowerCase();
+  const pillarIdx = lower.indexOf('pillar');
+  if (pillarIdx === -1) return [];
+
+  const sub = text.slice(pillarIdx);
+  const regex = /([\p{L}][\p{L}\p{N}\s&'’\-/]*?)\s*\(\s*(\d{1,3})\s*%\s*\)/gu;
+  const pillars: BriefPillar[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(sub)) !== null) {
+    let name = match[1].trim();
+    name = name.replace(/^(?:v[aà]|and|&)\s+/iu, '').trim();
+    const percent = parseInt(match[2], 10);
+    if (!name || percent < 1 || percent > 100) continue;
+    name = name.slice(0, 100).trim();
+    if (!name) continue;
+    pillars.push({ name, percent });
+    if (pillars.length >= 10) break;
+  }
+
+  if (pillars.length === 0) return [];
+  const total = pillars.reduce((sum, p) => sum + p.percent, 0);
+  if (total > 100) return [];
+  return pillars;
+}

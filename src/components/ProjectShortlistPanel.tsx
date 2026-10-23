@@ -154,20 +154,20 @@ function BriefExtrasFields({ brief, change, prefix }: { brief: any; change: (k: 
         </label>
         <div className="grid grid-cols-2 gap-2">
           <label className="text-sm">Số KOL cần
-            <input aria-label={prefix + ' số KOL cần'} className={field} type="number" min={0} max={10000} value={brief.kolTargetCount ?? ''} onChange={e => change('kolTargetCount', numOrNull(e.target.value))} placeholder="Số creator/KOL" />
+            <input aria-label={prefix + ' số KOL cần'} className={field} inputMode="numeric" value={brief.kolTargetCount == null ? '' : formatMoneyInput(brief.kolTargetCount)} onChange={e => { const v = parseMoneyInput(e.target.value); change('kolTargetCount', v === '' ? null : v); }} placeholder="Số creator/KOL" />
           </label>
           <label className="text-sm">Số Community cần
-            <input aria-label={prefix + ' số Community cần'} className={field} type="number" min={0} max={10000} value={brief.communityTargetCount ?? ''} onChange={e => change('communityTargetCount', numOrNull(e.target.value))} placeholder="Số page/group" />
+            <input aria-label={prefix + ' số Community cần'} className={field} inputMode="numeric" value={brief.communityTargetCount == null ? '' : formatMoneyInput(brief.communityTargetCount)} onChange={e => { const v = parseMoneyInput(e.target.value); change('communityTargetCount', v === '' ? null : v); }} placeholder="Số page/group" />
           </label>
         </div>
         <label className="text-sm">KPI: tổng số bài viết (topics)
-          <input aria-label={prefix + ' KPI topics'} className={field} type="number" min={0} value={brief.kpiTopics ?? ''} onChange={e => change('kpiTopics', numOrNull(e.target.value))} placeholder="VD: 100 = tổng 100 bài toàn phase" />
+          <input aria-label={prefix + ' KPI topics'} className={field} inputMode="numeric" value={brief.kpiTopics == null ? '' : formatMoneyInput(brief.kpiTopics)} onChange={e => { const v = parseMoneyInput(e.target.value); change('kpiTopics', v === '' ? null : v); }} placeholder="VD: 100 = tổng 100 bài toàn phase" />
         </label>
         <label className="text-sm">KPI: tổng số bình luận (comments)
-          <input aria-label={prefix + ' KPI comments'} className={field} type="number" min={0} value={brief.kpiComments ?? ''} onChange={e => change('kpiComments', numOrNull(e.target.value))} placeholder="VD: 8000 = tổng trên các bài" />
+          <input aria-label={prefix + ' KPI comments'} className={field} inputMode="numeric" value={brief.kpiComments == null ? '' : formatMoneyInput(brief.kpiComments)} onChange={e => { const v = parseMoneyInput(e.target.value); change('kpiComments', v === '' ? null : v); }} placeholder="VD: 8000 = tổng trên các bài" />
         </label>
         <label className="text-sm">KPI: buzz mục tiêu
-          <input aria-label={prefix + ' KPI buzz'} className={field} type="number" min={0} value={brief.kpiBuzz ?? ''} onChange={e => change('kpiBuzz', numOrNull(e.target.value))} placeholder="Buzz = like + share + comment" />
+          <input aria-label={prefix + ' KPI buzz'} className={field} inputMode="numeric" value={brief.kpiBuzz == null ? '' : formatMoneyInput(brief.kpiBuzz)} onChange={e => { const v = parseMoneyInput(e.target.value); change('kpiBuzz', v === '' ? null : v); }} placeholder="Buzz = like + share + comment" />
         </label>
       </div>
       <p className="text-xs text-slate-500">KPI là MỤC TIÊU cần đạt, không phải kết quả thực tế và không tự thành dòng chi phí. Comments đã nằm trong buzz — không cộng thêm lần nữa; số bài viết không cộng vào buzz.</p>

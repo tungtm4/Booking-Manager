@@ -6,6 +6,7 @@
 import express from 'express';
 import { createWorkspace } from './server/workspace';
 import { normalizePhaseDrafts } from './src/domain/phases';
+import { extractPillarsFromText } from './src/domain/projectBrief';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -427,7 +428,7 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
     }
 
     const validFormats = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
-    const validPlatforms = ['TikTok', 'YouTube', 'Facebook', 'Instagram'];
+    const validPlatforms = ['TikTok', 'YouTube', 'Facebook', 'Instagram', 'Threads'];
 
     // Sanitization
     const sanitizeHangMuc = (arr: any) => {
@@ -465,6 +466,13 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
         .slice(0, 10)
         .map((s: any) => ({ name: String(s.ten).trim().slice(0, 200), unit: typeof s.donVi === 'string' && s.donVi.trim() ? String(s.donVi).trim().slice(0, 50) : 'bài', quantity: Math.round(Number(s.soLuong)), scope: s.phamVi === 'per_partner' ? 'per_partner' : 'phase' })),
     };
+
+    if (!sanitizedResult.pillars.length) {
+      const fallbackPillars = extractPillarsFromText(moTa);
+      if (fallbackPillars.length) {
+        sanitizedResult.pillars = fallbackPillars;
+      }
+    }
 
     // Các hạng mục nêu rõ theo tổng campaign phải được giữ đúng tổng.
     const explicitTasks = [...moTa.matchAll(/(\d+)\s*(video\s+review|clip\s+ngắn|video\s+ngắn)/giu)].map(m => ({
