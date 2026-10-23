@@ -211,6 +211,23 @@ export function calculateKolRecommendation(
   };
 }
 
+/**
+ * Ngưỡng điểm phù hợp TỐI THIỂU cho kết quả đề xuất (màn Đề xuất của dự án):
+ * một hồ sơ chỉ được trả về khi đạt CẢ HAI điều kiện —
+ *   (1) tổng điểm >= 40/80 (ít nhất một nửa thang điểm), và
+ *   (2) điểm lĩnh vực >= 20 (ít nhất khớp ở mức lĩnh vực bổ trợ).
+ * Lý do cần cả điều kiện (2): KOL khác hẳn lĩnh vực (0 điểm lĩnh vực) vẫn có thể
+ * đạt ~35–40 tổng điểm nhờ giá rẻ + điểm hợp tác trung tính — đó là nhiễu, không
+ * phải phù hợp. Ngược lại KOL đúng lĩnh vực (40) dù giá chưa đẹp vẫn đạt 45 tổng
+ * và được giữ, vì giá còn thương lượng được. Đổi ngưỡng: sửa hai hằng số này.
+ */
+export const PROPOSAL_MIN_TOTAL_SCORE = 40;
+export const PROPOSAL_MIN_CATEGORY_SCORE = 20;
+
+export function passesProposalThreshold(score: RecommendationScore): boolean {
+  return score.tongDiem >= PROPOSAL_MIN_TOTAL_SCORE && score.diemLinhVuc >= PROPOSAL_MIN_CATEGORY_SCORE;
+}
+
 export function rankKolsForRecommendation(
   kols: KolProfile[],
   filter: RecommendationFilter

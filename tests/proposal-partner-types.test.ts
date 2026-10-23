@@ -184,3 +184,45 @@ test('UI: ProjectShortlistPanel có ô nhập số lượng KOL/Community cần 
   assert.ok(panelCode.includes('kolTargetCount: d.kolTargetCount'), 'AI draft tạo phase truyền kolTargetCount');
   assert.ok(panelCode.includes('communityTargetCount: d.communityTargetCount'), 'AI draft tạo phase truyền communityTargetCount');
 });
+
+test('Hồi quy (Muse kiểm chứng Đợt 14): tìm KOL ở màn Đề xuất không cắt kết quả theo số lượng brief', () => {
+  const proposalCode = readFileSync(new URL('../src/components/ProjectProposal.tsx', import.meta.url), 'utf8');
+  // recommendationEngine cắt cứng kết quả theo filter.soLuongCan — số lượng brief
+  // (kolTargetCount/soLuong) chỉ để đối chiếu ở tiêu đề nhóm, không được truyền vào.
+  assert.ok(proposalCode.includes('soLuongCan: 0'), 'màn Đề xuất phải gọi engine với soLuongCan: 0');
+  assert.ok(!proposalCode.includes('soLuongCan: kolTargetCount'), 'không được truyền kolTargetCount vào soLuongCan');
+});
+
+test('Ngưỡng điểm phù hợp tối thiểu cho kết quả đề xuất KOL (rule anh chốt Đợt 14)', async () => {
+  const { calculateKolRecommendation, passesProposalThreshold, PROPOSAL_MIN_TOTAL_SCORE, PROPOSAL_MIN_CATEGORY_SCORE } = await import('../src/utils/recommendationEngine');
+  assert.equal(PROPOSAL_MIN_TOTAL_SCORE, 40);
+  assert.equal(PROPOSAL_MIN_CATEGORY_SCORE, 20);
+  const baseKol: any = {
+    id: 'k', ten: 'KOL test', nenTang: [{ tenNenTang: 'TikTok', soFollower: 100000, linkKenh: '' }],
+    linhVuc: [], bangGia: { post: null, video: null, shorts: null, livestream: null, thamDuSuKien: null, sdha: null },
+    lienHe: { tenNguoiLienHe: '', soDienThoai: '', emailZalo: '', ghiChu: '' },
+    lichSuHopTac: [], ngayTao: '2026-01-01T00:00:00.000Z', ngayCapNhat: '2026-01-01T00:00:00.000Z',
+  };
+  const filter: any = { linhVuc: 'Ẩm thực', formatNganSach: 'video', nganSachToiDa: 10_000_000 };
+
+  // Đúng lĩnh vực (40) + giá vượt xa ngân sách (0) + KOL mới (5) = 45 → GIỮ (giá còn deal được).
+  const dungLinhVuc = calculateKolRecommendation({ ...baseKol, linhVuc: ['Ẩm thực'], bangGia: { ...baseKol.bangGia, video: 50_000_000 } }, filter);
+  assert.equal(dungLinhVuc.tongDiem, 45);
+  assert.ok(passesProposalThreshold(dungLinhVuc));
+
+  // Sai lĩnh vực (0) + giá trong ngân sách (30) + KOL mới (5) = 35 → LOẠI (dưới tổng tối thiểu).
+  const saiLinhVucRe = calculateKolRecommendation({ ...baseKol, linhVuc: ['Công nghệ'], bangGia: { ...baseKol.bangGia, video: 5_000_000 } }, filter);
+  assert.equal(saiLinhVucRe.tongDiem, 35);
+  assert.ok(!passesProposalThreshold(saiLinhVucRe));
+
+  // Sai lĩnh vực (0) + giá trong ngân sách (30) + đánh giá 5 sao (10) = 40 → LOẠI (lĩnh vực dưới 20 dù tổng đủ).
+  const saiLinhVucSao = calculateKolRecommendation({ ...baseKol, linhVuc: ['Công nghệ'], bangGia: { ...baseKol.bangGia, video: 5_000_000 }, danhGiaHieuQua: { diem: 5 } }, filter);
+  assert.equal(saiLinhVucSao.tongDiem, 40);
+  assert.equal(saiLinhVucSao.diemLinhVuc, 0);
+  assert.ok(!passesProposalThreshold(saiLinhVucSao));
+
+  // Lĩnh vực bổ trợ (20: Du lịch bổ trợ Ẩm thực) + giá trong ngân sách (30) + KOL mới (5) = 55 → GIỮ.
+  const boTro = calculateKolRecommendation({ ...baseKol, linhVuc: ['Du lịch'], bangGia: { ...baseKol.bangGia, video: 5_000_000 } }, filter);
+  assert.equal(boTro.tongDiem, 55);
+  assert.ok(passesProposalThreshold(boTro));
+});

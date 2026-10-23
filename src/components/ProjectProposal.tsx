@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { rankKolsForRecommendation } from '../utils/recommendationEngine';
+import { passesProposalThreshold, rankKolsForRecommendation, PROPOSAL_MIN_CATEGORY_SCORE, PROPOSAL_MIN_TOTAL_SCORE } from '../utils/recommendationEngine';
 import { LatestRequestGuard } from '../utils/latestRequestGuard';
 import { PRICE_FORMAT_LABELS, type PriceFormatKey, type RecommendationScore } from '../types/kol';
 import { formatFollowers, formatVND } from '../utils/formatters';
@@ -88,6 +88,8 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [resultsPage, setResultsPage] = useState(1);
   const [resultsPageSize, setResultsPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+  // Số hồ sơ KOL bị ẩn vì dưới ngưỡng điểm phù hợp tối thiểu (để báo minh bạch).
+  const [kolBelowThreshold, setKolBelowThreshold] = useState(0);
 
   // Kết quả Community
   const [commResults, setCommResults] = useState<any[] | null>(null);
@@ -153,6 +155,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
 
   function clearWork(clearMessages = true) {
     setResults(null);
+    setKolBelowThreshold(0);
     setSelectedIds([]);
     setResultsPage(1);
     setCommResults(null);
@@ -406,10 +409,17 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
         followerToiThieu: followerMin === '' ? undefined : Number(followerMin),
         nganSachToiDa: budgetMax === '' ? undefined : Number(budgetMax),
         formatNganSach: formatKey,
-        soLuongCan: kolTargetCount != null ? kolTargetCount : soLuong || 0,
+        // Số lượng brief (kolTargetCount/soLuong) CHỈ để đối chiếu ở tiêu đề nhóm —
+        // không truyền vào engine vì engine cắt cứng kết quả theo soLuongCan.
+        soLuongCan: 0,
       });
-      setResults(ranked);
+      // Ngưỡng điểm phù hợp tối thiểu: chỉ trả hồ sơ đạt ngưỡng; số bị ẩn được
+      // đếm và báo ngay dưới tiêu đề nhóm để người dùng biết danh sách đã lọc.
+      const qualified = ranked.filter(passesProposalThreshold);
+      setKolBelowThreshold(ranked.length - qualified.length);
+      setResults(qualified);
     } else {
+      setKolBelowThreshold(0);
       setResults(null);
     }
 
@@ -903,6 +913,11 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
                 Creator / KOL — {kolTargetCount != null ? `cần ${kolTargetCount.toLocaleString('vi-VN')} · ` : ''}tìm thấy {results ? results.length.toLocaleString('vi-VN') : 0} hồ sơ phù hợp
                 <span className="font-normal text-slate-500 text-sm ml-2">· đã chọn {selectedIds.length}</span>
               </h3>
+              {results && (
+                <p className="text-xs text-slate-500 -mt-1">
+                  Chỉ hiện hồ sơ đạt ngưỡng phù hợp: tổng điểm từ {PROPOSAL_MIN_TOTAL_SCORE}/80 và điểm lĩnh vực từ {PROPOSAL_MIN_CATEGORY_SCORE}/40.{kolBelowThreshold > 0 ? ` Đã ẩn ${kolBelowThreshold.toLocaleString('vi-VN')} hồ sơ dưới ngưỡng.` : ''}
+                </p>
+              )}
               {results && selectedIds.length > 0 && (
                 <button
                   type="button"
@@ -963,7 +978,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
                     })}
                     {results.length === 0 && (
                       <p className="py-4 text-sm text-slate-500 text-center">
-                        Không có KOL nào đạt tiêu chí. Nới lỏng lĩnh vực/follower/ngân sách rồi tìm lại.
+                        Không có KOL nào đạt ngưỡng điểm phù hợp (tổng điểm từ {PROPOSAL_MIN_TOTAL_SCORE}/80, điểm lĩnh vực từ {PROPOSAL_MIN_CATEGORY_SCORE}/40){kolBelowThreshold > 0 ? ` — ${kolBelowThreshold.toLocaleString('vi-VN')} hồ sơ trong kho chưa đạt ngưỡng` : ''}. Nới lỏng lĩnh vực/follower/ngân sách rồi tìm lại.
                       </p>
                     )}
                   </div>
