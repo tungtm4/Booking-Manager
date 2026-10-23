@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import {createWorkspace} from '../server/workspace';
+import {createWorkspace, migrateProjectRoles} from '../server/workspace';
 
 // Database trong bộ nhớ, không dùng tài khoản hoặc dữ liệu thật.
 test('đăng nhập, mật khẩu, nhiều thành viên và phân quyền API',async()=>{
@@ -96,12 +96,27 @@ test('dữ liệu cũ có sẵn project_member_roles role=admin được migrate
     await request('/users', { name: 'Legacy User', email: 'legacy@example.test', password: 'password-123456', role: 'member' }, admin);
     const legacyUser = w.db.prepare("SELECT id FROM users WHERE email='legacy@example.test'").get() as any;
     
-    // Giả lập dữ liệu cũ: chèn role='admin' vào project_member_roles
+    // Giả lập dữ liệu cũ: dựng lại bảng vai trò theo schema cũ (CHECK còn 'admin'),
+    // chèn một thành viên chỉ có Admin dự án và một thành viên có cả Admin dự án lẫn PM.
+    w.db.exec('PRAGMA foreign_keys = OFF;');
+    w.db.exec('DROP TABLE project_member_roles;');
+    w.db.exec("CREATE TABLE project_member_roles (project_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('admin','pm','booking')), PRIMARY KEY(project_id, user_id, role), FOREIGN KEY(project_id, user_id) REFERENCES project_members(project_id, user_id) ON DELETE CASCADE);");
+    w.db.exec('PRAGMA foreign_keys = ON;');
     w.db.prepare("INSERT INTO project_members VALUES (?,?,'company',1)").run(project, legacyUser.id);
     w.db.prepare("INSERT INTO project_member_roles VALUES (?,?,'admin')").run(project, legacyUser.id);
+    await request('/users', { name: 'Dual User', email: 'dual@example.test', password: 'password-123456', role: 'member' }, admin);
+    const dualUser = w.db.prepare("SELECT id FROM users WHERE email='dual@example.test'").get() as any;
+    w.db.prepare("INSERT INTO project_members VALUES (?,?,'company',1)").run(project, dualUser.id);
+    w.db.prepare("INSERT INTO project_member_roles VALUES (?,?,'admin')").run(project, dualUser.id);
+    w.db.prepare("INSERT INTO project_member_roles VALUES (?,?,'pm')").run(project, dualUser.id);
 
-    // Chạy lại migrate idempotent (như khi server khởi động lại trên DB có sẵn)
-    w.db.exec("UPDATE project_member_roles SET role='pm' WHERE role='admin';");
+    // Migration thật: chạy hai lần để chứng minh an toàn khi chạy lại, không trùng khoá.
+    migrateProjectRoles(w.db);
+    migrateProjectRoles(w.db);
+    const dualRoles = (w.db.prepare("SELECT role FROM project_member_roles WHERE user_id=?").all(dualUser.id) as any[]).map(r => r.role);
+    assert.deepEqual(dualRoles, ['pm']);
+    // Ràng buộc database mới không cho tạo lại Admin dự án.
+    assert.throws(() => w.db.prepare("INSERT INTO project_member_roles VALUES (?,?,'admin')").run(project, legacyUser.id));
 
     const legacyLogin = (await request('/auth/login', { email: 'legacy@example.test', password: 'password-123456' })).cookie;
     await request('/auth/password', { currentPassword: 'password-123456', newPassword: 'changed-password-123' }, legacyLogin);

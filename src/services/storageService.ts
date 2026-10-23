@@ -35,6 +35,235 @@ function notifyChange(key: string) {
   window.dispatchEvent(new CustomEvent('kol_storage_update', { detail: { key } }));
 }
 
+export function applyImportBatchToList(
+    baseKols: KolProfile[],
+    items: Array<{
+      ten: string;
+      nenTang?: string;
+      linkProfile?: string;
+      soFollower?: number;
+      channels?: Array<{
+        tenNenTang: 'TikTok' | 'YouTube' | 'Facebook' | 'Instagram' | 'Khác';
+        linkProfile: string;
+        soFollower?: number;
+      }>;
+      engagementRate?: number;
+      linhVuc?: string[];
+      bangGia?: Partial<KolProfile['bangGia']>;
+      tenNguoiLienHe?: string;
+      soDienThoai?: string;
+      emailZalo?: string;
+      forceCreate?: boolean;
+      targetKolId?: string;
+    }>,
+    matchKey: 'name' | 'link' = 'name',
+    overwriteEmpty: boolean = false
+  ): { created: number; updated: number; kols: KolProfile[]; changed: KolProfile[] } {
+    const kols: KolProfile[] = baseKols.map(k => JSON.parse(JSON.stringify(k)));
+    const changed: KolProfile[] = [];
+    const now = new Date().toISOString();
+    let createdCount = 0;
+    let updatedCount = 0;
+
+    const normalizeName = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
+    const normalizeUrl = (s: string) =>
+      s
+        .toLowerCase()
+        .trim()
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .split('?')[0]
+        .split('#')[0]
+        .replace(/\/+$/, '');
+
+    items.forEach((item) => {
+      if (!item.ten || !item.ten.trim()) return;
+
+      const normItemName = normalizeName(item.ten);
+
+      // Chuẩn bị danh sách các kênh mạng xã hội gửi lên
+      const incomingChannels: Array<{
+        tenNenTang: 'TikTok' | 'YouTube' | 'Facebook' | 'Instagram' | 'Khác';
+        linkProfile: string;
+        soFollower?: number;
+      }> = [];
+
+      if (item.channels && item.channels.length > 0) {
+        item.channels.forEach((ch) => {
+          if (ch.linkProfile || ch.soFollower) {
+            incomingChannels.push({
+              tenNenTang: ch.tenNenTang,
+              linkProfile: ch.linkProfile || '',
+              soFollower: ch.soFollower || 0,
+            });
+          }
+        });
+      }
+
+      // Nếu không có channels mảng hoặc còn linkProfile đơn lẻ chưa có trong danh sách
+      if (item.linkProfile || item.nenTang || item.soFollower) {
+        const singlePlatform = (['TikTok', 'YouTube', 'Facebook', 'Instagram'].includes(item.nenTang || '')
+          ? item.nenTang
+          : 'TikTok') as 'TikTok' | 'YouTube' | 'Facebook' | 'Instagram' | 'Khác';
+
+        const exists = incomingChannels.some(
+          (c) => c.tenNenTang.toLowerCase() === singlePlatform.toLowerCase()
+        );
+        if (!exists) {
+          incomingChannels.push({
+            tenNenTang: singlePlatform,
+            linkProfile: item.linkProfile || '',
+            soFollower: item.soFollower || 0,
+          });
+        }
+      }
+
+      // Danh sách tất cả các link của item này để so khớp
+      const itemLinks = [
+        item.linkProfile,
+        ...incomingChannels.map((c) => c.linkProfile),
+      ]
+        .filter((l): l is string => Boolean(l && l.trim()))
+        .map(normalizeUrl);
+
+      let matchedIndex = -1;
+
+      if (!item.forceCreate) {
+        if (item.targetKolId) {
+          // Ưu tiên khớp theo đích danh ID hồ sơ đã được người dùng xác nhận
+          matchedIndex = kols.findIndex((k) => k.id === item.targetKolId);
+        } else if (matchKey === 'link') {
+          // Khớp theo bất kỳ link kênh nào của KOL (CHỈ khớp theo link, TUYỆT ĐỐI không so khớp theo tên - PHẦN A)
+          if (itemLinks.length > 0) {
+            matchedIndex = kols.findIndex((k) =>
+              k.nenTang?.some((nt) => nt.linkProfile && itemLinks.includes(normalizeUrl(nt.linkProfile)))
+            );
+          }
+        } else {
+          // matchKey === 'name': Khớp chính xác theo tên (không tự ý khớp mờ chuỗi con để tránh ghi đè nhầm)
+          matchedIndex = kols.findIndex((k) => {
+            const normKName = normalizeName(k.ten);
+            return normKName === normItemName;
+          });
+        }
+      }
+
+      if (matchedIndex >= 0) {
+        // CẬP NHẬT KOL ĐÃ CÓ
+        const existing = kols[matchedIndex];
+
+        // Ghi đè hoặc giữ nguyên tùy theo overwriteEmpty
+        const newBangGia = { ...existing.bangGia };
+        if (item.bangGia) {
+          (Object.keys(item.bangGia) as Array<keyof KolProfile['bangGia']>).forEach((key) => {
+            const val = item.bangGia![key];
+            if (val !== undefined && val !== null) {
+              newBangGia[key] = val;
+            } else if (overwriteEmpty) {
+              newBangGia[key] = null;
+            }
+          });
+        }
+
+        // Cập nhật hoặc bổ sung các kênh mạng xã hội
+        const updatedNenTang = [...(existing.nenTang || [])];
+        incomingChannels.forEach((inCh, chIdx) => {
+          const channelIdx = updatedNenTang.findIndex(
+            (nt) => nt.tenNenTang.toLowerCase() === inCh.tenNenTang.toLowerCase()
+          );
+          if (channelIdx >= 0) {
+            updatedNenTang[channelIdx] = {
+              ...updatedNenTang[channelIdx],
+              linkProfile: inCh.linkProfile || updatedNenTang[channelIdx].linkProfile,
+              soFollower:
+                inCh.soFollower !== undefined && inCh.soFollower > 0
+                  ? inCh.soFollower
+                  : updatedNenTang[channelIdx].soFollower,
+            };
+          } else {
+            updatedNenTang.push({
+              id: `ch-${Date.now()}-${chIdx}-${Math.random().toString(36).substr(2, 4)}`,
+              tenNenTang: inCh.tenNenTang,
+              linkProfile: inCh.linkProfile || '',
+              soFollower: inCh.soFollower || 0,
+            });
+          }
+        });
+
+        kols[matchedIndex] = {
+          ...existing,
+          ten: item.ten.trim() || existing.ten,
+          engagementRate: item.engagementRate !== undefined ? item.engagementRate : existing.engagementRate,
+          linhVuc:
+            item.linhVuc && item.linhVuc.length > 0
+              ? Array.from(new Set([...existing.linhVuc, ...item.linhVuc]))
+              : existing.linhVuc,
+          bangGia: newBangGia,
+          nenTang: updatedNenTang,
+          lienHe: {
+            tenNguoiLienHe: item.tenNguoiLienHe || (overwriteEmpty ? '' : existing.lienHe?.tenNguoiLienHe),
+            soDienThoai: item.soDienThoai || (overwriteEmpty ? '' : existing.lienHe?.soDienThoai),
+            emailZalo: item.emailZalo || (overwriteEmpty ? '' : existing.lienHe?.emailZalo),
+            ghiChu: existing.lienHe?.ghiChu,
+          },
+          ngayCapNhat: now,
+        };
+        updatedCount++;
+        changed.push(kols[matchedIndex]);
+      } else {
+        // TẠO MỚI KOL
+        const nenTangToSave =
+          incomingChannels.length > 0
+            ? incomingChannels.map((ch, chIdx) => ({
+                id: `ch-${Date.now()}-${chIdx}-${Math.random().toString(36).substr(2, 4)}`,
+                tenNenTang: ch.tenNenTang,
+                linkProfile: ch.linkProfile || '',
+                soFollower: ch.soFollower || 0,
+              }))
+            : [
+                {
+                  id: `ch-${Date.now()}-1`,
+                  tenNenTang: (item.nenTang && ['TikTok', 'YouTube', 'Facebook', 'Instagram'].includes(item.nenTang)
+                    ? item.nenTang
+                    : 'TikTok') as any,
+                  linkProfile: item.linkProfile || '',
+                  soFollower: item.soFollower || 0,
+                },
+              ];
+
+        const newKol: KolProfile = {
+          id: `kol-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          ten: item.ten.trim(),
+          nenTang: nenTangToSave,
+          engagementRate: item.engagementRate,
+          linhVuc: item.linhVuc && item.linhVuc.length > 0 ? item.linhVuc : ['Khác'],
+          bangGia: {
+            post: item.bangGia?.post ?? null,
+            video: item.bangGia?.video ?? null,
+            shorts: item.bangGia?.shorts ?? null,
+            livestream: item.bangGia?.livestream ?? null,
+            thamDuSuKien: item.bangGia?.thamDuSuKien ?? null,
+            sdha: item.bangGia?.sdha ?? null,
+          },
+          lienHe: {
+            tenNguoiLienHe: item.tenNguoiLienHe,
+            soDienThoai: item.soDienThoai,
+            emailZalo: item.emailZalo,
+          },
+          lichSuHopTac: [],
+          isSample: false,
+          ngayTao: now,
+          ngayCapNhat: now,
+        };
+        kols.unshift(newKol);
+        changed.push(newKol);
+        createdCount++;
+      }
+    });
+
+    return { created: createdCount, updated: updatedCount, kols, changed };
+}
+
 export const StorageService = {
   // Lấy danh sách KOL
   getKols(): KolProfile[] {
@@ -232,231 +461,14 @@ export const StorageService = {
 
   // Import hàng loạt từ Excel / Google Sheet (Feature 2.3)
   importBatchKols(
-    items: Array<{
-      ten: string;
-      nenTang?: string;
-      linkProfile?: string;
-      soFollower?: number;
-      channels?: Array<{
-        tenNenTang: 'TikTok' | 'YouTube' | 'Facebook' | 'Instagram' | 'Khác';
-        linkProfile: string;
-        soFollower?: number;
-      }>;
-      engagementRate?: number;
-      linhVuc?: string[];
-      bangGia?: Partial<KolProfile['bangGia']>;
-      tenNguoiLienHe?: string;
-      soDienThoai?: string;
-      emailZalo?: string;
-      forceCreate?: boolean;
-      targetKolId?: string;
-    }>,
+    items: Parameters<typeof applyImportBatchToList>[1],
     matchKey: 'name' | 'link' = 'name',
     overwriteEmpty: boolean = false
   ): { created: number; updated: number } {
-    const kols = this.getKols();
-    const now = new Date().toISOString();
-    let createdCount = 0;
-    let updatedCount = 0;
-
-    const normalizeName = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
-    const normalizeUrl = (s: string) =>
-      s
-        .toLowerCase()
-        .trim()
-        .replace(/^https?:\/\//, '')
-        .replace(/^www\./, '')
-        .split('?')[0]
-        .split('#')[0]
-        .replace(/\/+$/, '');
-
-    items.forEach((item) => {
-      if (!item.ten || !item.ten.trim()) return;
-
-      const normItemName = normalizeName(item.ten);
-
-      // Chuẩn bị danh sách các kênh mạng xã hội gửi lên
-      const incomingChannels: Array<{
-        tenNenTang: 'TikTok' | 'YouTube' | 'Facebook' | 'Instagram' | 'Khác';
-        linkProfile: string;
-        soFollower?: number;
-      }> = [];
-
-      if (item.channels && item.channels.length > 0) {
-        item.channels.forEach((ch) => {
-          if (ch.linkProfile || ch.soFollower) {
-            incomingChannels.push({
-              tenNenTang: ch.tenNenTang,
-              linkProfile: ch.linkProfile || '',
-              soFollower: ch.soFollower || 0,
-            });
-          }
-        });
-      }
-
-      // Nếu không có channels mảng hoặc còn linkProfile đơn lẻ chưa có trong danh sách
-      if (item.linkProfile || item.nenTang || item.soFollower) {
-        const singlePlatform = (['TikTok', 'YouTube', 'Facebook', 'Instagram'].includes(item.nenTang || '')
-          ? item.nenTang
-          : 'TikTok') as 'TikTok' | 'YouTube' | 'Facebook' | 'Instagram' | 'Khác';
-
-        const exists = incomingChannels.some(
-          (c) => c.tenNenTang.toLowerCase() === singlePlatform.toLowerCase()
-        );
-        if (!exists) {
-          incomingChannels.push({
-            tenNenTang: singlePlatform,
-            linkProfile: item.linkProfile || '',
-            soFollower: item.soFollower || 0,
-          });
-        }
-      }
-
-      // Danh sách tất cả các link của item này để so khớp
-      const itemLinks = [
-        item.linkProfile,
-        ...incomingChannels.map((c) => c.linkProfile),
-      ]
-        .filter((l): l is string => Boolean(l && l.trim()))
-        .map(normalizeUrl);
-
-      let matchedIndex = -1;
-
-      if (!item.forceCreate) {
-        if (item.targetKolId) {
-          // Ưu tiên khớp theo đích danh ID hồ sơ đã được người dùng xác nhận
-          matchedIndex = kols.findIndex((k) => k.id === item.targetKolId);
-        } else if (matchKey === 'link') {
-          // Khớp theo bất kỳ link kênh nào của KOL (CHỈ khớp theo link, TUYỆT ĐỐI không so khớp theo tên - PHẦN A)
-          if (itemLinks.length > 0) {
-            matchedIndex = kols.findIndex((k) =>
-              k.nenTang?.some((nt) => nt.linkProfile && itemLinks.includes(normalizeUrl(nt.linkProfile)))
-            );
-          }
-        } else {
-          // matchKey === 'name': Khớp chính xác theo tên (không tự ý khớp mờ chuỗi con để tránh ghi đè nhầm)
-          matchedIndex = kols.findIndex((k) => {
-            const normKName = normalizeName(k.ten);
-            return normKName === normItemName;
-          });
-        }
-      }
-
-      if (matchedIndex >= 0) {
-        // CẬP NHẬT KOL ĐÃ CÓ
-        const existing = kols[matchedIndex];
-
-        // Ghi đè hoặc giữ nguyên tùy theo overwriteEmpty
-        const newBangGia = { ...existing.bangGia };
-        if (item.bangGia) {
-          (Object.keys(item.bangGia) as Array<keyof KolProfile['bangGia']>).forEach((key) => {
-            const val = item.bangGia![key];
-            if (val !== undefined && val !== null) {
-              newBangGia[key] = val;
-            } else if (overwriteEmpty) {
-              newBangGia[key] = null;
-            }
-          });
-        }
-
-        // Cập nhật hoặc bổ sung các kênh mạng xã hội
-        const updatedNenTang = [...(existing.nenTang || [])];
-        incomingChannels.forEach((inCh, chIdx) => {
-          const channelIdx = updatedNenTang.findIndex(
-            (nt) => nt.tenNenTang.toLowerCase() === inCh.tenNenTang.toLowerCase()
-          );
-          if (channelIdx >= 0) {
-            updatedNenTang[channelIdx] = {
-              ...updatedNenTang[channelIdx],
-              linkProfile: inCh.linkProfile || updatedNenTang[channelIdx].linkProfile,
-              soFollower:
-                inCh.soFollower !== undefined && inCh.soFollower > 0
-                  ? inCh.soFollower
-                  : updatedNenTang[channelIdx].soFollower,
-            };
-          } else {
-            updatedNenTang.push({
-              id: `ch-${Date.now()}-${chIdx}-${Math.random().toString(36).substr(2, 4)}`,
-              tenNenTang: inCh.tenNenTang,
-              linkProfile: inCh.linkProfile || '',
-              soFollower: inCh.soFollower || 0,
-            });
-          }
-        });
-
-        kols[matchedIndex] = {
-          ...existing,
-          ten: item.ten.trim() || existing.ten,
-          engagementRate: item.engagementRate !== undefined ? item.engagementRate : existing.engagementRate,
-          linhVuc:
-            item.linhVuc && item.linhVuc.length > 0
-              ? Array.from(new Set([...existing.linhVuc, ...item.linhVuc]))
-              : existing.linhVuc,
-          bangGia: newBangGia,
-          nenTang: updatedNenTang,
-          lienHe: {
-            tenNguoiLienHe: item.tenNguoiLienHe || (overwriteEmpty ? '' : existing.lienHe?.tenNguoiLienHe),
-            soDienThoai: item.soDienThoai || (overwriteEmpty ? '' : existing.lienHe?.soDienThoai),
-            emailZalo: item.emailZalo || (overwriteEmpty ? '' : existing.lienHe?.emailZalo),
-            ghiChu: existing.lienHe?.ghiChu,
-          },
-          ngayCapNhat: now,
-        };
-        updatedCount++;
-      } else {
-        // TẠO MỚI KOL
-        const nenTangToSave =
-          incomingChannels.length > 0
-            ? incomingChannels.map((ch, chIdx) => ({
-                id: `ch-${Date.now()}-${chIdx}-${Math.random().toString(36).substr(2, 4)}`,
-                tenNenTang: ch.tenNenTang,
-                linkProfile: ch.linkProfile || '',
-                soFollower: ch.soFollower || 0,
-              }))
-            : [
-                {
-                  id: `ch-${Date.now()}-1`,
-                  tenNenTang: (item.nenTang && ['TikTok', 'YouTube', 'Facebook', 'Instagram'].includes(item.nenTang)
-                    ? item.nenTang
-                    : 'TikTok') as any,
-                  linkProfile: item.linkProfile || '',
-                  soFollower: item.soFollower || 0,
-                },
-              ];
-
-        const newKol: KolProfile = {
-          id: `kol-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-          ten: item.ten.trim(),
-          nenTang: nenTangToSave,
-          engagementRate: item.engagementRate,
-          linhVuc: item.linhVuc && item.linhVuc.length > 0 ? item.linhVuc : ['Khác'],
-          bangGia: {
-            post: item.bangGia?.post ?? null,
-            video: item.bangGia?.video ?? null,
-            shorts: item.bangGia?.shorts ?? null,
-            livestream: item.bangGia?.livestream ?? null,
-            thamDuSuKien: item.bangGia?.thamDuSuKien ?? null,
-            sdha: item.bangGia?.sdha ?? null,
-          },
-          lienHe: {
-            tenNguoiLienHe: item.tenNguoiLienHe,
-            soDienThoai: item.soDienThoai,
-            emailZalo: item.emailZalo,
-          },
-          lichSuHopTac: [],
-          isSample: false,
-          ngayTao: now,
-          ngayCapNhat: now,
-        };
-        kols.unshift(newKol);
-        createdCount++;
-      }
-    });
-
-    localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(kols));
+    const r = applyImportBatchToList(this.getKols(), items, matchKey, overwriteEmpty);
+    localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(r.kols));
     notifyChange(STORAGE_KEYS.KOLS);
-
-    return { created: createdCount, updated: updatedCount };
+    return { created: r.created, updated: r.updated };
   },
 
   // Xóa toàn bộ dữ liệu mẫu
@@ -480,6 +492,19 @@ export const StorageService = {
   },
 
   // === Quản lý Báo giá SOW ===
+  // Khôi phục riêng báo giá SOW lẻ và thẻ tùy chỉnh từ file sao lưu.
+  // Không đụng vào dữ liệu KOL cũ trên trình duyệt (bản đối chiếu/khôi phục cho nhập chuyển đổi).
+  restoreQuotesAndTags(quotes: SowQuote[] | null, customTags: string[] | null): void {
+    if (Array.isArray(quotes)) {
+      localStorage.setItem(STORAGE_KEYS.SOW_QUOTES, JSON.stringify(quotes));
+      notifyChange(STORAGE_KEYS.SOW_QUOTES);
+    }
+    if (Array.isArray(customTags)) {
+      localStorage.setItem(STORAGE_KEYS.CUSTOM_TAGS, JSON.stringify(customTags));
+      notifyChange(STORAGE_KEYS.CUSTOM_TAGS);
+    }
+  },
+
   getQuotes(): SowQuote[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.SOW_QUOTES);

@@ -12,6 +12,11 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
   db.exec(`CREATE TABLE IF NOT EXISTS kol_catalog(id TEXT NOT NULL,organization_id TEXT NOT NULL,profile_json TEXT NOT NULL,PRIMARY KEY(id,organization_id));
     CREATE TABLE IF NOT EXISTS project_briefs(project_id TEXT PRIMARY KEY REFERENCES projects(id),payload_json TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1);
     CREATE TABLE IF NOT EXISTS project_shortlist(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),catalog_id TEXT NOT NULL,profile_json TEXT NOT NULL,prices_json TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,UNIQUE(project_id,catalog_id));`);
+  // Kho KOL server là nguồn chính duy nhất (Vấn đề 7): mỗi hồ sơ có revision chống ghi đè
+  // và thời điểm cập nhật do server ghi. Cột được thêm an toàn trên database cũ.
+  const catalogCols=(db.prepare('PRAGMA table_info(kol_catalog)').all() as any[]).map((r:any)=>r.name);
+  if(!catalogCols.includes('revision'))db.exec('ALTER TABLE kol_catalog ADD COLUMN revision INTEGER NOT NULL DEFAULT 1');
+  if(!catalogCols.includes('updated_at'))db.exec("ALTER TABLE kol_catalog ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''");
   db.exec(`CREATE TABLE IF NOT EXISTS project_phases(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'other',description TEXT NOT NULL DEFAULT '',budget INTEGER,sort_order INTEGER NOT NULL DEFAULT 0,brief_json TEXT,revision INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL DEFAULT '');`);
   const slCols=(db.prepare(`PRAGMA table_info(project_shortlist)`).all() as any[]).map((r:any)=>r.name);
   if(!slCols.includes('phase_id'))db.exec(`ALTER TABLE project_shortlist ADD COLUMN phase_id TEXT`);
@@ -23,10 +28,45 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     db.prepare('INSERT INTO project_phases(id,project_id,name,kind,description,budget,sort_order,brief_json,revision,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,1,?,?)').run(phaseId,p.id,'Phase 1 — Tổng hợp','other','',null,0,b?.payload_json??null,now,now);
     db.prepare('UPDATE project_shortlist SET phase_id=? WHERE project_id=? AND phase_id IS NULL').run(phaseId,p.id);
   }
+  const optStr=(v:any,max:number)=>v===undefined||v===null?'':(typeof v==='string'&&v.length<=max?v:null);
+  function sanitizeContact(v:any){
+    if(v===undefined||v===null)return {};
+    if(typeof v!=='object'||Array.isArray(v))return undefined;
+    const tenNguoiLienHe=optStr(v.tenNguoiLienHe,200),soDienThoai=optStr(v.soDienThoai,50),emailZalo=optStr(v.emailZalo,200),ghiChu=optStr(v.ghiChu,1000);
+    if([tenNguoiLienHe,soDienThoai,emailZalo,ghiChu].some(x=>x===null))return undefined;
+    return {tenNguoiLienHe,soDienThoai,emailZalo,ghiChu};
+  }
+  function sanitizeHistory(v:any){
+    if(v===undefined||v===null)return [];
+    if(!Array.isArray(v)||v.length>200)return undefined;
+    const out:any[]=[];
+    for(const h of v){
+      if(!h||typeof h!=='object'||Array.isArray(h))return undefined;
+      const id=optStr(h.id,100),tenChienDich=optStr(h.tenChienDich,300),thoiGian=optStr(h.thoiGian,50),formatDaLam=optStr(h.formatDaLam,100),ketQuaLink=optStr(h.ketQuaLink,2000),nhanXet=optStr(h.nhanXet,2000);
+      if([id,tenChienDich,thoiGian,formatDaLam,ketQuaLink,nhanXet].some(x=>x===null))return undefined;
+      if(typeof h.chiPhiThucTe!=='number'||!Number.isFinite(h.chiPhiThucTe)||h.chiPhiThucTe<0||h.chiPhiThucTe>1e12)return undefined;
+      if(h.danhGia!==undefined&&(typeof h.danhGia!=='number'||h.danhGia<0||h.danhGia>5))return undefined;
+      out.push({id,tenChienDich,thoiGian,formatDaLam,chiPhiThucTe:h.chiPhiThucTe,ketQuaLink,nhanXet,...(h.danhGia!==undefined?{danhGia:h.danhGia}:{})});
+    }
+    return out;
+  }
+  function sanitizeRating(v:any){
+    if(v===undefined||v===null)return undefined;
+    if(typeof v!=='object'||Array.isArray(v))return undefined;
+    const nhanXet=optStr(v.nhanXet,2000);if(nhanXet===null)return undefined;
+    if(v.diem!==undefined&&(typeof v.diem!=='number'||v.diem<0||v.diem>5))return undefined;
+    return {...(v.diem!==undefined?{diem:v.diem}:{}),nhanXet};
+  }
   function profile(p:any){
     if(!p||!str(p.id,100)||!p.id.trim()||!str(p.ten,200)||!p.ten.trim()||!Array.isArray(p.linhVuc)||p.linhVuc.length>50||p.linhVuc.some((v:any)=>!str(v,100))||!Array.isArray(p.nenTang)||p.nenTang.length>30||!p.bangGia||formats.some(f=>!money(p.bangGia[f]??null)))return null;
     if(p.nenTang.some((c:any)=>!c||!str(c.tenNenTang,50)||!str(c.linkProfile??'',2000)||!Number.isSafeInteger(c.soFollower)||c.soFollower<0)||!str(p.reviewSoBo??'',5000))return null;
-    return {id:p.id,ten:p.ten.trim(),linhVuc:p.linhVuc,nenTang:p.nenTang.map((c:any)=>({tenNenTang:c.tenNenTang,linkProfile:c.linkProfile??'',soFollower:c.soFollower})),reviewSoBo:p.reviewSoBo??'',anhDaiDien:typeof p.anhDaiDien==='string'&&/^https?:\/\//i.test(p.anhDaiDien)?p.anhDaiDien:undefined,bangGia:Object.fromEntries(formats.map(f=>[f,p.bangGia[f]??null])),ngayCapNhat:typeof p.ngayCapNhat==='string'?p.ngayCapNhat:undefined};
+    // Giữ đầy đủ các trường hồ sơ đang có khi chuyển lên kho server — không làm mất liên hệ,
+    // lịch sử hợp tác, đánh giá hiệu quả, cờ dữ liệu mẫu và ngày tạo của hồ sơ.
+    const lienHe=sanitizeContact(p.lienHe),lichSuHopTac=sanitizeHistory(p.lichSuHopTac),danhGiaHieuQua=sanitizeRating(p.danhGiaHieuQua);
+    if(lienHe===undefined||lichSuHopTac===undefined)return null;
+    const clean={id:p.id,ten:p.ten.trim(),linhVuc:p.linhVuc,nenTang:p.nenTang.map((c:any)=>({...(typeof c.id==='string'&&c.id?{id:c.id}:{}),tenNenTang:c.tenNenTang,linkProfile:c.linkProfile??'',soFollower:c.soFollower})),reviewSoBo:p.reviewSoBo??'',anhDaiDien:typeof p.anhDaiDien==='string'&&/^https?:\/\//i.test(p.anhDaiDien)?p.anhDaiDien:undefined,bangGia:Object.fromEntries(formats.map(f=>[f,p.bangGia[f]??null])),lienHe,lichSuHopTac,...(danhGiaHieuQua?{danhGiaHieuQua}:{}),...(p.isSample===true?{isSample:true}:{}),ngayTao:typeof p.ngayTao==='string'?p.ngayTao:undefined,ngayCapNhat:typeof p.ngayCapNhat==='string'?p.ngayCapNhat:undefined};
+    if(JSON.stringify(clean).length>200000)return null;
+    return clean;
   }
   const emptyBrief=emptyProjectBrief;
   const phaseKinds=['creator','community','seeding','other'];
@@ -39,8 +79,114 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
   }
   router.get('/catalog',(req,res)=>{
     const u=res.locals.user;
-    const kols=db.prepare('SELECT profile_json FROM kol_catalog WHERE organization_id=? ORDER BY rowid').all(u.organization_id).map((r:any)=>{const {engagementRate,...p}=JSON.parse(r.profile_json);return p;});
+    const kols=db.prepare('SELECT profile_json,revision,updated_at FROM kol_catalog WHERE organization_id=? ORDER BY rowid').all(u.organization_id).map((r:any)=>{const {engagementRate,...p}=JSON.parse(r.profile_json);return {...p,revision:r.revision,updatedAt:r.updated_at};});
     res.json({kols});
+  });
+  // ===== Kho KOL chính thức trên server (Vấn đề 7) — chỉ Admin hệ thống quản lý =====
+  const isOrgAdmin=(u:any)=>u.organization_role==='admin';
+  const catalogRow=(orgId:string,id:string)=>db.prepare('SELECT * FROM kol_catalog WHERE id=? AND organization_id=?').get(id,orgId) as any;
+  router.post('/catalog',(req,res)=>{
+    const u=res.locals.user;if(!isOrgAdmin(u))return res.status(403).json({message:'Chỉ Admin hệ thống được quản lý kho KOL.'});
+    const now=new Date().toISOString();
+    const p=profile({...req.body?.profile,id:randomUUID(),ngayCapNhat:now});if(!p)return res.status(400).json({message:'Kiểm tra tên, lĩnh vực, nền tảng, follower và giá KOL.'});
+    db.prepare('INSERT INTO kol_catalog VALUES (?,?,?,?,?)').run(p.id,u.organization_id,JSON.stringify(p),1,now);audit(u.id,'create_catalog_kol',p.id);res.json({id:p.id,revision:1,updatedAt:now});
+  });
+  router.post('/catalog/:id/update',(req,res)=>{
+    const u=res.locals.user;if(!isOrgAdmin(u))return res.status(403).json({message:'Chỉ Admin hệ thống được quản lý kho KOL.'});
+    const row=catalogRow(u.organization_id,req.params.id);if(!row)return res.status(404).json({message:'Không tìm thấy KOL trong kho.'});
+    if(req.body?.revision!==row.revision)return res.status(409).json({message:'Hồ sơ đã có thay đổi mới hơn trên server. Tải lại dữ liệu trước khi lưu.'});
+    const now=new Date().toISOString();
+    const p=profile({...req.body?.profile,id:row.id,ngayCapNhat:now});if(!p)return res.status(400).json({message:'Kiểm tra tên, lĩnh vực, nền tảng, follower và giá KOL.'});
+    const result=db.prepare('UPDATE kol_catalog SET profile_json=?,revision=revision+1,updated_at=? WHERE id=? AND organization_id=? AND revision=?').run(JSON.stringify(p),now,row.id,u.organization_id,row.revision);
+    if(!result.changes)return res.status(409).json({message:'Hồ sơ đã có thay đổi mới hơn trên server. Tải lại dữ liệu trước khi lưu.'});
+    audit(u.id,'update_catalog_kol',row.id);res.json({id:row.id,revision:row.revision+1,updatedAt:now});
+  });
+  router.post('/catalog/:id/remove',(req,res)=>{
+    const u=res.locals.user;if(!isOrgAdmin(u))return res.status(403).json({message:'Chỉ Admin hệ thống được quản lý kho KOL.'});
+    const row=catalogRow(u.organization_id,req.params.id);if(!row)return res.status(404).json({message:'Không tìm thấy KOL trong kho.'});
+    if(req.body?.revision!==undefined&&req.body.revision!==row.revision)return res.status(409).json({message:'Hồ sơ đã có thay đổi mới hơn trên server. Tải lại dữ liệu trước khi xoá.'});
+    db.prepare('DELETE FROM kol_catalog WHERE id=? AND organization_id=?').run(row.id,u.organization_id);audit(u.id,'remove_catalog_kol',row.id);res.json({success:true});
+  });
+  // Ghi hàng loạt có kiểm tra revision từng hồ sơ (dùng cho nhập dữ liệu đã qua xác minh và cập nhật giá hàng loạt).
+  router.post('/catalog/bulk-update',(req,res)=>{
+    const u=res.locals.user;if(!isOrgAdmin(u))return res.status(403).json({message:'Chỉ Admin hệ thống được quản lý kho KOL.'});
+    if(!Array.isArray(req.body?.items)||!req.body.items.length||req.body.items.length>500)return res.status(400).json({message:'Danh sách hồ sơ cần ghi không hợp lệ.'});
+    const now=new Date().toISOString();const added:string[]=[],updated:string[]=[],conflicts:{id:string,reason:string}[]=[];
+    db.exec('BEGIN');try{
+      for(const item of req.body.items){
+        const id=typeof item?.id==='string'?item.id:'';
+        const p=id?profile({...item.profile,id}):null;
+        if(!p){conflicts.push({id:id||'(không có mã)',reason:'Dữ liệu hồ sơ không hợp lệ.'});continue;}
+        const row=catalogRow(u.organization_id,id);
+        if(!row){
+          if(item.revision!==null&&item.revision!==undefined){conflicts.push({id,reason:'Hồ sơ không còn trên server.'});continue;}
+          db.prepare('INSERT INTO kol_catalog VALUES (?,?,?,?,?)').run(id,u.organization_id,JSON.stringify(p),1,now);added.push(id);continue;
+        }
+        if(item.revision!==row.revision){conflicts.push({id,reason:'Đã có thay đổi mới hơn trên server.'});continue;}
+        db.prepare('UPDATE kol_catalog SET profile_json=?,revision=revision+1,updated_at=? WHERE id=? AND organization_id=?').run(JSON.stringify(p),now,id,u.organization_id);updated.push(id);
+      }
+      audit(u.id,'bulk_update_catalog','');db.exec('COMMIT');
+    }catch(e){db.exec('ROLLBACK');throw e;}
+    res.json({added,updated,conflicts});
+  });
+  // Nhập chuyển đổi dữ liệu trình duyệt cũ lên kho server: xem trước phân loại, áp dụng theo lựa chọn.
+  // Khớp hồ sơ CHỈ theo mã định danh — không gộp theo tên gần giống; không xoá hồ sơ chỉ có trên server;
+  // hồ sơ xung đột chỉ bị ghi đè khi Admin chọn rõ "dùng bản nhập".
+  // Chuẩn hoá để so sánh hồ sơ: sắp xếp khoá, bỏ qua các khoá có giá trị undefined
+  // (bản vừa làm sạch còn giữ khoá undefined, bản đã lưu trong DB thì không).
+  const canonical=(v:any):string=>{
+    if(v===undefined)return '';
+    if(v===null||typeof v!=='object')return JSON.stringify(v)??'';
+    if(Array.isArray(v))return '['+v.map(canonical).join(',')+']';
+    const keys=Object.keys(v).filter(k=>v[k]!==undefined).sort();
+    return '{'+keys.map(k=>JSON.stringify(k)+':'+canonical(v[k])).join(',')+'}';
+  };
+  const profileKey=(p:any)=>{const {ngayCapNhat,...rest}=p??{};return canonical(rest);};
+  const FIELD_LABELS:Record<string,string>={ten:'Tên',linhVuc:'Lĩnh vực',nenTang:'Nền tảng',bangGia:'Bảng giá',reviewSoBo:'Review sơ bộ',anhDaiDien:'Ảnh đại diện',lienHe:'Liên hệ',lichSuHopTac:'Lịch sử hợp tác',danhGiaHieuQua:'Đánh giá hiệu quả',isSample:'Cờ dữ liệu mẫu',ngayTao:'Ngày tạo'};
+  function classifyMigration(u:any,rawProfiles:any[]){
+    const profiles=rawProfiles.map(profile);
+    if(profiles.some((p:any)=>!p)||new Set(profiles.map((p:any)=>p!.id)).size!==profiles.length)return null;
+    const serverRows=db.prepare('SELECT id,profile_json FROM kol_catalog WHERE organization_id=?').all(u.organization_id) as any[];
+    const serverById=new Map(serverRows.map((r:any)=>[r.id,JSON.parse(r.profile_json)]));
+    const newItems:any[]=[],unchanged:any[]=[],conflicts:any[]=[];const importedIds=new Set<string>();
+    for(const p of profiles as any[]){
+      importedIds.add(p.id);
+      const server=serverById.get(p.id);
+      if(!server){newItems.push({id:p.id,ten:p.ten});continue;}
+      if(profileKey(server)===profileKey(p)){unchanged.push({id:p.id,ten:p.ten});continue;}
+      const keys=new Set([...Object.keys(server),...Object.keys(p)]);
+      const differentFields=[...keys].filter(k=>k!=='ngayCapNhat'&&canonical(server[k])!==canonical(p[k])).map(k=>FIELD_LABELS[k]??k);
+      conflicts.push({id:p.id,ten:p.ten,differentFields});
+    }
+    const serverOnly=serverRows.filter((r:any)=>!importedIds.has(r.id)).map((r:any)=>({id:r.id,ten:JSON.parse(r.profile_json).ten}));
+    return {profiles:profiles as any[],newItems,unchanged,conflicts,serverOnly};
+  }
+  router.post('/catalog/migration/preview',(req,res)=>{
+    const u=res.locals.user;if(!isOrgAdmin(u))return res.status(403).json({message:'Chỉ Admin hệ thống được nhập chuyển đổi dữ liệu.'});
+    if(!Array.isArray(req.body?.profiles)||req.body.profiles.length>500)return res.status(400).json({message:'Dữ liệu nhập tối đa 500 hồ sơ mỗi lần.'});
+    const c=classifyMigration(u,req.body.profiles);if(!c)return res.status(400).json({message:'Dữ liệu nhập không hợp lệ hoặc trùng mã hồ sơ.'});
+    res.json({newItems:c.newItems,unchanged:c.unchanged,conflicts:c.conflicts,serverOnly:c.serverOnly});
+  });
+  router.post('/catalog/migration/apply',(req,res)=>{
+    const u=res.locals.user;if(!isOrgAdmin(u))return res.status(403).json({message:'Chỉ Admin hệ thống được nhập chuyển đổi dữ liệu.'});
+    if(!Array.isArray(req.body?.profiles)||req.body.profiles.length>500)return res.status(400).json({message:'Dữ liệu nhập tối đa 500 hồ sơ mỗi lần.'});
+    const resolutions=(req.body?.resolutions&&typeof req.body.resolutions==='object')?req.body.resolutions:{};
+    const c=classifyMigration(u,req.body.profiles);if(!c)return res.status(400).json({message:'Dữ liệu nhập không hợp lệ hoặc trùng mã hồ sơ.'});
+    const now=new Date().toISOString();const conflictIds=new Set(c.conflicts.map((x:any)=>x.id));const unchangedIds=new Set(c.unchanged.map((x:any)=>x.id));
+    let added=0,updated=0,keptServer=0;
+    db.exec('BEGIN');try{
+      for(const p of c.profiles){
+        if(unchangedIds.has(p.id))continue;
+        if(conflictIds.has(p.id)){
+          if(resolutions[p.id]==='imported'){db.prepare('UPDATE kol_catalog SET profile_json=?,revision=revision+1,updated_at=? WHERE id=? AND organization_id=?').run(JSON.stringify(p),now,p.id,u.organization_id);updated++;}
+          else keptServer++;
+          continue;
+        }
+        db.prepare('INSERT INTO kol_catalog VALUES (?,?,?,?,?)').run(p.id,u.organization_id,JSON.stringify(p),1,now);added++;
+      }
+      audit(u.id,'migration_apply_catalog','');db.exec('COMMIT');
+    }catch(e){db.exec('ROLLBACK');throw e;}
+    res.json({added,updated,unchanged:c.unchanged.length,keptServer,serverOnly:c.serverOnly.length});
   });
   router.get('/projects/:id/phases',(req,res)=>{
     const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền xem dự án này.'});
@@ -127,10 +273,10 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
         const row=db.prepare('SELECT profile_json FROM kol_catalog WHERE id=? AND organization_id=?').get(p!.id,u.organization_id) as any;
         const newJson=JSON.stringify(p);
         if(!row){
-          db.prepare('INSERT INTO kol_catalog VALUES (?,?,?)').run(p!.id,u.organization_id,newJson);
+          db.prepare('INSERT INTO kol_catalog VALUES (?,?,?,?,?)').run(p!.id,u.organization_id,newJson,1,new Date().toISOString());
           added++;
         }else if(row.profile_json!==newJson){
-          db.prepare('UPDATE kol_catalog SET profile_json=? WHERE id=? AND organization_id=?').run(newJson,p!.id,u.organization_id);
+          db.prepare('UPDATE kol_catalog SET profile_json=?,revision=revision+1,updated_at=? WHERE id=? AND organization_id=?').run(newJson,new Date().toISOString(),p!.id,u.organization_id);
           updated++;
         }else{
           unchanged++;
@@ -146,8 +292,8 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
   });
   router.post('/projects/:id/catalog/create',(req,res)=>{
     const u=res.locals.user;if(!access(u,req.params.id))return res.status(403).json({message:'Bạn không có quyền thêm KOL trong dự án này.'});
-    const p=profile({...req.body.profile,id:randomUUID(),ngayCapNhat:req.body.profile?.ngayCapNhat||new Date().toISOString()});if(!p)return res.status(400).json({message:'Kiểm tra tên, lĩnh vực, nền tảng, follower và giá KOL.'});
-    db.prepare('INSERT INTO kol_catalog VALUES (?,?,?)').run(p.id,u.organization_id,JSON.stringify(p));audit(u.id,'create_catalog_kol',p.id);res.json({id:p.id});
+    const p=profile({...req.body.profile,id:randomUUID(),ngayCapNhat:new Date().toISOString()});if(!p)return res.status(400).json({message:'Kiểm tra tên, lĩnh vực, nền tảng, follower và giá KOL.'});
+    db.prepare('INSERT INTO kol_catalog VALUES (?,?,?,?,?)').run(p.id,u.organization_id,JSON.stringify(p),1,new Date().toISOString());audit(u.id,'create_catalog_kol',p.id);res.json({id:p.id});
   });
   router.post('/projects/:id/shortlist/add',(req,res)=>{
     const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật danh sách dự án.'});
@@ -174,13 +320,16 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     const q=db.prepare('SELECT q.* FROM project_quote_versions q JOIN project_options o ON o.id=q.option_id WHERE q.id=? AND o.project_id=?').get(req.params.quoteId,pid) as any;
     if(!q)return res.status(404).json({message:'Không tìm thấy báo giá.'});
     if(!['draft','changes_requested'].includes(q.status)||q.revision!==req.body.revision)return res.status(409).json({message:'Báo giá đã thay đổi hoặc bị khóa. Hãy tạo phiên bản mới hoặc tải lại.'});
-    const p=JSON.parse(q.payload_json);let updated=0;
+    const p=JSON.parse(q.payload_json);let updated=0,missingPrice=0,unconfirmedPrice=0,skipped=0;
     for(const i of p.items){if(!i.shortlistId)continue;const row=db.prepare('SELECT prices_json FROM project_shortlist WHERE id=? AND project_id=?').get(i.shortlistId,pid) as any;const price=row?JSON.parse(row.prices_json)[i.format]:null;
-      if(!price||price.status!=='confirmed')return res.status(400).json({message:'Cần xác nhận lại đủ giá hạng mục trong danh sách chung trước khi lấy giá mới.'});
+      // Lấy giá mới nhất kèm trạng thái xác nhận vào bản nháp; dòng chưa xác nhận vẫn được lấy
+      // nhưng cổng giá ở bước gửi duyệt/duyệt sẽ chặn cho tới khi xác nhận đủ.
+      if(!price){skipped++;continue;}
       i.buyUnitPrice=price.value;i.priceSnapshot=price;updated++;
+      if(price.value===null)missingPrice++;else if(price.status!=='confirmed')unconfirmedPrice++;
     }
     if(!validTotals(p))return res.status(400).json({message:'Tổng tiền vượt phạm vi hỗ trợ. Giảm số lượng hoặc kiểm tra giá.'});
-    db.prepare('UPDATE project_quote_versions SET payload_json=?,revision=revision+1 WHERE id=? AND revision=?').run(JSON.stringify(p),q.id,q.revision);audit(u.id,'refresh_quote_buy_prices',q.id);res.json({success:true,updated});
+    db.prepare('UPDATE project_quote_versions SET payload_json=?,revision=revision+1 WHERE id=? AND revision=?').run(JSON.stringify(p),q.id,q.revision);audit(u.id,'refresh_quote_buy_prices',q.id);res.json({success:true,updated,missingPrice,unconfirmedPrice,skipped});
   });
   router.post('/projects/:id/shortlist/to-option',(req,res)=>{
     const u=res.locals.user,pid=req.params.id;if(!access(u,pid,true))return res.status(403).json({message:'Chỉ PM/Admin được chọn KOL vào phương án.'});
@@ -194,10 +343,13 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
       if(!s||!str(s.id,100)||!formats.includes(s.format)||!Number.isSafeInteger(s.quantity)||s.quantity<1||s.quantity>100000)return res.status(400).json({message:'Hạng mục và số lượng không hợp lệ.'});
       const row=db.prepare('SELECT * FROM project_shortlist WHERE id=? AND project_id=?').get(s.id,pid) as any;if(!row)return res.status(400).json({message:'KOL không thuộc danh sách dự án.'});
       const key=s.id+':'+s.format;if(seen.has(key))return res.status(409).json({message:'KOL và hạng mục này đã có trong phương án. Sửa số lượng ở báo giá.'});seen.add(key);
-      const price=JSON.parse(row.prices_json)[s.format];if(price.status!=='confirmed')return res.status(400).json({message:'Booking cần xác nhận giá của hạng mục đã chọn trước khi lập phương án.'});
+      // Bản nháp được phép chứa giá thiếu/chưa xác nhận (snapshot giữ nguyên trạng thái giá);
+      // cổng giá ở server sẽ chặn gửi duyệt/duyệt/chốt cho tới khi giá được xác nhận đủ.
+      const price=JSON.parse(row.prices_json)[s.format];
       const p=JSON.parse(row.profile_json);newItems.push({id:randomUUID(),creator:p.ten,description:PRICE_FORMAT_LABELS[s.format as keyof typeof PRICE_FORMAT_LABELS],phase:'',kind:'kol',quantity:s.quantity,buyUnitPrice:price.value,sellUnitPrice:null,included:true,shortlistId:row.id,format:s.format,priceSnapshot:price});
     }
     if(payload.items.length+newItems.length>500)return res.status(400).json({message:'Một báo giá hỗ trợ tối đa 500 hạng mục.'});
-    payload.items.push(...newItems);if(!validTotals(payload))return res.status(400).json({message:'Tổng tiền vượt phạm vi hỗ trợ. Giảm số lượng hoặc kiểm tra giá.'});db.prepare("UPDATE project_quote_versions SET payload_json=?,revision=revision+1,status='draft' WHERE id=? AND revision=?").run(JSON.stringify(payload),q.id,q.revision);audit(u.id,'shortlist_to_option',q.id);res.json({success:true,added:newItems.length});
+    payload.items.push(...newItems);if(!validTotals(payload))return res.status(400).json({message:'Tổng tiền vượt phạm vi hỗ trợ. Giảm số lượng hoặc kiểm tra giá.'});db.prepare("UPDATE project_quote_versions SET payload_json=?,revision=revision+1,status='draft' WHERE id=? AND revision=?").run(JSON.stringify(payload),q.id,q.revision);audit(u.id,'shortlist_to_option',q.id);
+    res.json({success:true,added:newItems.length,missingPrice:newItems.filter(i=>i.buyUnitPrice===null).length,unconfirmedPrice:newItems.filter(i=>i.buyUnitPrice!==null&&i.priceSnapshot?.status!=='confirmed').length});
   });
 }

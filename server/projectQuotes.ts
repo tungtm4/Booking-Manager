@@ -35,6 +35,28 @@ const finance=(p:QuotePayload)=>{
   if(totalWithTax!==null&&!Number.isSafeInteger(totalWithTax))throw new Error('Tổng tiền vượt phạm vi hỗ trợ.');
   return {...totals,tax,totalWithTax};
 };
+// Cổng giá (kiểm soát ở server): chỉ các dòng ĐƯỢC TÍNH vào báo giá (included) mới chặn
+// gửi duyệt / duyệt / chốt. Giá 0 là giá hợp lệ, không tính là thiếu giá.
+// Giá đầu vào "chưa xác nhận" áp dụng cho dòng lấy từ danh sách KOL (có priceSnapshot);
+// dòng chi phí nhập trực tiếp không có bước xác nhận riêng nên chỉ cần có giá.
+const priceGate=(p:QuotePayload)=>{
+  let missingBuy=0,missingSell=0,unconfirmedBuy=0;
+  for(const i of p.items){
+    if(!i.included)continue;
+    if(i.buyUnitPrice===null)missingBuy++;
+    if(i.sellUnitPrice===null)missingSell++;
+    const snap=(i as unknown as {priceSnapshot?:{status?:string}}).priceSnapshot;
+    if(i.buyUnitPrice!==null&&snap&&snap.status!=='confirmed')unconfirmedBuy++;
+  }
+  return {missingBuy,missingSell,unconfirmedBuy,ok:missingBuy===0&&missingSell===0&&unconfirmedBuy===0};
+};
+const priceGateMessage=(g:ReturnType<typeof priceGate>)=>{
+  const parts:string[]=[];
+  if(g.missingBuy)parts.push(`thiếu giá đầu vào ở ${g.missingBuy} dòng`);
+  if(g.unconfirmedBuy)parts.push(`giá đầu vào chưa xác nhận ở ${g.unconfirmedBuy} dòng`);
+  if(g.missingSell)parts.push(`thiếu giá bán ở ${g.missingSell} dòng`);
+  return `Chưa thể gửi duyệt, duyệt hoặc chốt báo giá: ${parts.join('; ')}. Hãy bổ sung/xác nhận giá trong danh sách KOL của dự án rồi lấy lại giá vào bản nháp.`;
+};
 const cleanItems=(items:ProjectQuoteItem[])=>items.map(i=>({id:i.id,creator:i.creator.trim(),description:i.description.trim(),phase:i.phase.trim(),kind:i.kind,quantity:i.quantity,buyUnitPrice:i.buyUnitPrice,sellUnitPrice:i.sellUnitPrice,included:i.included}));
 
 export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:any,id:string,manage?:boolean)=>boolean,audit:(actor:string|null,action:string,target:string)=>unknown){
@@ -137,13 +159,21 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     const transitions:Record<string,string[]>={draft:['submitted'],submitted:['approved','changes_requested'],approved:[],changes_requested:['submitted']};
     if(!transitions[q.status].includes(req.body.status))return res.status(400).json({message:'Không thể chuyển trạng thái báo giá.'});
     const p=JSON.parse(q.payload_json) as QuotePayload;
-    if(!p.items.some(i=>i.included)||!finance(p).complete)return res.status(400).json({message:'Cần có hạng mục và đủ giá đầu vào/giá bán trước khi duyệt.'});
+    if(!p.items.some(i=>i.included))return res.status(400).json({message:'Cần có ít nhất một hạng mục được tính vào báo giá.'});
+    // Gửi duyệt và duyệt phải qua cổng giá ở server; yêu cầu chỉnh sửa thì không chặn.
+    if(['submitted','approved'].includes(req.body.status)){
+      const gate=priceGate(p);
+      if(!gate.ok)return res.status(400).json({message:priceGateMessage(gate),priceGate:gate});
+      if(!finance(p).complete)return res.status(400).json({message:'Cần đủ giá đầu vào và giá bán trước khi duyệt.'});
+    }
     db.prepare('UPDATE project_quote_versions SET status=?,approved_by=?,revision=revision+1 WHERE id=? AND revision=?').run(req.body.status,req.body.status==='approved'?u.id:null,q.id,q.revision);audit(u.id,req.body.status+'_quote',q.id);res.json({success:true});
   });
   router.post('/projects/:id/quotes/:quoteId/select',(req,res)=>{
     const u=res.locals.user;const pid=req.params.id;
     if(!access(u,pid,true))return res.status(403).json({message:'Chỉ PM/Admin được chốt phương án.'});
     const q=quote(req.params.quoteId,pid);if(!q||q.status!=='approved')return res.status(400).json({message:'Chỉ được chốt một phiên bản đã duyệt trong dự án.'});
+    const gate=priceGate(JSON.parse(q.payload_json) as QuotePayload);
+    if(!gate.ok)return res.status(400).json({message:priceGateMessage(gate),priceGate:gate});
     db.prepare('INSERT INTO project_baselines VALUES (?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET quote_id=excluded.quote_id,selected_by=excluded.selected_by,selected_at=excluded.selected_at').run(pid,q.id,u.id,new Date().toISOString());audit(u.id,'select_baseline',q.id);res.json({success:true});
   });
   // Đợt 9B: tạo phương án + V1 từ các phase đã chọn (PM/Admin).

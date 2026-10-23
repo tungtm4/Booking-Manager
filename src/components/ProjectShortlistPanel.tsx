@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ProjectKolCard } from './ProjectKolCard';
-import { StorageService } from '../services/storageService';
+import { readLegacyLocalKols } from '../services/catalogService';
+import { CatalogMigrationModal } from './CatalogMigrationModal';
+import type { KolProfile } from '../types/kol';
 import { PRICE_FORMAT_LABELS } from '../types/kol';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { paginateItems, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../utils/pagination';
 import { PHASE_KIND_LABELS, normalizePhaseDrafts } from '../domain/phases';
 import { assessProjectKol } from '../domain/projectBrief';
+import { distributeCampaignQuantity } from '../domain/phaseQuote';
 import { formatVND } from '../utils/formatters';
 
 const formats = Object.entries(PRICE_FORMAT_LABELS);
@@ -134,6 +137,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
 
   // Đợt 9: phase của dự án
   const [phases, setPhases] = useState<any[]>([]), [activePhaseId, setActivePhaseId] = useState(''), [pool, setPool] = useState<any[]>([]);
+  const [showMigration, setShowMigration] = useState(false), [migrationProfiles, setMigrationProfiles] = useState<KolProfile[]>([]);
   const [phaseInfo, setPhaseInfo] = useState<any>({ name: '', kind: 'other', description: '', budget: '' }), [phaseInfoDirty, setPhaseInfoDirty] = useState(false);
   const [phaseBrief, setPhaseBrief] = useState<any>(null), [phaseBriefDirty, setPhaseBriefDirty] = useState(false);
   const [newPhase, setNewPhase] = useState<any>({ name: '', kind: 'creator', budget: '' });
@@ -264,15 +268,26 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
   const activePhase = phases.find((p: any) => p.id === activePhaseId) ?? null;
   const activeBrief = activePhase?.brief ?? data.brief;
   const phaseNameOf = (id: string | null) => phases.find((p: any) => p.id === id)?.name ?? 'phase khác';
+  // Tổng chi phí đầu vào của phase (từ danh sách sơ bộ) — dùng CHUNG quy tắc số lượng với
+  // chức năng tạo báo giá từ phase: "mỗi KOL" nhân số lượng từng hạng mục; "tổng toàn phase"
+  // phân bổ đúng tổng số lượng cho các KOL (phần dư cho các KOL đầu, giữ đúng tổng).
   function phaseRollup(ph: any) {
     const rows = (data.rows || []).filter((r: any) => r.phaseId === ph.id || (phases[0]?.id === ph.id && !r.phaseId));
     const fmts: string[] = ph.brief?.deliverables?.length ? ph.brief.deliverables.map((d: any) => d.format) : formats.map(([k]) => k);
     let total = 0, missing = 0;
-    for (const r of rows) for (const f of fmts) {
-      const v = r.prices?.[f]?.value;
-      if (v == null) missing++;
-      else total += ph.brief?.deliverableScope === 'per_kol' ? v * (ph.brief.deliverables.find((d: any) => d.format === f)?.quantity ?? 1) : v;
-    }
+    const qtyOf = (f: string, rowIndex: number) => {
+      const d = ph.brief?.deliverables?.find((x: any) => x.format === f);
+      if (!d) return 1;
+      if (ph.brief?.deliverableScope === 'per_kol') return d.quantity;
+      return distributeCampaignQuantity(d.quantity, rows.length)[rowIndex] ?? 0;
+    };
+    rows.forEach((r: any, rowIndex: number) => {
+      for (const f of fmts) {
+        const v = r.prices?.[f]?.value;
+        if (v == null) missing++;
+        else total += v * qtyOf(f, rowIndex);
+      }
+    });
     return { count: rows.length, total, missing };
   }
   const poolSource = pool.length ? pool : (data.matches || []);
@@ -311,12 +326,12 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
               return (
                 <div key={ph.id} className="py-2 flex flex-wrap gap-x-4 gap-y-1 items-baseline justify-between">
                   <span className="font-medium">{ph.name} <span className="font-normal text-slate-500">· {PHASE_KIND_LABELS[ph.kind as keyof typeof PHASE_KIND_LABELS]} · {r.count} KOL</span></span>
-                  <span>Giá đầu vào tạm tính: <strong>{formatVND(r.total)}</strong>{r.missing > 0 && <span className="text-amber-700"> · thiếu {r.missing} giá</span>}{ph.budget != null && <> · Ngân sách {formatVND(ph.budget)} · {r.total <= ph.budget ? <span className="text-emerald-700">còn {formatVND(ph.budget - r.total)}</span> : <span className="text-red-700">vượt {formatVND(r.total - ph.budget)}</span>}</>}</span>
+                  <span>Chi phí đầu vào đã biết: <strong>{formatVND(r.total)}</strong>{r.missing > 0 && <span className="text-amber-700"> · thiếu {r.missing} giá — chưa đủ dữ liệu</span>}{ph.budget != null && <> · Ngân sách phase {formatVND(ph.budget)} · {r.missing > 0 ? <span className="text-amber-700">chưa kết luận còn/vượt vì tổng còn thiếu giá</span> : r.total <= ph.budget ? <span className="text-emerald-700">còn {formatVND(ph.budget - r.total)}</span> : <span className="text-red-700">vượt {formatVND(r.total - ph.budget)}</span>}</>}</span>
                 </div>
               );
             })}
           </div>
-          <p className="text-xs text-slate-500 border-t pt-2">Tổng tạm tính toàn dự án: <strong>{formatVND(phases.reduce((a: number, ph: any) => a + phaseRollup(ph).total, 0))}</strong>{data.brief.budget != null && <> / ngân sách tổng {formatVND(data.brief.budget)}</>}. Tạm tính cộng giá đầu vào đã có (thiếu giá tính 0); phase “mỗi KOL” đã nhân số lượng hạng mục trong brief của phase, phase “tổng chiến dịch” tính theo đơn giá.</p>
+          <p className="text-xs text-slate-500 border-t pt-2">Tổng chi phí đầu vào đã biết toàn dự án: <strong>{formatVND(phases.reduce((a: number, ph: any) => a + phaseRollup(ph).total, 0))}</strong>{data.brief.budget != null && <> / ngân sách tổng {formatVND(data.brief.budget)}</>}. Đây là chi phí đầu vào của danh sách sơ bộ (giá mua phía dự án), KHÔNG phải tổng giá báo khách của phương án. Tổng chỉ cộng các giá đã có; phase “mỗi KOL” nhân đơn giá với số lượng từng hạng mục, phase “tổng toàn phase” phân bổ đúng tổng số lượng cho các KOL theo cùng quy tắc của báo giá (ví dụ 10 video cho 4 KOL cùng giá 10 triệu = 100 triệu).</p>
         </section>
       )}
 
@@ -583,30 +598,24 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
         </summary>
         <p className="text-xs text-slate-500">{activePhase ? 'Đang lọc theo brief của phase “' + activePhase.name + '”; KOL thêm vào sẽ vào thẳng phase này. ' : ''}Lọc theo nội dung hồ sơ và tiêu chí đã duyệt; chưa dùng AI để đánh giá ngữ nghĩa. Thiếu giá vẫn xuất hiện. Không áp dụng Top N hoặc lọc theo giá.</p>
         {data.canImport && (
-          <button
-            disabled={busy || dirty}
-            className="border rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-slate-50"
-            onClick={() => run(async () => {
-              const profiles = StorageService.getKols().filter(p => !p.isSample);
-              if (!profiles.length) {
-                setNotice('Không có KOL thật trên trình duyệt này để nhập. Có thể thêm KOL mới bên dưới.');
-                return;
-              }
-              let added = 0, updated = 0, unchanged = 0, onlyInCatalog = 0;
-              for (let i = 0; i < profiles.length; i += 500) {
-                const r = await request(base + '/catalog/import', { profiles: profiles.slice(i, i + 500) });
-                added += r.added;
-                updated += r.updated;
-                unchanged += r.unchanged;
-                onlyInCatalog = r.onlyInCatalog;
-              }
-              await refresh();
-              const extra = onlyInCatalog > 0 ? ` Thư viện còn ${onlyInCatalog} KOL không có trong dữ liệu trình duyệt này (được giữ nguyên).` : '';
-              setNotice(`Đã đồng bộ thư viện: thêm mới ${added}, cập nhật ${updated}, không đổi ${unchanged}.${extra}`);
-            })}
-          >
-            Đồng bộ toàn bộ KOL từ trình duyệt vào thư viện
-          </button>
+          <div className="space-y-1">
+            <button
+              disabled={busy || dirty}
+              className="border rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-slate-50"
+              onClick={() => {
+                const profiles = (readLegacyLocalKols() ?? []).filter(p => !p.isSample);
+                if (!profiles.length) {
+                  setNotice('Không có dữ liệu KOL cũ trên trình duyệt này để nhập chuyển đổi. Kho chính thức nằm trên server; có thể thêm KOL mới bên dưới.');
+                  return;
+                }
+                setMigrationProfiles(profiles as KolProfile[]);
+                setShowMigration(true);
+              }}
+            >
+              Nhập chuyển đổi dữ liệu KOL cũ trên trình duyệt này lên kho server
+            </button>
+            <p className="text-xs text-slate-500">Nhập chuyển đổi có xem trước: hồ sơ mới được thêm, hồ sơ xung đột do bạn chọn giữ bản server hay dùng bản nhập, hồ sơ chỉ có trên server được giữ nguyên. Dữ liệu cũ trên trình duyệt không bị xoá.</p>
+          </div>
         )}
 
         <div className="space-y-4">
@@ -786,9 +795,9 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
               className={button}
               disabled={busy || dirty || !target || !selected.length}
               onClick={() => run(async () => {
-                await request(base + '/shortlist/to-option', { quoteId, revision: target.revision, selections: selected.map(id => ({ id, format, quantity })) });
+                const r = await request(base + '/shortlist/to-option', { quoteId, revision: target.revision, selections: selected.map(id => ({ id, format, quantity })) });
                 await refresh();
-                setNotice('Đã đưa KOL và giá đã xác nhận vào phương án. Mở báo giá để PM điền giá bán.');
+                setNotice(`Đã đưa ${r.added} dòng vào phương án (bản nháp).${r.missingPrice ? ` Còn ${r.missingPrice} dòng thiếu giá đầu vào` : ''}${r.unconfirmedPrice ? `${r.missingPrice ? ';' : ' Còn'} ${r.unconfirmedPrice} dòng giá đầu vào chưa xác nhận` : ''}${r.missingPrice || r.unconfirmedPrice ? ' — báo giá chỉ gửi duyệt được khi giá đã bổ sung và xác nhận đủ.' : ''} Mở báo giá để PM điền giá bán.`);
               })}
             >
               Đưa KOL đã chọn vào phương án
@@ -803,6 +812,13 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
           <p className="text-xs text-slate-500">Chỉ lấy giá hạng mục đã xác nhận; không tự tạo phương án, không tự chia đều SOW toàn chiến dịch. Thêm lần lượt các hạng mục và điều chỉnh số lượng từng KOL tại báo giá.</p>
         </section>
       )}
+      <CatalogMigrationModal
+        isOpen={showMigration}
+        onClose={() => setShowMigration(false)}
+        sourceProfiles={migrationProfiles}
+        sourceLabel="Dữ liệu KOL cũ lưu trên trình duyệt này"
+        onApplied={refresh}
+      />
     </div>
   );
 }

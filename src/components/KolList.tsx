@@ -51,6 +51,7 @@ interface KolListProps {
   onSelectKol: (kol: KolProfile) => void;
   onEditKol: (kol: KolProfile) => void;
   onDeleteKol: (kol: KolProfile) => void;
+  onDeleteMultiple?: (ids: string[]) => Promise<number>;
   onOpenAddKol: () => void;
   onAddToSow?: (kol: KolProfile) => void;
   initialSearch?: string;
@@ -63,6 +64,7 @@ export const KolList: React.FC<KolListProps> = ({
   onSelectKol,
   onEditKol,
   onDeleteKol,
+  onDeleteMultiple,
   onOpenAddKol,
   onAddToSow,
   initialSearch = '',
@@ -314,11 +316,12 @@ export const KolList: React.FC<KolListProps> = ({
     setIsBulkDeleteModalOpen(true);
   };
 
-  // Xác nhận xóa hàng loạt KOL
-  const handleConfirmBulkDelete = () => {
+  // Xác nhận xóa hàng loạt KOL — xoá trên kho server
+  const handleConfirmBulkDelete = async () => {
     if (deleteConfirmCountInput.trim() !== String(selectedKolIds.length)) return;
-    const count = StorageService.deleteMultipleKols(selectedKolIds);
-    showToast(`Đã xóa thành công ${count} hồ sơ KOL khỏi hệ thống!`, 'info');
+    if (!onDeleteMultiple) return;
+    const count = await onDeleteMultiple(selectedKolIds);
+    showToast(`Đã xóa thành công ${count} hồ sơ KOL khỏi kho server!`, 'info');
     setSelectedKolIds([]);
     setIsBulkDeleteModalOpen(false);
     setDeleteConfirmCountInput('');

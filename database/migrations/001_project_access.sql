@@ -37,7 +37,7 @@ CREATE TABLE project_members (
 CREATE TABLE project_member_roles (
   project_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
-  role TEXT NOT NULL CHECK(role IN ('admin','pm','booking')),
+  role TEXT NOT NULL CHECK(role IN ('pm','booking')),
   PRIMARY KEY(project_id, user_id, role),
   FOREIGN KEY(project_id, user_id) REFERENCES project_members(project_id, user_id) ON DELETE CASCADE
 );

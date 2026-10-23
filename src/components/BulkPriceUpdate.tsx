@@ -26,9 +26,10 @@ import { StorageService } from '../services/storageService';
 interface BulkPriceUpdateProps {
   kols: KolProfile[];
   onDataSaved: () => void;
+  onBulkUpdatePrices?: (updates: Array<{ kolId: string; bangGia: KolProfile['bangGia'] }>) => Promise<{ added: string[]; updated: string[]; conflicts: { id: string; reason: string }[] }>;
 }
 
-export const BulkPriceUpdate: React.FC<BulkPriceUpdateProps> = ({ kols, onDataSaved }) => {
+export const BulkPriceUpdate: React.FC<BulkPriceUpdateProps> = ({ kols, onDataSaved, onBulkUpdatePrices }) => {
   // Bộ lọc
   const [keyword, setKeyword] = useState('');
   const [selectedPlatform, setSelectedPlatform] = useState<PlatformType | 'all'>('all');
@@ -128,8 +129,8 @@ export const BulkPriceUpdate: React.FC<BulkPriceUpdateProps> = ({ kols, onDataSa
     });
   };
 
-  // Lưu tất cả thay đổi
-  const handleSaveAll = () => {
+  // Lưu tất cả thay đổi — ghi lên kho server
+  const handleSaveAll = async () => {
     const formats: PriceFormatKey[] = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
     const updates: Array<{ kolId: string; bangGia: KolProfile['bangGia'] }> = [];
 
@@ -159,8 +160,19 @@ export const BulkPriceUpdate: React.FC<BulkPriceUpdateProps> = ({ kols, onDataSa
       return;
     }
 
-    const savedCount = StorageService.bulkUpdatePrices(updates);
-    showToast(`Đã lưu thành công ${totalModifiedCells} thay đổi giá cho ${savedCount} KOL!`);
+    if (!onBulkUpdatePrices) { showToast('Chưa kết nối được kho KOL trên server.'); return; }
+    try {
+      const r = await onBulkUpdatePrices(updates);
+      const savedCount = r.updated.length + r.added.length;
+      if (r.conflicts.length) {
+        showToast(`Đã lưu ${savedCount} KOL lên kho server. ${r.conflicts.length} hồ sơ bị xung đột phiên bản — hãy tải lại dữ liệu rồi lưu lại các hồ sơ đó.`);
+      } else {
+        showToast(`Đã lưu thành công ${totalModifiedCells} thay đổi giá cho ${savedCount} KOL lên kho server!`);
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Không lưu được giá lên kho server.');
+      return;
+    }
     onDataSaved();
   };
 

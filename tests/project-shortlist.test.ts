@@ -42,22 +42,30 @@ test('Booking xác nhận giá, PM lấy snapshot vào A/B, khóa giá cũ và k
   const a=(await call(`/projects/${pid}/options`,{name:'A'},cookies.pm)).body;
   const b=(await call(`/projects/${pid}/options`,{name:'B'},cookies.pm)).body;
   const selection={quoteId:a.quoteId,revision:1,selections:[{id:row.id,format:'video',quantity:3}]};
-  assert.equal((await call(`/projects/${pid}/shortlist/to-option`,selection,cookies.pm)).status,400);
+  // Kiểm soát giá (hành vi mới): bản nháp ĐƯỢC tạo khi giá còn thiếu, snapshot giữ trạng thái
+  // 'waiting' và response báo số dòng thiếu giá; nhưng server chặn gửi duyệt.
+  const draftTry=await call(`/projects/${pid}/shortlist/to-option`,selection,cookies.pm);
+  assert.equal(draftTry.status,200);assert.equal(draftTry.body.missingPrice,1);
+  const q0=(await call(`/projects/${pid}/options`,undefined,cookies.pm)).body.options[0].versions[0];
+  assert.equal(q0.items[0].buyUnitPrice,null);assert.equal(q0.items[0].priceSnapshot.status,'waiting');
+  const gateTry=await call(`/projects/${pid}/quotes/${q0.id}/status`,{status:'submitted',revision:q0.revision},cookies.pm);
+  assert.equal(gateTry.status,400);assert.equal(gateTry.body.priceGate.missingBuy,1);assert.equal(gateTry.body.priceGate.missingSell,1);
+  assert.equal((await call(`/projects/${pid}/quotes/${q0.id}/save`,{revision:q0.revision,payload:{items:[],discount:{mode:'fixed',value:0},agencyFee:{mode:'percent',value:12},taxRate:0}},cookies.pm)).status,200);
   const price={revision:1,format:'video',value:2000000,source:'Creator xác nhận qua email',confirm:true};
   assert.equal((await call(`/projects/${pid}/shortlist/${row.id}/prices`,{...price,source:''},cookies.booking)).status,400);
   assert.equal((await call(`/projects/${pid}/shortlist/${row.id}/prices`,price,cookies.booking)).status,200);
   assert.equal((await call(`/projects/${pid}/shortlist/${row.id}/prices`,price,cookies.booking)).status,409);
-  assert.equal((await call(`/projects/${pid}/shortlist/to-option`,selection,cookies.booking)).status,403);
-  assert.equal((await call(`/projects/${pid}/shortlist/to-option`,selection,cookies.pm)).status,200);
-  assert.equal((await call(`/projects/${pid}/shortlist/to-option`,{...selection,revision:2},cookies.pm)).status,409);
+  assert.equal((await call(`/projects/${pid}/shortlist/to-option`,{...selection,revision:3},cookies.booking)).status,403);
+  assert.equal((await call(`/projects/${pid}/shortlist/to-option`,{...selection,revision:3},cookies.pm)).status,200);
+  assert.equal((await call(`/projects/${pid}/shortlist/to-option`,{...selection,revision:4},cookies.pm)).status,409);
   assert.equal((await call(`/projects/${pid}/shortlist/to-option`,{...selection,quoteId:b.quoteId},cookies.pm)).status,200);
   let o=(await call(`/projects/${pid}/options`,undefined,cookies.pm)).body;
   let q=o.options[0].versions[0];assert.equal(q.items[0].buyUnitPrice,2000000);assert.equal(q.items[0].quantity,3);assert.equal(q.items[0].sellUnitPrice,null);
   const sell={items:q.items.map((i:any)=>({...i,buyUnitPrice:9,sellUnitPrice:4000000})),discount:{mode:'fixed',value:0},agencyFee:{mode:'percent',value:10},taxRate:0};
-  assert.equal((await call(`/projects/${pid}/quotes/${q.id}/save`,{revision:2,payload:sell},cookies.pm)).body.quote.items[0].buyUnitPrice,2000000);
+  assert.equal((await call(`/projects/${pid}/quotes/${q.id}/save`,{revision:4,payload:sell},cookies.pm)).body.quote.items[0].buyUnitPrice,2000000);
   const book=(await call(`/projects/${pid}/options`,undefined,cookies.booking)).body.options[0].versions[0];
   assert.equal('finance' in book,false);assert.equal('sellUnitPrice' in book.items[0],false);
-  assert.equal((await call(`/projects/${pid}/quotes/${q.id}/save`,{revision:3,buyPrices:[{id:q.items[0].id,buyUnitPrice:1}]},cookies.booking)).status,403);
+  assert.equal((await call(`/projects/${pid}/quotes/${q.id}/save`,{revision:5,buyPrices:[{id:q.items[0].id,buyUnitPrice:1}]},cookies.booking)).status,403);
   await call(`/projects/${pid}/shortlist/${row.id}/prices`,{...price,revision:2,value:3000000},cookies.booking);
   q=(await call(`/projects/${pid}/options`,undefined,cookies.pm)).body.options[0].versions[0];assert.equal(q.items[0].buyUnitPrice,2000000);assert.equal(q.finance.profit,7200000);
   assert.equal((await call(`/projects/${pid}/quotes/${q.id}/refresh-prices`,{revision:q.revision},cookies.booking)).status,403);

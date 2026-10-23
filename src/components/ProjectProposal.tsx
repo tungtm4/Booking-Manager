@@ -5,6 +5,7 @@ import { formatFollowers, formatVND } from '../utils/formatters';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { friendlyAiMessage } from '../utils/aiMessages';
 import { PHASE_KIND_LABELS } from '../domain/phases';
+import { paginateItems, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../utils/pagination';
 
 const field = 'w-full rounded-lg border border-slate-300 px-3 py-2 bg-white';
 const button = 'rounded-lg bg-indigo-600 text-white px-3 py-2 text-sm font-semibold disabled:opacity-50';
@@ -31,46 +32,77 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
   const [formatKey, setFormatKey] = useState<PriceFormatKey>('video'), [soLuong, setSoLuong] = useState(10);
   const [parsing, setParsing] = useState(false), [parseMsg, setParseMsg] = useState('');
   const [results, setResults] = useState<RecommendationScore[] | null>(null), [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [resultsPage, setResultsPage] = useState(1), [resultsPageSize, setResultsPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+  const [formSnapshot, setFormSnapshot] = useState('');
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
 
+  type FormValues = { briefText: string; linhVuc: string; nenTang: string; followerMin: number | ''; budgetMax: number | ''; formatKey: PriceFormatKey; soLuong: number };
+  const blankForm = (): FormValues => ({ briefText: '', linhVuc: '', nenTang: 'TatCa', followerMin: '', budgetMax: '', formatKey: 'video', soLuong: 10 });
+  function applyForm(v: FormValues) {
+    setBriefText(v.briefText); setLinhVuc(v.linhVuc); setNenTang(v.nenTang);
+    setFollowerMin(v.followerMin); setBudgetMax(v.budgetMax); setFormatKey(v.formatKey); setSoLuong(v.soLuong);
+    setFormSnapshot(JSON.stringify(v));
+  }
+  function clearWork(clearMessages = true) {
+    setResults(null); setSelectedIds([]); setResultsPage(1); setParseMsg('');
+    if (clearMessages) { setNotice(''); setError(''); }
+  }
+  // Nạp ĐẦY ĐỦ brief/tiêu chí của phase; phase thiếu dữ liệu ở đâu thì dùng giá trị trống/mặc định ở đó.
+  // Ngân sách tổng của phase KHÔNG được dùng làm ngân sách/KOL.
+  function formFromPhase(ph: any): FormValues {
+    const b = ph?.brief;
+    if (!b) return blankForm();
+    const first = b.deliverables?.[0]?.format;
+    return {
+      briefText: b.text ?? '',
+      linhVuc: b.category ?? '',
+      nenTang: PLATFORMS.includes(b.platform) ? b.platform : 'TatCa',
+      followerMin: b.minFollowers ? b.minFollowers : '',
+      budgetMax: '',
+      formatKey: first && first in PRICE_FORMAT_LABELS ? (first as PriceFormatKey) : 'video',
+      soLuong: b.targetCount ?? 10,
+    };
+  }
+  const currentForm = (): FormValues => ({ briefText, linhVuc, nenTang, followerMin, budgetMax, formatKey, soLuong });
+  const formDirty = () => formSnapshot !== '' && JSON.stringify(currentForm()) !== formSnapshot;
+  function guardSwitch(action: () => void) {
+    if (formDirty() && !window.confirm('Bạn đang có chỉnh sửa ở brief/tiêu chí chưa được dùng để tìm kiếm. Chuyển dự án/phase sẽ làm mất các chỉnh sửa này. Tiếp tục?')) return;
+    action();
+  }
+
   useEffect(() => {
+    let active = true;
     Promise.all([request('/projects'), request('/catalog').catch(() => ({ kols: [] }))])
       .then(([p, c]) => {
+        if (!active) return;
         setProjects(p.projects ?? []);
         setPool(c.kols ?? []);
         if (!initialProjectId && p.projects?.length) setProjectId(p.projects[0].id);
       })
-      .catch(e => setError(e.message));
+      .catch(e => { if (active) setError(e.message); });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
     if (!projectId) { setPhases([]); return; }
+    let active = true;
     request(`/projects/${projectId}/phases`)
       .then(r => {
+        if (!active) return;
         setPhases(r.phases ?? []);
         setPhaseId(prev => (r.phases ?? []).some((p: any) => p.id === (initialPhaseId && prev === '' ? initialPhaseId : prev)) ? prev || initialPhaseId || '' : (r.phases?.[0]?.id ?? ''));
       })
-      .catch(e => setError(e.message));
+      .catch(e => { if (active) setError(e.message); });
+    return () => { active = false; };
   }, [projectId]);
 
   const phase = phases.find((p: any) => p.id === phaseId) ?? null;
 
-  // Chọn phase → nạp brief + tiêu chí của phase vào form đề xuất.
+  // Chọn phase → xoá toàn bộ kết quả/lựa chọn/thông báo của ngữ cảnh trước, nạp form của phase mới.
   useEffect(() => {
     if (!phase) return;
-    const b = phase.brief;
-    if (b) {
-      if (b.text) setBriefText(b.text);
-      setLinhVuc(b.category ?? '');
-      setNenTang(PLATFORMS.includes(b.platform) ? b.platform : 'TatCa');
-      setFollowerMin(b.minFollowers ? b.minFollowers : '');
-      if (b.targetCount) setSoLuong(b.targetCount);
-      const first = b.deliverables?.[0]?.format;
-      if (first && first in PRICE_FORMAT_LABELS) setFormatKey(first as PriceFormatKey);
-    }
-    setResults(null);
-    setSelectedIds([]);
-    setParseMsg('');
+    applyForm(formFromPhase(phase));
+    clearWork(false);
   }, [phaseId, phase?.id]);
 
   async function run(work: () => Promise<void>) {
@@ -93,6 +125,8 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       if (x.followerToiThieu > 0) setFollowerMin(Number(x.followerToiThieu));
       const first = (x.hangMucMoiKol?.[0] ?? x.hangMucTongCampaign?.[0])?.format;
       if (first && first in PRICE_FORMAT_LABELS) setFormatKey(first as PriceFormatKey);
+      // Ảnh chụp = form TRƯỚC khi AI điền: mọi thay đổi sau phân tích đều coi là chỉnh sửa chưa áp dụng.
+      setFormSnapshot(JSON.stringify(currentForm()));
       setParseMsg('AI đã phân tích brief và điền tiêu chí. Kiểm tra lại rồi bấm Tìm KOL phù hợp.');
     } catch { setParseMsg('Không gọi được AI lúc này. Bạn vẫn có thể tự điền tiêu chí bên dưới.'); }
     finally { setParsing(false); }
@@ -107,14 +141,19 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       formatNganSach: formatKey,
       soLuongCan: 0,
     });
+    // Không tự tích KOL theo số lượng brief — người dùng chủ động chọn; số lượng brief chỉ để đối chiếu.
+    // Tìm kiếm mới luôn xoá lựa chọn của lần tìm trước.
     setResults(ranked);
-    setSelectedIds(ranked.slice(0, Math.max(0, soLuong)).map(r => r.kol.id));
+    setSelectedIds([]);
+    setResultsPage(1);
     setNotice('');
   }
 
   const toggle = (id: string) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const phaseNameOf = (id: string | null) => phases.find((p: any) => p.id === id)?.name ?? 'một phase khác';
-  const shown = (results ?? []).slice(0, 50);
+  // Phân trang để truy cập TOÀN BỘ kết quả — không cắt cứng số lượng hiển thị.
+  const paged = results ? paginateItems(results, resultsPage, resultsPageSize) : null;
+  const selectedKols = (results ?? []).filter(r => selectedIds.includes(r.kol.id));
 
   return (
     <div className="space-y-6">
@@ -129,13 +168,13 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
         <h2 className="font-semibold">1. Chọn dự án & phase đích</h2>
         <div className="grid sm:grid-cols-2 gap-3">
           <label className="text-sm">Dự án
-            <select aria-label="Dự án đích" className={field} value={projectId} onChange={e => { setProjectId(e.target.value); setPhaseId(''); }}>
+            <select aria-label="Dự án đích" className={field} value={projectId} onChange={e => { const v = e.target.value; guardSwitch(() => { setProjectId(v); setPhaseId(''); setPhases([]); applyForm(blankForm()); clearWork(); }); }}>
               <option value="">Chọn dự án…</option>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </label>
           <label className="text-sm">Phase
-            <select aria-label="Phase đích" className={field} value={phaseId} onChange={e => setPhaseId(e.target.value)} disabled={!phases.length}>
+            <select aria-label="Phase đích" className={field} value={phaseId} onChange={e => { const v = e.target.value; guardSwitch(() => { setPhaseId(v); clearWork(); }); }} disabled={!phases.length}>
               <option value="">Chọn phase…</option>
               {phases.map((p: any) => <option key={p.id} value={p.id}>{p.name} ({PHASE_KIND_LABELS[p.kind as keyof typeof PHASE_KIND_LABELS]})</option>)}
             </select>
@@ -174,7 +213,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
               {Object.entries(PRICE_FORMAT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </label>
-          <label className="text-sm">Số lượng cần đề xuất
+          <label className="text-sm">Số lượng mục tiêu của brief (chỉ đối chiếu, không giới hạn kết quả)
             <input className={field} type="number" min={1} max={100} value={soLuong} onChange={e => setSoLuong(Number(e.target.value) || 10)} />
           </label>
         </div>
@@ -185,7 +224,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       {results && (
         <section className="bg-white border rounded-2xl p-5 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-semibold">3. Kết quả đề xuất — {results.length.toLocaleString('vi-VN')} KOL, đã chọn {selectedIds.length}</h2>
+            <h2 className="font-semibold">3. Kết quả đề xuất — {results.length.toLocaleString('vi-VN')} KOL phù hợp · đã chọn {selectedIds.length} <span className="font-normal text-slate-500 text-sm">(mục tiêu brief: {soLuong} KOL — chỉ để đối chiếu tiến độ lựa chọn)</span></h2>
             <button type="button" className={button} disabled={busy || !phase || !selectedIds.length} onClick={() => run(async () => {
               const r = await request(`/projects/${projectId}/shortlist/add`, { ids: selectedIds, phaseId: phase?.id });
               const existingText = (r.existing ?? []).map((x: any) => {
@@ -196,9 +235,21 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
               setSelectedIds([]);
             })}>Thêm {selectedIds.length} KOL đã chọn vào phase</button>
           </div>
-          {results.length > shown.length && <p className="text-xs text-slate-500">Chỉ hiển thị {shown.length} KOL điểm cao nhất. Muốn xem thêm, thu hẹp tiêu chí ở mục 2.</p>}
+          {selectedKols.length > 0 && (
+            <div className="text-sm">
+              <p className="text-slate-600 mb-1">Đã chọn {selectedKols.length} KOL — lựa chọn được giữ nguyên khi chuyển trang:</p>
+              <div className="flex flex-wrap gap-1">
+                {selectedKols.map(r => (
+                  <span key={r.kol.id} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2 py-0.5 text-xs font-medium">
+                    {r.kol.ten}
+                    <button type="button" aria-label={'Bỏ chọn ' + r.kol.ten} className="font-bold px-0.5" onClick={() => toggle(r.kol.id)}>×</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="divide-y">
-            {shown.map((rec) => {
+            {(paged?.pageItems ?? []).map((rec) => {
               const kol = rec.kol;
               const maxFol = Math.max(0, ...(kol.nenTang ?? []).map((c: any) => c.soFollower ?? 0));
               const price = kol.bangGia?.[formatKey];
@@ -219,6 +270,19 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
             })}
             {results.length === 0 && <p className="py-3 text-sm text-slate-500">Không có KOL nào đạt tiêu chí. Nới lỏng lĩnh vực/follower/ngân sách rồi tìm lại.</p>}
           </div>
+          {paged && paged.totalItems > 0 && (
+            <div className="flex flex-wrap items-center gap-2 text-sm pt-1">
+              <span className="text-slate-500">Hiển thị {paged.startIndex + 1}–{paged.endIndex} / {paged.totalItems.toLocaleString('vi-VN')} KOL</span>
+              <label className="flex items-center gap-1">Mỗi trang
+                <select aria-label="Số KOL mỗi trang" className="rounded border border-slate-300 px-2 py-1 bg-white" value={resultsPageSize} onChange={e => { setResultsPageSize(Number(e.target.value)); setResultsPage(1); }}>
+                  {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </label>
+              <button type="button" className="border rounded-lg px-3 py-1 disabled:opacity-50" disabled={!paged.hasPrev} onClick={() => setResultsPage(paged.page - 1)}>Trang trước</button>
+              <span>Trang {paged.page}/{paged.totalPages}</span>
+              <button type="button" className="border rounded-lg px-3 py-1 disabled:opacity-50" disabled={!paged.hasNext} onClick={() => setResultsPage(paged.page + 1)}>Trang sau</button>
+            </div>
+          )}
         </section>
       )}
     </div>

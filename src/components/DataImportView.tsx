@@ -30,7 +30,8 @@ import {
 } from 'lucide-react';
 import { KolProfile, PriceFormatKey, PRICE_FORMAT_LABELS, ImportHistoryEntry } from '../types/kol';
 import { formatVND } from '../utils/formatters';
-import { StorageService } from '../services/storageService';
+import { StorageService, applyImportBatchToList } from '../services/storageService';
+import { CatalogService } from '../services/catalogService';
 
 export interface ConflictItem {
   id: string;
@@ -1570,10 +1571,26 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     });
   };
 
-  // Thực thi Import trực tiếp khi KHÔNG có xung đột nào
-  const executeDirectImport = (validSelected: typeof parsedPreviewRows) => {
+  // Thực thi Import trực tiếp khi KHÔNG có xung đột nào — tính gộp trên danh sách hiện tại
+  // rồi ghi các hồ sơ thay đổi lên kho server
+  const executeDirectImport = async (validSelected: typeof parsedPreviewRows) => {
     const payload = validSelected.map((r) => r.kolData!);
-    const result = StorageService.importBatchKols(payload, matchKey, overwriteEmpty);
+    let result: { created: number; updated: number };
+    try {
+      const merged = applyImportBatchToList(kols, payload, matchKey, overwriteEmpty);
+      if (merged.changed.length) {
+        const res = await CatalogService.bulkUpdateProfiles(merged.changed);
+        result = { created: res.added.length, updated: res.updated.length };
+        if (res.conflicts.length) {
+          showToast(`Có ${res.conflicts.length} hồ sơ xung đột phiên bản trên server — hãy tải lại dữ liệu và import lại các hồ sơ đó.`);
+        }
+      } else {
+        result = { created: 0, updated: 0 };
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Không import được lên kho server.');
+      return;
+    }
 
     // Lọc danh sách dòng lỗi từ parsedPreviewRows
     const errorRows = parsedPreviewRows.filter((r) => r.status === 'error');
@@ -1671,7 +1688,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
   };
 
   // Áp dụng lựa chọn khi bấm "Xác nhận import" trong bảng xác minh (Yêu cầu 3 & Phần C)
-  const handleConfirmVerification = () => {
+  const handleConfirmVerification = async () => {
     const validSelected = parsedPreviewRows.filter(
       (r) => selectedRowIndices.includes(r.index) && r.status !== 'error' && r.kolData
     );
@@ -1748,24 +1765,34 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
 
     const remainingPayload = remainingSelected.map((r) => r.kolData!);
 
-    // 3. Thực thi import:
-    // Các dòng cập nhật đã qua xác minh: gọi StorageService.importBatchKols với overwriteEmpty = false
-    const verifiedUpdateResult =
-      verifiedUpdatePayload.length > 0
-        ? StorageService.importBatchKols(verifiedUpdatePayload, matchKey, false)
-        : { created: 0, updated: 0 };
-
-    // Các dòng tạo mới từ khớp mờ: gọi importBatchKols với forceCreate = true
-    const verifiedCreateResult =
-      verifiedCreatePayload.length > 0
-        ? StorageService.importBatchKols(verifiedCreatePayload, matchKey, false)
-        : { created: 0, updated: 0 };
-
-    // Các dòng còn lại: gọi riêng với overwriteEmpty như hiện tại
-    const remainingResult =
-      remainingPayload.length > 0
-        ? StorageService.importBatchKols(remainingPayload, matchKey, overwriteEmpty)
-        : { created: 0, updated: 0 };
+    // 3. Thực thi import lên kho server: chạy cùng thuật toán gộp theo từng nhóm trên danh sách
+    // đang tiến triển (nhóm sau thấy kết quả của nhóm trước như trước đây), rồi ghi một lần lên server.
+    let evolving = kols;
+    const changedById = new Map<string, KolProfile>();
+    const runGroup = (payload: any[], ow: boolean) => {
+      if (!payload.length) return { created: 0, updated: 0 };
+      const r = applyImportBatchToList(evolving, payload, matchKey, ow);
+      evolving = r.kols;
+      r.changed.forEach((prof) => changedById.set(prof.id, prof));
+      return r;
+    };
+    let verifiedUpdateResult = { created: 0, updated: 0 };
+    let verifiedCreateResult = { created: 0, updated: 0 };
+    let remainingResult = { created: 0, updated: 0 };
+    try {
+      verifiedUpdateResult = runGroup(verifiedUpdatePayload, false);
+      verifiedCreateResult = runGroup(verifiedCreatePayload, false);
+      remainingResult = runGroup(remainingPayload, overwriteEmpty);
+      if (changedById.size) {
+        const res = await CatalogService.bulkUpdateProfiles([...changedById.values()]);
+        if (res.conflicts.length) {
+          showToast(`Có ${res.conflicts.length} hồ sơ xung đột phiên bản trên server — hãy tải lại dữ liệu và import lại các hồ sơ đó.`);
+        }
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Không import được lên kho server.');
+      return;
+    }
 
     const totalCreated = verifiedUpdateResult.created + verifiedCreateResult.created + remainingResult.created;
     const totalUpdated = verifiedUpdateResult.updated + verifiedCreateResult.updated + remainingResult.updated;

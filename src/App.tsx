@@ -17,13 +17,18 @@ import { DataImportView } from './components/DataImportView';
 import { DataBackupModal } from './components/DataBackupModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { StorageService } from './services/storageService';
+import { CatalogService, readLegacyLocalKols } from './services/catalogService';
+import { CatalogMigrationModal } from './components/CatalogMigrationModal';
 import { CollaborationHistory, KolProfile, RatingReview, SowQuote, PRICE_FORMAT_LABELS, RecommendedKolSowItem, SowLineItem } from './types/kol';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
 
   // Core Data State
-  const [kols, setKols] = useState<KolProfile[]>(() => StorageService.getKols());
+  // Kho KOL chính thức nằm trên server (Vấn đề 7); localStorage chỉ còn giữ báo giá SOW lẻ và thẻ tùy chỉnh.
+  const [kols, setKols] = useState<KolProfile[]>([]);
+  const [kolsLoading, setKolsLoading] = useState(true);
+  const [kolsError, setKolsError] = useState('');
   const [quotes, setQuotes] = useState<SowQuote[]>(() => StorageService.getQuotes());
   const [customTags, setCustomTags] = useState<string[]>(() => StorageService.getCustomTags());
 
@@ -40,21 +45,33 @@ export default function App() {
   const [preselectedKolForSow, setPreselectedKolForSow] = useState<KolProfile | null>(null);
   const [openQuoteId, setOpenQuoteId] = useState<string | null>(null);
 
-  // Reload data from storage
+  // Reload data: KOL từ kho server, báo giá SOW lẻ và thẻ tùy chỉnh từ trình duyệt
   const reloadData = useCallback(() => {
-    const freshKols = StorageService.getKols();
     const freshQuotes = StorageService.getQuotes();
     const freshTags = StorageService.getCustomTags();
-    setKols(freshKols);
     setQuotes(freshQuotes);
     setCustomTags(freshTags);
-
-    // Refresh detail modal if open
-    if (selectedKolForDetail) {
-      const updated = freshKols.find((k) => k.id === selectedKolForDetail.id);
-      setSelectedKolForDetail(updated || null);
-    }
+    CatalogService.list()
+      .then((freshKols) => {
+        setKols(freshKols);
+        setKolsError('');
+        // Refresh detail modal if open
+        if (selectedKolForDetail) {
+          const updated = freshKols.find((k) => k.id === selectedKolForDetail.id);
+          setSelectedKolForDetail(updated || null);
+        }
+      })
+      .catch((e) => setKolsError(e instanceof Error ? e.message : 'Không tải được kho KOL từ server.'));
   }, [selectedKolForDetail]);
+
+  // Tải kho KOL lần đầu từ server
+  useEffect(() => {
+    let active = true;
+    CatalogService.list()
+      .then((list) => { if (active) { setKols(list); setKolsLoading(false); } })
+      .catch((e) => { if (active) { setKolsError(e instanceof Error ? e.message : 'Không tải được kho KOL từ server.'); setKolsLoading(false); } });
+    return () => { active = false; };
+  }, []);
 
   // Listen to Storage update events across components
   useEffect(() => {
@@ -68,10 +85,7 @@ export default function App() {
     };
   }, [reloadData]);
 
-  // Tự động gộp hồ sơ trùng tên một lần duy nhất khi app khởi động
-  useEffect(() => {
-    StorageService.mergeDuplicateKols();
-  }, []);
+  // Không còn tự gộp hồ sơ trùng tên: kho server không gộp KOL chỉ vì tên gần giống nhau.
 
   // Open Form for Adding New KOL
   const handleOpenAddKol = () => {
@@ -88,16 +102,21 @@ export default function App() {
     }
   };
 
-  // Save KOL (Add or Update)
-  const handleSaveKol = (savedKol: KolProfile, saveAndAddNew?: boolean) => {
-    const result = StorageService.saveKol(savedKol);
-    reloadData();
+  // Save KOL (Add or Update) — ghi thẳng lên kho server, có kiểm tra revision chống ghi đè
+  const handleSaveKol = async (savedKol: KolProfile, saveAndAddNew?: boolean) => {
+    try {
+      const exists = kols.some((k) => k.id === savedKol.id);
+      const result = exists ? await CatalogService.update(savedKol) : await CatalogService.create(savedKol);
+      reloadData();
 
-    if (!saveAndAddNew) {
-      setIsFormModalOpen(false);
-      setKolToEdit(null);
-      // Automatically show the detail modal for the saved profile
-      setSelectedKolForDetail(result);
+      if (!saveAndAddNew) {
+        setIsFormModalOpen(false);
+        setKolToEdit(null);
+        // Automatically show the detail modal for the saved profile
+        setSelectedKolForDetail(result);
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Không lưu được hồ sơ KOL lên kho server.');
     }
   };
 
@@ -107,30 +126,65 @@ export default function App() {
     setIsDeleteModalOpen(true);
   };
 
-  // Confirm Delete KOL
-  const handleConfirmDeleteKol = (kol: KolProfile) => {
-    StorageService.deleteKol(kol.id);
-    if (selectedKolForDetail?.id === kol.id) {
-      setSelectedKolForDetail(null);
+  // Confirm Delete KOL — xoá trên kho server
+  const handleConfirmDeleteKol = async (kol: KolProfile) => {
+    try {
+      await CatalogService.remove(kol.id);
+      if (selectedKolForDetail?.id === kol.id) {
+        setSelectedKolForDetail(null);
+      }
+      reloadData();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Không xoá được hồ sơ KOL trên kho server.');
+    }
+  };
+
+  // Delete multiple KOLs on the server catalog
+  const handleDeleteMultipleKols = async (ids: string[]): Promise<number> => {
+    let ok = 0;
+    for (const id of ids) {
+      try { await CatalogService.remove(id); ok++; } catch { /* hồ sơ lỗi được bỏ qua và báo theo tổng số thành công */ }
     }
     reloadData();
+    return ok;
   };
 
-  // Add Collaboration History entry to KOL
-  const handleAddCollaboration = (kolId: string, item: Omit<CollaborationHistory, 'id'>) => {
-    const updated = StorageService.addCollaboration(kolId, item);
-    if (updated) {
+  // Bulk price update on the server catalog (giữ nguyên toàn bộ hồ sơ, chỉ thay bảng giá)
+  const handleBulkUpdatePrices = async (updates: Array<{ kolId: string; bangGia: KolProfile['bangGia'] }>) => {
+    const profiles = updates
+      .map((u) => { const kol = kols.find((k) => k.id === u.kolId); return kol ? { ...kol, bangGia: u.bangGia } : null; })
+      .filter((x): x is KolProfile => Boolean(x));
+    const r = await CatalogService.bulkUpdateProfiles(profiles);
+    reloadData();
+    return r;
+  };
+
+  // Add Collaboration History entry to KOL — ghi lên kho server
+  const handleAddCollaboration = async (kolId: string, item: Omit<CollaborationHistory, 'id'>) => {
+    const kol = kols.find((k) => k.id === kolId);
+    if (!kol) return;
+    try {
+      const updated = await CatalogService.update({
+        ...kol,
+        lichSuHopTac: [...(kol.lichSuHopTac ?? []), { ...item, id: `collab-${Date.now()}-${Math.random().toString(36).substring(2, 7)}` }],
+      });
       reloadData();
       setSelectedKolForDetail(updated);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Không lưu được lịch sử hợp tác lên kho server.');
     }
   };
 
-  // Update Rating & Feedback for KOL
-  const handleUpdateRating = (kolId: string, rating: RatingReview) => {
-    const updated = StorageService.updateRating(kolId, rating);
-    if (updated) {
+  // Update Rating & Feedback for KOL — ghi lên kho server
+  const handleUpdateRating = async (kolId: string, rating: RatingReview) => {
+    const kol = kols.find((k) => k.id === kolId);
+    if (!kol) return;
+    try {
+      const updated = await CatalogService.update({ ...kol, danhGiaHieuQua: rating });
       reloadData();
       setSelectedKolForDetail(updated);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Không lưu được đánh giá lên kho server.');
     }
   };
 
@@ -140,11 +194,17 @@ export default function App() {
     setCustomTags(updated);
   };
 
-  // Delete all sample data
-  const handleDeleteSampleData = () => {
-    if (confirm('Bạn có chắc chắn muốn xóa toàn bộ các hồ sơ KOL mẫu?')) {
-      StorageService.deleteSampleKols();
-      reloadData();
+  // Delete all sample data — xoá các hồ sơ gắn cờ mẫu trên kho server
+  const handleDeleteSampleData = async () => {
+    const samples = kols.filter((k) => k.isSample);
+    if (!samples.length) return;
+    if (confirm('Bạn có chắc chắn muốn xóa toàn bộ các hồ sơ KOL mẫu khỏi kho server?')) {
+      try {
+        for (const sample of samples) await CatalogService.remove(sample.id);
+        reloadData();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Không xoá được hồ sơ mẫu trên kho server.');
+      }
     }
   };
 
@@ -219,6 +279,10 @@ export default function App() {
 
   const sampleCount = kols.filter((k) => k.isSample).length;
 
+  // Dữ liệu KOL cũ còn trên trình duyệt này (chỉ đọc để nhập chuyển đổi, không tự xoá)
+  const [legacyLocalKols] = useState<KolProfile[] | null>(() => readLegacyLocalKols());
+  const [migrationSource, setMigrationSource] = useState<{ profiles: KolProfile[]; label: string } | null>(null);
+
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-800 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
       {/* Navigation Header */}
@@ -233,6 +297,19 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+        {kolsLoading && <p className="py-4 text-slate-500">Đang tải kho KOL từ server…</p>}
+        {kolsError && (
+          <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-xl text-sm flex flex-wrap items-center gap-3">
+            <span>Không tải được kho KOL từ server. {kolsError}</span>
+            <button type="button" className="border rounded-lg px-3 py-1 bg-white" onClick={reloadData}>Thử lại</button>
+          </div>
+        )}
+        {legacyLocalKols && legacyLocalKols.length > 0 && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm flex flex-wrap items-center gap-3">
+            <span className="flex-1 min-w-64">Trình duyệt này còn lưu {legacyLocalKols.length.toLocaleString('vi-VN')} hồ sơ KOL cũ từ trước khi chuyển kho lên server. Kho chính thức hiện nằm trên server — hãy nhập chuyển đổi để đưa các hồ sơ này lên kho. Dữ liệu cũ trên trình duyệt vẫn được giữ nguyên để đối chiếu/khôi phục.</span>
+            <button type="button" className="rounded-lg bg-indigo-600 text-white px-3 py-1.5 font-semibold" onClick={() => setMigrationSource({ profiles: legacyLocalKols, label: 'Dữ liệu KOL cũ lưu trên trình duyệt này' })}>Nhập chuyển đổi lên kho server</button>
+          </div>
+        )}
         {activeTab === 'dashboard' && (
           <Dashboard
             kols={kols}
@@ -250,6 +327,7 @@ export default function App() {
             onSelectKol={(kol) => setSelectedKolForDetail(kol)}
             onEditKol={handleOpenEditKol}
             onDeleteKol={handleRequestDeleteKol}
+            onDeleteMultiple={handleDeleteMultipleKols}
             onOpenAddKol={handleOpenAddKol}
             onAddToSow={handleAddKolToSow}
             initialSearch={listSearchKeyword}
@@ -260,6 +338,7 @@ export default function App() {
           <BulkPriceUpdate
             kols={kols}
             onDataSaved={reloadData}
+            onBulkUpdatePrices={handleBulkUpdatePrices}
           />
         )}
 
@@ -358,10 +437,20 @@ export default function App() {
         onConfirmDelete={handleConfirmDeleteKol}
       />
 
+      {/* Nhập chuyển đổi KOL lên kho server */}
+      <CatalogMigrationModal
+        isOpen={!!migrationSource}
+        onClose={() => setMigrationSource(null)}
+        sourceProfiles={migrationSource?.profiles ?? null}
+        sourceLabel={migrationSource?.label ?? ''}
+        onApplied={reloadData}
+      />
+
       {/* Backup & Data Management Modal */}
       <DataBackupModal
         isOpen={isBackupModalOpen}
         onClose={() => setIsBackupModalOpen(false)}
+        onMigrateKols={(profiles, label) => setMigrationSource({ profiles, label })}
         kolCount={kols.length}
         quoteCount={quotes.length}
         sampleCount={sampleCount}

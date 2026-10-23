@@ -24,7 +24,7 @@ import {
 import { KolProfile, PriceFormatKey, PRICE_FORMAT_LABELS } from '../types/kol';
 import { formatVND } from '../utils/formatters';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
-import { StorageService } from '../services/storageService';
+import { CatalogService } from '../services/catalogService';
 
 interface AiPriceExtractorProps {
   kols: KolProfile[];
@@ -375,8 +375,8 @@ export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onData
     setExtractedList((prev) => prev.map((item) => ({ ...item, selected: checked })));
   };
 
-  // Áp dụng các mục đã chọn vào hồ sơ KOL
-  const handleApplySelected = () => {
+  // Áp dụng các mục đã chọn vào hồ sơ KOL — ghi lên kho server
+  const handleApplySelected = async () => {
     const selectedItems = extractedList.filter((item) => item.selected);
     if (selectedItems.length === 0) {
       showToast('Vui lòng tick chọn ít nhất 1 mục để áp dụng!');
@@ -386,14 +386,25 @@ export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onData
     let updatedCount = 0;
     let createdCount = 0;
 
-    // 1. Cập nhật các mục đã có trong danh bạ (giữ nguyên)
+    // 1. Cập nhật giá các mục đã có trong kho server (giữ nguyên phần còn lại của hồ sơ)
+    const profilesToUpdate = new Map<string, KolProfile>();
     selectedItems.forEach((item) => {
       if (!item.format) return;
       if (item.action === 'update' && item.matchedKolId) {
-        const res = StorageService.updateKolPriceFormat(item.matchedKolId, item.format, item.giaMoiVND);
-        if (res) updatedCount++;
+        const base = profilesToUpdate.get(item.matchedKolId) ?? kols.find((k) => k.id === item.matchedKolId);
+        if (base) profilesToUpdate.set(item.matchedKolId, { ...base, bangGia: { ...base.bangGia, [item.format]: item.giaMoiVND } });
       }
     });
+    try {
+      if (profilesToUpdate.size) {
+        const r = await CatalogService.bulkUpdateProfiles([...profilesToUpdate.values()]);
+        updatedCount = r.updated.length + r.added.length;
+        if (r.conflicts.length) showToast(`${r.conflicts.length} hồ sơ bị xung đột phiên bản — hãy tải lại dữ liệu rồi áp dụng lại.`);
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Không cập nhật được giá lên kho server.');
+      return;
+    }
 
     // 2. GỘP các mục create_new theo tên KOL chuẩn hóa trước khi tạo hồ sơ mới
     const normalizeName = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
@@ -409,7 +420,7 @@ export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onData
     });
 
     // Mỗi tên chuẩn hóa chỉ tạo ĐÚNG 1 hồ sơ mới, hợp nhất giá từ tất cả các mục
-    createGroups.forEach((items) => {
+    for (const items of createGroups.values()) {
       const displayName = items[0].tenKOL_AI.trim();
       const mergedBangGia: Record<PriceFormatKey, number | null> = {
         post: null,
@@ -446,9 +457,11 @@ export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onData
         ngayCapNhat: new Date().toISOString(),
       };
 
-      StorageService.saveKol(newKol);
-      createdCount++;
-    });
+      try {
+        await CatalogService.create(newKol);
+        createdCount++;
+      } catch { /* hồ sơ lỗi được bỏ qua; tổng kết hiển thị số tạo thành công */ }
+    }
 
     onDataSaved();
     showToast(`Đã áp dụng thành công: Cập nhật ${updatedCount} mục, tạo mới ${createdCount} KOL!`);

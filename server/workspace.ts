@@ -21,13 +21,47 @@ const verifyPassword = (password: string, stored: string) => {
 };
 const safeUser = (u: any) => ({ id: u.id, email: u.email, name: u.display_name, role: u.organization_role, active: Boolean(u.active), mustChangePassword: Boolean(u.must_change_password) });
 
+/**
+ * Loại bỏ dứt điểm vai trò "Admin dự án" (trong dự án chỉ còn PM và Booking):
+ * - Người có cả Admin dự án lẫn PM: xoá dòng Admin, giữ một PM duy nhất (tránh trùng khoá chính).
+ * - Người chỉ có Admin dự án: chuyển thành PM. Thành viên, phân công và quyền khác giữ nguyên.
+ * - Thu hẹp CHECK của database xuống ('pm','booking') để không tạo lại được Admin dự án ở tầng dữ liệu.
+ * Chạy trong một transaction; an toàn khi chạy lại (bảng đã thu hẹp thì bỏ qua).
+ */
+export function migrateProjectRoles(db: DatabaseSync) {
+  const rolesTableSql = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='project_member_roles'").get() as any)?.sql ?? '';
+  if (!rolesTableSql.includes("'admin'")) return;
+  db.exec('PRAGMA foreign_keys = OFF;');
+  try {
+    db.exec('BEGIN;');
+    db.exec("DELETE FROM project_member_roles WHERE role='admin' AND EXISTS (SELECT 1 FROM project_member_roles x WHERE x.project_id=project_member_roles.project_id AND x.user_id=project_member_roles.user_id AND x.role='pm');");
+    db.exec("UPDATE project_member_roles SET role='pm' WHERE role='admin';");
+    db.exec(`CREATE TABLE project_member_roles_new (
+      project_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('pm','booking')),
+      PRIMARY KEY(project_id, user_id, role),
+      FOREIGN KEY(project_id, user_id) REFERENCES project_members(project_id, user_id) ON DELETE CASCADE
+    );`);
+    db.exec('INSERT INTO project_member_roles_new SELECT project_id, user_id, role FROM project_member_roles;');
+    db.exec('DROP TABLE project_member_roles;');
+    db.exec('ALTER TABLE project_member_roles_new RENAME TO project_member_roles;');
+    db.exec('COMMIT;');
+  } catch (e) {
+    try { db.exec('ROLLBACK;'); } catch { /* transaction đã kết thúc */ }
+    throw e;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON;');
+  }
+}
+
 export function createWorkspace(directory: string, options: { memory?: boolean; setupCode?: string } = {}) {
   if (!options.memory) mkdirSync(directory, { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(options.memory ? ':memory:' : path.join(directory, 'workspace.sqlite'));
   db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
   // Schema dự án dùng chung với đặc tả; users chỉ chứa hash mật khẩu.
   db.exec(readFileSync(new URL('../database/migrations/001_project_access.sql', import.meta.url), 'utf8').replace(/CREATE TABLE /g, 'CREATE TABLE IF NOT EXISTS ').replace('CREATE INDEX ', 'CREATE INDEX IF NOT EXISTS '));
-  db.exec("UPDATE project_member_roles SET role='pm' WHERE role='admin';");
+  migrateProjectRoles(db);
   if (!(db.prepare('PRAGMA table_info(users)').all() as any[]).some(c => c.name === 'must_change_password')) db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
   db.exec(`CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, actor_id TEXT, action TEXT NOT NULL, target_id TEXT, created_at TEXT NOT NULL);`);
