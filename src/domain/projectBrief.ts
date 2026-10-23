@@ -1,13 +1,35 @@
 import {PRICE_FORMAT_LABELS, type PriceFormatKey} from '../types/kol';
 export type BriefDeliverable={format:PriceFormatKey;quantity:number};
+/** Loại đối tác brief hướng tới; null = brief chưa nói rõ — để chưa xác định, yêu cầu người dùng duyệt. */
+export type BriefPartnerType='kol'|'community'|'both';
+/** Pillar nội dung kèm tỷ lệ % (tổng các pillar không vượt 100). */
+export type BriefPillar={name:string;percent:number};
+/** Đầu việc/dịch vụ nói chung (đặc biệt cho Community/comment): không ép vào 6 format Creator. */
+export type BriefService={name:string;unit:string;quantity:number;scope:'phase'|'per_partner'};
 export interface ProjectBrief {
   text:string;category:string;keyword:string;platform:string;minFollowers:number;
   targetCount:number|null;budget:number|null;deliverableScope:'campaign'|'per_kol';deliverables:BriefDeliverable[];
+  partnerType:BriefPartnerType|null;
+  /** KPI mục tiêu (KHÔNG phải kết quả thực tế, KHÔNG tự thành dòng chi phí):
+   *  topics = tổng số bài viết; comments = tổng số bình luận; buzz = like + share + comment
+   *  (comments đã nằm trong buzz — không cộng thêm; số bài không cộng vào buzz). */
+  kpiTopics:number|null;kpiComments:number|null;kpiBuzz:number|null;
+  pillars:BriefPillar[];
+  services:BriefService[];
 }
-export const emptyProjectBrief:ProjectBrief={text:'',category:'',keyword:'',platform:'',minFollowers:0,targetCount:null,budget:null,deliverableScope:'campaign',deliverables:[]};
+export const emptyProjectBrief:ProjectBrief={text:'',category:'',keyword:'',platform:'',minFollowers:0,targetCount:null,budget:null,deliverableScope:'campaign',deliverables:[],partnerType:null,kpiTopics:null,kpiComments:null,kpiBuzz:null,pillars:[],services:[]};
 // Chỉ đọc các trường đang sử dụng. Tiêu chí ER trong bản lưu cũ bị bỏ qua.
+const briefCount=(v:any)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=1&&v<=100_000_000?v:null;
 export function readProjectBrief(raw:any):ProjectBrief {
-  return {...Object.fromEntries(Object.keys(emptyProjectBrief).map(k=>[k,raw?.[k]??emptyProjectBrief[k as keyof ProjectBrief]]))} as unknown as ProjectBrief;
+  const base={...Object.fromEntries(Object.keys(emptyProjectBrief).map(k=>[k,raw?.[k]??emptyProjectBrief[k as keyof ProjectBrief]]))} as unknown as ProjectBrief;
+  // Chuẩn hoá an toàn các trường mở rộng (Community/KPI): giá trị bẩn bị bỏ, không bịa thêm.
+  base.partnerType=(['kol','community','both'] as const).includes(raw?.partnerType)?raw.partnerType:null;
+  base.kpiTopics=briefCount(raw?.kpiTopics);
+  base.kpiComments=briefCount(raw?.kpiComments);
+  base.kpiBuzz=briefCount(raw?.kpiBuzz);
+  base.pillars=Array.isArray(raw?.pillars)?raw.pillars.filter((p:any)=>p&&typeof p.name==='string'&&p.name.trim()&&typeof p.percent==='number'&&p.percent>0&&p.percent<=100).slice(0,10).map((p:any)=>({name:p.name.trim().slice(0,100),percent:p.percent})):[];
+  base.services=Array.isArray(raw?.services)?raw.services.filter((s:any)=>s&&typeof s.name==='string'&&s.name.trim()&&typeof s.quantity==='number'&&Number.isSafeInteger(s.quantity)&&s.quantity>=1&&s.quantity<=1_000_000).slice(0,10).map((s:any)=>({name:s.name.trim().slice(0,200),unit:typeof s.unit==='string'&&s.unit.trim()?s.unit.trim().slice(0,50):'bài',quantity:s.quantity,scope:s.scope==='per_partner'?'per_partner':'phase'})):[];
+  return base;
 }
 const fold=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/đ/g,'d').trim();
 export function assessProjectKol(p:any,brief:ProjectBrief){

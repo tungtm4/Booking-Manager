@@ -28,6 +28,14 @@ export interface PhaseDraft {
   platform: string;
   deliverableScope: 'per_kol' | 'campaign';
   deliverables: PhaseDeliverableDraft[];
+  /** Mở rộng Community/seeding: loại đối tác + KPI mục tiêu + pillar + dịch vụ.
+   *  KPI là mục tiêu, không phải chi phí; brief không nói rõ thì để null/rỗng. */
+  partnerType: 'kol' | 'community' | 'both' | null;
+  kpiTopics: number | null;
+  kpiComments: number | null;
+  kpiBuzz: number | null;
+  pillars: { name: string; percent: number }[];
+  services: { name: string; unit: string; quantity: number; scope: 'phase' | 'per_partner' }[];
 }
 
 const VALID_FORMATS = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
@@ -63,6 +71,26 @@ export function normalizePhaseDraft(raw: any): PhaseDraft | null {
       if (deliverables.length >= 6) break;
     }
   }
+  const kpiCount = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isSafeInteger(v) && v >= 1 && v <= 100_000_000 ? v : null;
+  const pillars: PhaseDraft['pillars'] = [];
+  if (Array.isArray(raw.pillars)) {
+    for (const p of raw.pillars) {
+      const nm = cleanText(p?.name, 100);
+      const pc = typeof p?.percent === 'number' && p.percent > 0 && p.percent <= 100 ? p.percent : null;
+      if (nm && pc !== null) pillars.push({ name: nm, percent: pc });
+      if (pillars.length >= 10) break;
+    }
+  }
+  const services: PhaseDraft['services'] = [];
+  if (Array.isArray(raw.services)) {
+    for (const s of raw.services) {
+      const nm = cleanText(s?.name, 200);
+      const q = typeof s?.quantity === 'number' && Number.isSafeInteger(s.quantity) && s.quantity >= 1 && s.quantity <= 1_000_000 ? s.quantity : null;
+      if (nm && q !== null) services.push({ name: nm, unit: cleanText(s?.unit, 50) || 'bài', quantity: q, scope: s?.scope === 'per_partner' ? 'per_partner' : 'phase' });
+      if (services.length >= 10) break;
+    }
+  }
   return {
     name,
     kind,
@@ -73,6 +101,12 @@ export function normalizePhaseDraft(raw: any): PhaseDraft | null {
     platform: cleanText(raw.platform, 50),
     deliverableScope: raw.deliverableScope === 'campaign' ? 'campaign' : 'per_kol',
     deliverables,
+    partnerType: (['kol', 'community', 'both'] as const).includes(raw.partnerType) ? raw.partnerType : null,
+    kpiTopics: kpiCount(raw.kpiTopics),
+    kpiComments: kpiCount(raw.kpiComments),
+    kpiBuzz: kpiCount(raw.kpiBuzz),
+    pillars,
+    services,
   };
 }
 

@@ -281,7 +281,11 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
 7. Lĩnh vực (linhVuc): Tên lĩnh vực chính của brief (ví dụ: "Ẩm thực", "Làm đẹp", "Công nghệ", "Thời trang", "Du lịch", "Mẹ & bé", "Giải trí", "Tài chính", "Sức khỏe & Gym", "Giáo dục", "Lifestyle", "Gaming"), hoặc null.
 8. Số lượng KOL (soLuongKol): Số nguyên (ví dụ: 3, 5, 10), hoặc null.
 9. Bỏ qua yêu cầu ER / tỷ lệ tương tác nếu brief có nhắc; không dùng làm tiêu chí đề xuất.
-10. Follower tối thiểu (followerToiThieu): Số người theo dõi tối thiểu dạng số nguyên (ví dụ 100000), hoặc null.`;
+10. Follower tối thiểu (followerToiThieu): Số người theo dõi tối thiểu dạng số nguyên (ví dụ 100000), hoặc null.
+11. LOẠI ĐỐI TÁC (doiTac): 'kol' nếu brief nói về creator/KOL/KOC cá nhân; 'community' nếu fanpage/group/cộng đồng đăng bài; 'both' nếu cả hai; null nếu brief không nói rõ — KHÔNG đoán.
+12. KPI MỤC TIÊU (chỉ khi brief nêu số rõ ràng, để null nếu không có): kpiTopics = TỔNG số bài viết (topics) toàn chiến dịch; kpiComments = TỔNG số bình luận; kpiBuzz = chỉ số buzz mục tiêu. Buzz = like + share + comment — comments ĐÃ nằm trong buzz: KHÔNG cộng số comments vào buzz, KHÔNG cộng số bài viết (topics) vào buzz. KPI là mục tiêu cần đạt, KHÔNG phải hạng mục tính tiền — không đưa KPI vào hangMucMoiKol/hangMucTongCampaign.
+13. PILLAR NỘI DUNG (pillars): mảng { name, percent } khi brief nêu tỷ lệ pillar (ví dụ lifestyle 40%, product review 60% thì hai phần tử 40 và 60; tổng không vượt 100). Không có thì mảng rỗng.
+14. DỊCH VỤ (dichVu): đầu việc/dịch vụ KHÔNG thuộc 6 format creator (đăng bài trên community, thuê ngoài comment, gói seeding…): mảng { ten, donVi, soLuong, phamVi } với phamVi = 'phase' (tổng toàn phase) hoặc 'per_partner' (mỗi đối tác). Chỉ ghi khi brief nêu rõ tên việc và số lượng; không suy diễn từ KPI.`;
 
     const prompt = `HÃY PHÂN TÍCH BRIEF CHIẾN DỊCH SAU ĐÂY:\n"""\n${moTa.trim()}\n"""\n\nTrả về kết quả dưới định dạng JSON đúng schema.`;
 
@@ -362,6 +366,48 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
                 required: ['format', 'soLuong'],
               },
             },
+            doiTac: {
+              type: Type.STRING,
+              description: 'kol | community | both — hoặc null nếu brief không nói rõ loại đối tác',
+            },
+            kpiTopics: {
+              type: Type.NUMBER,
+              description: 'KPI mục tiêu: TỔNG số bài viết (topics) — hoặc null',
+            },
+            kpiComments: {
+              type: Type.NUMBER,
+              description: 'KPI mục tiêu: TỔNG số bình luận (đã nằm trong buzz) — hoặc null',
+            },
+            kpiBuzz: {
+              type: Type.NUMBER,
+              description: 'KPI mục tiêu buzz = like + share + comment (không cộng topics/comments vào) — hoặc null',
+            },
+            pillars: {
+              type: Type.ARRAY,
+              description: 'Pillar nội dung và tỷ lệ phần trăm nếu brief có nêu',
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  percent: { type: Type.NUMBER },
+                },
+                required: ['name', 'percent'],
+              },
+            },
+            dichVu: {
+              type: Type.ARRAY,
+              description: 'Đầu việc/dịch vụ ngoài 6 format creator (đăng bài community, comment thuê ngoài, gói…)',
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  ten: { type: Type.STRING },
+                  donVi: { type: Type.STRING, description: 'bài, comment, gói…' },
+                  soLuong: { type: Type.INTEGER },
+                  phamVi: { type: Type.STRING, description: "'phase' (tổng toàn phase) hoặc 'per_partner' (mỗi đối tác)" },
+                },
+                required: ['ten', 'soLuong'],
+              },
+            },
           },
         },
       },
@@ -401,6 +447,18 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
       followerToiThieu: parsedData.followerToiThieu && Number(parsedData.followerToiThieu) > 0 ? Number(parsedData.followerToiThieu) : null,
       hangMucMoiKol: sanitizeHangMuc(parsedData.hangMucMoiKol),
       hangMucTongCampaign: sanitizeHangMuc(parsedData.hangMucTongCampaign),
+      doiTac: ['kol', 'community', 'both'].includes(parsedData.doiTac) ? parsedData.doiTac : null,
+      kpiTopics: parsedData.kpiTopics && Number(parsedData.kpiTopics) > 0 ? Math.round(Number(parsedData.kpiTopics)) : null,
+      kpiComments: parsedData.kpiComments && Number(parsedData.kpiComments) > 0 ? Math.round(Number(parsedData.kpiComments)) : null,
+      kpiBuzz: parsedData.kpiBuzz && Number(parsedData.kpiBuzz) > 0 ? Math.round(Number(parsedData.kpiBuzz)) : null,
+      pillars: (Array.isArray(parsedData.pillars) ? parsedData.pillars : [])
+        .filter((p: any) => p && typeof p.name === 'string' && p.name.trim() && Number(p.percent) > 0 && Number(p.percent) <= 100)
+        .slice(0, 10)
+        .map((p: any) => ({ name: String(p.name).trim().slice(0, 100), percent: Number(p.percent) })),
+      services: (Array.isArray(parsedData.dichVu) ? parsedData.dichVu : [])
+        .filter((s: any) => s && typeof s.ten === 'string' && s.ten.trim() && Number(s.soLuong) > 0)
+        .slice(0, 10)
+        .map((s: any) => ({ name: String(s.ten).trim().slice(0, 200), unit: typeof s.donVi === 'string' && s.donVi.trim() ? String(s.donVi).trim().slice(0, 50) : 'bài', quantity: Math.round(Number(s.soLuong)), scope: s.phamVi === 'per_partner' ? 'per_partner' : 'phase' })),
     };
 
     // Các hạng mục nêu rõ theo tổng campaign phải được giữ đúng tổng.
@@ -470,7 +528,11 @@ QUY TẮC:
 5. deliverables: các hạng mục công việc thuộc phase, ánh xạ về đúng 6 format key chuẩn: 'post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'. deliverableScope = 'per_kol' nếu số lượng tính theo từng creator/community, 'campaign' nếu tính tổng cả phase.
 6. category: lĩnh vực chính của phase; platform: nền tảng chính (TikTok/YouTube/Facebook/Instagram/Threads) hoặc chuỗi rỗng nếu đa nền tảng/không rõ.
 7. description: mô tả ngắn yêu cầu riêng của phase theo brief (angle nội dung, tiêu chí chọn đối tác...), tối đa ~500 ký tự.
-8. Số phase hợp lý: 1-10. Không tách vụn một hạng mục thành nhiều phase nếu chúng cùng loại đối tác và cùng yêu cầu.`;
+8. Số phase hợp lý: 1-10. Không tách vụn một hạng mục thành nhiều phase nếu chúng cùng loại đối tác và cùng yêu cầu.
+9. partnerType: 'kol' (creator cá nhân), 'community' (fanpage/group), 'both', hoặc null nếu brief không rõ cho phase đó.
+10. KPI MỤC TIÊU của phase (kpiTopics/kpiComments/kpiBuzz): chỉ khi brief gán số rõ ràng cho phase. topics = TỔNG số bài; comments = TỔNG số bình luận; buzz = like + share + comment (comments đã nằm trong buzz — KHÔNG cộng topics hay comments vào buzz). KPI là mục tiêu, KHÔNG phải đầu việc tính tiền: không biến KPI thành deliverables/services.
+11. pillars: pillar nội dung + tỷ lệ % của phase nếu brief nêu (tổng ≤ 100).
+12. services: đầu việc/dịch vụ của phase không thuộc 6 format creator (đăng bài community, gói seeding...): { name, unit, quantity, scope } — scope 'phase' nếu số lượng là tổng toàn phase, 'per_partner' nếu tính theo từng đối tác. Chỉ ghi khi brief nêu rõ.`;
     const prompt = `HÃY BÓC TÁCH BRIEF TỔNG DỰ ÁN SAU ĐÂY THÀNH CÁC PHASE:\n\"\"\"\n${briefText.trim()}\n\"\"\"\n\nTrả về JSON đúng schema.`;
     const response = await callAiWithRetry(() => aiClient!.models.generateContent({
       model: 'gemini-3.8-flash',
@@ -505,6 +567,34 @@ QUY TẮC:
                       required: ['format', 'soLuong'],
                     },
                   },
+                  partnerType: { type: Type.STRING, description: 'kol | community | both — hoặc null' },
+                  kpiTopics: { type: Type.NUMBER, description: 'KPI mục tiêu: tổng số bài viết của phase — hoặc null' },
+                  kpiComments: { type: Type.NUMBER, description: 'KPI mục tiêu: tổng số bình luận (đã nằm trong buzz) — hoặc null' },
+                  kpiBuzz: { type: Type.NUMBER, description: 'KPI mục tiêu buzz = like + share + comment — hoặc null' },
+                  pillars: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        name: { type: Type.STRING },
+                        percent: { type: Type.NUMBER },
+                      },
+                      required: ['name', 'percent'],
+                    },
+                  },
+                  services: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        name: { type: Type.STRING },
+                        unit: { type: Type.STRING, description: 'bài, comment, gói…' },
+                        soLuong: { type: Type.INTEGER },
+                        scope: { type: Type.STRING, description: "'phase' hoặc 'per_partner'" },
+                      },
+                      required: ['name', 'soLuong'],
+                    },
+                  },
                 },
                 required: ['name', 'kind'],
               },
@@ -525,6 +615,7 @@ QUY TẮC:
       ...p,
       budget: typeof p?.budget === 'number' ? Math.round(p.budget) : null,
       deliverables: Array.isArray(p?.deliverables) ? p.deliverables.map((d: any) => ({ format: d?.format, quantity: d?.soLuong })) : [],
+      services: Array.isArray(p?.services) ? p.services.map((s: any) => ({ name: s?.name, unit: s?.unit, quantity: s?.soLuong, scope: s?.scope })) : [],
     })) : [];
     const phases = normalizePhaseDrafts(rawPhases);
     if (!phases.length) {
@@ -588,8 +679,11 @@ app.get('/api/sheets/fetch-csv', async (req, res) => {
       });
     }
 
-    // Tự dựng link export của Google Sheet, TUYỆT ĐỐI không tải URL gốc
-    const targetUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(targetSheetId)}/export?format=csv`;
+    // Tự dựng link export của Google Sheet, TUYỆT ĐỐI không tải URL gốc.
+    // gid tuỳ chọn (chỉ nhận số) để tải đúng tab khi link có #gid=…
+    const rawGid = req.query.gid as string | undefined;
+    const gid = typeof rawGid === 'string' && /^\d{1,20}$/.test(rawGid.trim()) ? rawGid.trim() : null;
+    const targetUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(targetSheetId)}/export?format=csv${gid ? `&gid=${gid}` : ''}`;
 
     // Giới hạn thời gian chờ tối đa 15 giây (PHẦN E)
     const controller = new AbortController();

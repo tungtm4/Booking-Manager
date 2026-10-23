@@ -39,10 +39,13 @@ test('Vấn đề 1 (giao diện): panel báo giá cảnh báo giá theo dòng v
   assert.ok(quotes.includes('Chưa có giá bán'), 'phân biệt trạng thái thiếu giá bán');
 });
 
-test('Vấn đề 2 (giao diện): tổng quan phase dùng chung quy tắc phân bổ và không kết luận khi thiếu giá', () => {
-  assert.ok(panel.includes('distributeCampaignQuantity'), 'tổng quan dùng chung quy tắc phân bổ với báo giá');
-  assert.ok(panel.includes('chưa kết luận còn/vượt'), 'thiếu giá thì không kết luận còn/vượt ngân sách');
-  assert.ok(panel.includes('KHÔNG phải tổng giá báo khách'), 'phân biệt chi phí đầu vào với giá báo khách');
+test('Vấn đề 2 (giao diện): tổng quan phase — quy tắc đã thay bởi đặc tả Community §6 (danh sách sơ bộ không tự phân bổ/không tự tính chi phí)', () => {
+  // Đợt 10 từng yêu cầu tổng quan phase tự phân bổ số lượng để tính chi phí; đặc tả
+  // Community §6 (bắt buộc, sau này) đã bỏ hẳn hành vi đó: danh sách sơ bộ chỉ là
+  // ứng viên, chưa phân bổ thì không có cơ sở tính chi phí triển khai.
+  assert.ok(panel.includes('phaseCandidates'), 'tổng quan phase chỉ đếm ứng viên theo phase');
+  assert.ok(panel.includes('Chưa phân bổ công việc'), 'chưa phân bổ phải ghi rõ chưa đủ cơ sở tính chi phí');
+  assert.ok(panel.includes('chưa đủ cơ sở tính chi phí'), 'không coi tổng đơn giá ứng viên là chi phí triển khai');
 });
 
 test('Vấn đề 7 (giao diện): module cũ đọc/ghi kho server, không dùng localStorage làm kho KOL, không tự gộp trùng tên', () => {

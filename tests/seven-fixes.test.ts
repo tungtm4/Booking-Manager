@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import {createWorkspace} from '../server/workspace';
-import {buildPhaseQuoteItems} from '../src/domain/phaseQuote';
+import {buildAllocatedQuoteItems} from '../src/domain/phaseQuote';
 
 // Kiểm thử hành vi cho đợt sửa 7 vấn đề — chạy trên database thử trong bộ nhớ,
 // không chạm dữ liệu dự án thật.
@@ -101,12 +101,11 @@ test('Vấn đề 1: nháp chứa giá chưa xác nhận được, gửi duyệt
   assert.equal(row1Final.prices.video.status,'unconfirmed');assert.equal(row1Final.prices.video.value,6_000_000);assert.equal(row1Final.prices.video.checkedBy,null);
 }));
 
-test('Vấn đề 2: tổng toàn phase phân bổ đúng tổng số lượng — 10 video × 4 KOL × 10 triệu = 100 triệu',()=>{
+test('Vấn đề 2: phân bổ PM chọn giữ đúng tổng — 10 video chia 3,3,2,2 × 10 triệu = 100 triệu',()=>{
   const price=(value:number,status:string)=>({value,status,source:'',checkedAt:null,checkedBy:null});
-  const result=buildPhaseQuoteItems([{
-    name:'Phase tổng',brief:{deliverableScope:'campaign',deliverables:[{format:'video',quantity:10}]},
-    rows:[1,2,3,4].map(n=>({shortlistId:'s'+n,creator:'KOL '+n,prices:{video:price(10_000_000,'confirmed')}} as any)),
-  }],()=> 'item-'+Math.random());
+  const result=buildAllocatedQuoteItems([3,3,2,2].map((q,n)=>({
+    shortlistId:'s'+(n+1),creator:'KOL '+(n+1),phase:'Phase tổng',partnerType:'kol' as const,key:'video',description:'Video dài',quantity:q,price:price(10_000_000,'confirmed') as any,
+  })),()=> 'item-'+Math.random());
   assert.deepEqual(result.items.map(i=>i.quantity),[3,3,2,2]);
   assert.equal(result.items.reduce((a,i)=>a+i.quantity*(i.buyUnitPrice??0),0),100_000_000);
 });

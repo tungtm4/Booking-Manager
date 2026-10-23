@@ -1,11 +1,13 @@
 import { PRICE_FORMAT_LABELS, type PriceFormatKey } from '../types/kol';
 
-// Đợt 9B: sinh dòng báo giá từ các phase của dự án.
-// - Brief "mỗi KOL": mỗi KOL trong phase nhận đúng số lượng brief cho từng hạng mục.
-// - Brief "tổng toàn phase": chia tổng cho các KOL — phần dư cộng cho các KOL đầu danh sách
-//   (cùng quy tắc chia tổng của engine đề xuất: 10 cho 4 KOL -> 3,3,2,2; 15 -> 4,4,4,3).
-// Giá đầu vào lấy từ danh sách của phase; thiếu giá vẫn sinh dòng (giá trống) và được đếm riêng
-// để PM biết — bản nháp chưa gửi duyệt được cho tới khi giá được xác nhận (cơ chế sẵn có).
+// Sinh dòng báo giá từ phase — NGUYÊN TẮC MỚI (bắt buộc):
+// - Danh sách sơ bộ chỉ là ỨNG VIÊN, chưa phải phân công. Hệ thống KHÔNG tự chia
+//   khối lượng cho toàn bộ ứng viên và KHÔNG tự nhân giá ứng viên thành chi phí phase.
+// - Dòng báo giá chỉ sinh từ PHÂN BỔ PM chủ động chọn (đối tác + dịch vụ/hạng mục + số lượng).
+// - "Gợi ý phân bổ" là thao tác chủ động riêng: chỉ trả về bản nháp phân bổ để PM xem/sửa,
+//   không tự áp dụng và không tạo phương án.
+// Giá đầu vào lấy từ danh sách của phase tại thời điểm tạo (chụp snapshot);
+// thiếu giá vẫn sinh dòng (giá trống) và được đếm riêng — cổng giá ở server chặn ở bước gửi duyệt.
 
 export interface PhaseQuotePrice {
   value: number | null;
@@ -13,36 +15,6 @@ export interface PhaseQuotePrice {
   source: string;
   checkedAt: string | null;
   checkedBy: string | null;
-}
-
-export interface PhaseQuoteRow {
-  shortlistId: string;
-  creator: string;
-  prices: Partial<Record<string, PhaseQuotePrice | undefined>>;
-}
-
-export interface PhaseQuotePhase {
-  name: string;
-  brief: {
-    deliverableScope: 'per_kol' | 'campaign';
-    deliverables: { format: string; quantity: number }[];
-  } | null;
-  rows: PhaseQuoteRow[];
-}
-
-export interface PhaseQuoteItem {
-  id: string;
-  creator: string;
-  description: string;
-  phase: string;
-  kind: 'kol';
-  quantity: number;
-  buyUnitPrice: number | null;
-  sellUnitPrice: number | null;
-  included: boolean;
-  shortlistId: string;
-  format: string;
-  priceSnapshot: PhaseQuotePrice;
 }
 
 export function distributeCampaignQuantity(total: number, count: number): number[] {
@@ -54,48 +26,165 @@ export function distributeCampaignQuantity(total: number, count: number): number
 
 const WAITING_PRICE: PhaseQuotePrice = { value: null, status: 'waiting', source: '', checkedAt: null, checkedBy: null };
 
-export function buildPhaseQuoteItems(
-  phases: PhaseQuotePhase[],
+export interface AllocatedLine {
+  shortlistId: string;
+  creator: string;
+  phase: string;
+  partnerType: 'kol' | 'community';
+  key: string; // KOL: format key; Community: serviceId
+  description: string;
+  serviceName?: string;
+  unit?: string;
+  conditions?: string;
+  quantity: number;
+  price: PhaseQuotePrice;
+}
+
+export interface AllocatedQuoteItem {
+  id: string;
+  creator: string;
+  description: string;
+  phase: string;
+  kind: 'kol' | 'community';
+  partnerType: 'kol' | 'community';
+  quantity: number;
+  buyUnitPrice: number | null;
+  sellUnitPrice: number | null;
+  included: boolean;
+  shortlistId: string;
+  format: string;
+  serviceId?: string;
+  serviceName?: string;
+  unit?: string;
+  conditions?: string;
+  priceSnapshot: PhaseQuotePrice;
+}
+
+/** Chỉ sinh dòng từ các phân bổ PM đã chọn. Không có phân bổ -> không có dòng, không có chi phí. */
+export function buildAllocatedQuoteItems(
+  lines: AllocatedLine[],
   idGen: () => string,
-): { items: PhaseQuoteItem[]; missingPrice: number; unconfirmedPrice: number; skippedPhases: string[] } {
-  const items: PhaseQuoteItem[] = [];
+): { items: AllocatedQuoteItem[]; missingPrice: number; unconfirmedPrice: number } {
+  const items: AllocatedQuoteItem[] = [];
   let missingPrice = 0;
   let unconfirmedPrice = 0;
-  const skippedPhases: string[] = [];
+  for (const line of lines) {
+    if (!Number.isSafeInteger(line.quantity) || line.quantity <= 0) continue;
+    const price = line.price ?? WAITING_PRICE;
+    if (price.value === null) missingPrice++;
+    else if (price.status !== 'confirmed') unconfirmedPrice++;
+    items.push({
+      id: idGen(),
+      creator: line.creator,
+      description: line.description,
+      phase: line.phase,
+      kind: line.partnerType,
+      partnerType: line.partnerType,
+      quantity: line.quantity,
+      buyUnitPrice: price.value,
+      sellUnitPrice: null,
+      included: true,
+      shortlistId: line.shortlistId,
+      format: line.partnerType === 'kol' ? line.key : '',
+      ...(line.partnerType === 'community' ? { serviceId: line.key } : {}),
+      ...(line.serviceName ? { serviceName: line.serviceName } : {}),
+      ...(line.unit ? { unit: line.unit } : {}),
+      ...(line.conditions ? { conditions: line.conditions } : {}),
+      priceSnapshot: price,
+    });
+  }
+  return { items, missingPrice, unconfirmedPrice };
+}
 
+// ---------------------------------------------------------------------------
+// Gợi ý phân bổ (nháp — PM xem trước, sửa rồi mới tạo phương án; không tự áp dụng).
+// ---------------------------------------------------------------------------
+
+export interface SuggestRowInput {
+  shortlistId: string;
+  partnerType: 'kol' | 'community';
+  /** Community: các dịch vụ hồ sơ có (key = serviceId). KOL: để trống — dùng format của brief. */
+  services: { key: string; name: string }[];
+}
+
+export interface SuggestPhaseInput {
+  phaseId: string;
+  brief: {
+    deliverableScope: 'per_kol' | 'campaign';
+    deliverables: { format: string; quantity: number }[];
+    services: { name: string; unit: string; quantity: number; scope: 'phase' | 'per_partner' }[];
+  } | null;
+  rows: SuggestRowInput[];
+}
+
+export interface SuggestedAllocation {
+  shortlistId: string;
+  phaseId: string;
+  key: string;
+  quantity: number;
+}
+
+const foldSvc = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/đ/g, 'd').trim();
+
+function matchCommunityService(row: SuggestRowInput, wantedName: string): string | null {
+  const w = foldSvc(wantedName);
+  const hit = row.services.find(s => {
+    const n = foldSvc(s.name);
+    return n.includes(w) || w.includes(n);
+  });
+  return hit?.key ?? null;
+}
+
+function matchPostService(row: SuggestRowInput): string | null {
+  const hit = row.services.find(s => {
+    const n = foldSvc(s.name);
+    return n.includes('dang bai') || n.includes('bai dang') || n === 'post';
+  });
+  return hit?.key ?? null;
+}
+
+export function suggestAllocations(phases: SuggestPhaseInput[]): SuggestedAllocation[] {
+  const out: SuggestedAllocation[] = [];
+  const push = (phaseId: string, shortlistId: string, key: string, quantity: number) => {
+    if (quantity > 0) out.push({ shortlistId, phaseId, key, quantity });
+  };
   for (const ph of phases) {
-    const deliverables = ph.brief?.deliverables ?? [];
-    if (!ph.rows.length || !deliverables.length) {
-      skippedPhases.push(ph.name);
-      continue;
-    }
-    for (const d of deliverables) {
+    if (!ph.brief) continue;
+    const kolRows = ph.rows.filter(r => r.partnerType === 'kol');
+    const commRows = ph.rows.filter(r => r.partnerType === 'community');
+    // KOL x hạng mục Creator của brief
+    for (const d of ph.brief.deliverables) {
       if (!(d.format in PRICE_FORMAT_LABELS)) continue;
-      const quantities = ph.brief!.deliverableScope === 'per_kol'
-        ? ph.rows.map(() => d.quantity)
-        : distributeCampaignQuantity(d.quantity, ph.rows.length);
-      ph.rows.forEach((row, idx) => {
-        const quantity = quantities[idx];
-        if (!quantity) return;
-        const price = row.prices[d.format] ?? WAITING_PRICE;
-        if (price.value === null) missingPrice++;
-        else if (price.status !== 'confirmed') unconfirmedPrice++;
-        items.push({
-          id: idGen(),
-          creator: row.creator,
-          description: PRICE_FORMAT_LABELS[d.format as PriceFormatKey],
-          phase: ph.name,
-          kind: 'kol',
-          quantity,
-          buyUnitPrice: price.value,
-          sellUnitPrice: null,
-          included: true,
-          shortlistId: row.shortlistId,
-          format: d.format,
-          priceSnapshot: price,
-        });
-      });
+      if (ph.brief.deliverableScope === 'per_kol') {
+        for (const r of kolRows) push(ph.phaseId, r.shortlistId, d.format, d.quantity);
+      } else {
+        const qs = distributeCampaignQuantity(d.quantity, kolRows.length);
+        kolRows.forEach((r, i) => push(ph.phaseId, r.shortlistId, d.format, qs[i] ?? 0));
+      }
+      // Community: hạng mục "post" gợi ý sang dịch vụ đăng bài của Community (nếu hồ sơ có)
+      if (d.format === 'post') {
+        const matched = commRows.map(r => ({ r, key: matchPostService(r) })).filter(x => x.key);
+        if (matched.length) {
+          if (ph.brief.deliverableScope === 'per_kol') {
+            for (const m of matched) push(ph.phaseId, m.r.shortlistId, m.key!, d.quantity);
+          } else if (!kolRows.length) {
+            const qs = distributeCampaignQuantity(d.quantity, matched.length);
+            matched.forEach((m, i) => push(ph.phaseId, m.r.shortlistId, m.key!, qs[i] ?? 0));
+          }
+        }
+      }
+    }
+    // Community x dịch vụ của brief (brief.services)
+    for (const s of ph.brief.services) {
+      const matched = commRows.map(r => ({ r, key: matchCommunityService(r, s.name) })).filter(x => x.key);
+      if (!matched.length) continue;
+      if (s.scope === 'per_partner') {
+        for (const m of matched) push(ph.phaseId, m.r.shortlistId, m.key!, s.quantity);
+      } else {
+        const qs = distributeCampaignQuantity(s.quantity, matched.length);
+        matched.forEach((m, i) => push(ph.phaseId, m.r.shortlistId, m.key!, qs[i] ?? 0));
+      }
     }
   }
-  return { items, missingPrice, unconfirmedPrice, skippedPhases };
+  return out;
 }

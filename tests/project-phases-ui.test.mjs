@@ -12,7 +12,8 @@ test('panel có đủ luồng phase của Đợt 9A', () => {
   assert.ok(panel.includes('phaseId: activePhase?.id'), 'thêm KOL từ thư viện phải gắn phase đang chọn');
   assert.ok(panel.includes('/phase`'), 'phải có thao tác chuyển phase cho KOL');
   assert.ok(panel.includes('/remove`'), 'phải có thao tác xoá KOL khỏi dự án');
-  assert.ok(panel.includes('phaseRollup'), 'phải có tổng quan theo phase cho PM');
+  assert.ok(panel.includes('phaseCandidates'), 'phải có tổng quan ứng viên theo phase cho PM');
+  assert.ok(panel.includes('Chưa phân bổ công việc'), 'chưa phân bổ phải ghi rõ chưa đủ cơ sở tính chi phí (không tự nhân giá ứng viên)');
 });
 
 test('Đợt 9B: tạo phương án từ phase, bản khách nhóm theo phase và in PDF', () => {

@@ -2,6 +2,7 @@ import type {Router} from 'express';
 import type {DatabaseSync} from 'node:sqlite';
 import {randomUUID} from 'node:crypto';
 import {emptyProjectBrief,readProjectBrief,assessProjectKol} from '../src/domain/projectBrief';
+import {assessCommunity} from '../src/domain/community';
 import {calculateProjectFinance} from '../src/domain/projectFinance';
 import {PRICE_FORMAT_LABELS} from '../src/types/kol';
 const formats=Object.keys(PRICE_FORMAT_LABELS);
@@ -20,6 +21,26 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
   db.exec(`CREATE TABLE IF NOT EXISTS project_phases(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'other',description TEXT NOT NULL DEFAULT '',budget INTEGER,sort_order INTEGER NOT NULL DEFAULT 0,brief_json TEXT,revision INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL DEFAULT '');`);
   const slCols=(db.prepare(`PRAGMA table_info(project_shortlist)`).all() as any[]).map((r:any)=>r.name);
   if(!slCols.includes('phase_id'))db.exec(`ALTER TABLE project_shortlist ADD COLUMN phase_id TEXT`);
+  // Community dùng chung bảng danh sách sơ bộ với KOL nhưng là loại đối tác riêng:
+  // thêm cột partner_type và nới ràng buộc duy nhất thành (project_id, partner_type, catalog_id)
+  // để một Community và một KOL trùng mã vẫn vào được cùng dự án. Migration chạy trong
+  // transaction, giữ nguyên mọi dòng/phase/revision hiện có.
+  db.exec(`CREATE TABLE IF NOT EXISTS community_catalog(id TEXT NOT NULL,organization_id TEXT NOT NULL,profile_json TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,updated_at TEXT NOT NULL DEFAULT '',PRIMARY KEY(id,organization_id));`);
+  if(!slCols.includes('partner_type')){
+    const slSql=(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='project_shortlist'").get() as any)?.sql??'';
+    db.exec('BEGIN');
+    try{
+      if(/UNIQUE\s*\(\s*project_id\s*,\s*catalog_id\s*\)/.test(slSql)){
+        db.exec(`CREATE TABLE project_shortlist_new(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),catalog_id TEXT NOT NULL,profile_json TEXT NOT NULL,prices_json TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,phase_id TEXT,partner_type TEXT NOT NULL DEFAULT 'kol',UNIQUE(project_id,partner_type,catalog_id));
+          INSERT INTO project_shortlist_new(id,project_id,catalog_id,profile_json,prices_json,revision,phase_id) SELECT id,project_id,catalog_id,profile_json,prices_json,revision,phase_id FROM project_shortlist;
+          DROP TABLE project_shortlist;
+          ALTER TABLE project_shortlist_new RENAME TO project_shortlist;`);
+      }else{
+        db.exec(`ALTER TABLE project_shortlist ADD COLUMN partner_type TEXT NOT NULL DEFAULT 'kol'`);
+      }
+      db.exec('COMMIT');
+    }catch(e){db.exec('ROLLBACK');throw e;}
+  }
   // Migration Đợt 9: dự án chưa có phase nào → tạo phase mặc định giữ brief + shortlist hiện tại.
   const phaseless=db.prepare('SELECT p.id FROM projects p WHERE NOT EXISTS (SELECT 1 FROM project_phases ph WHERE ph.project_id=p.id)').all() as any[];
   for(const p of phaseless){
@@ -77,6 +98,9 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     if(input===undefined||input===null)return null;
     const b=readProjectBrief(input);
     if(!b||!str(b.text,10000)||!str(b.category,100)||!str(b.keyword,200)||!str(b.platform,50)||!Number.isSafeInteger(b.minFollowers)||b.minFollowers<0||!['campaign','per_kol'].includes(b.deliverableScope)||!Array.isArray(b.deliverables)||b.deliverables.length>6||b.deliverables.some((d:any)=>!d||!formats.includes(d.format)||!Number.isSafeInteger(d.quantity)||d.quantity<1||d.quantity>100000)||new Set(b.deliverables.map((d:any)=>d.format)).size!==b.deliverables.length||(b.targetCount!==null&&(!Number.isSafeInteger(b.targetCount)||b.targetCount<1||b.targetCount>100000))||!money(b.budget))return undefined;
+    // Trường mở rộng (loại đối tác/KPI/pillar/dịch vụ) đã được readProjectBrief chuẩn hoá;
+    // ở đây chỉ kiểm tra ràng buộc liên-field: tổng tỷ lệ pillar không vượt 100%.
+    if(b.pillars.reduce((a:number,p:any)=>a+p.percent,0)>100)return undefined;
     return {...b,deliverables:b.deliverables.map((d:any)=>({format:d.format,quantity:d.quantity}))};
   }
   router.get('/catalog',(req,res)=>{
@@ -285,13 +309,16 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     const brief=readProjectBrief(b?JSON.parse(b.payload_json):null);
     // Không cắt Top N; số KOL mục tiêu chỉ để PM đối chiếu khi chọn phương án.
     const matches=catalog.filter(p=>assessProjectKol(p,brief).matches);
-    const rows=db.prepare('SELECT * FROM project_shortlist WHERE project_id=? ORDER BY rowid').all(pid).map((r:any)=>({id:r.id,catalogId:r.catalog_id,profile:(()=>{const {engagementRate,...p}=JSON.parse(r.profile_json);return p;})(),prices:JSON.parse(r.prices_json),revision:r.revision,phaseId:r.phase_id??null}));
-    res.json({brief,briefRevision:b?.revision??0,canManage:access(u,pid,true),canImport:u.organization_role==='admin',catalogCount:catalog.length,matches,rows});
+    // Community được tìm từ KHO COMMUNITY riêng — không bao giờ thay bằng danh sách Creator.
+    const communityCatalog=db.prepare('SELECT profile_json FROM community_catalog WHERE organization_id=? ORDER BY rowid').all(u.organization_id).map((r:any)=>JSON.parse(r.profile_json));
+    const communityMatches=communityCatalog.filter((p:any)=>assessCommunity(p,brief).matches);
+    const rows=db.prepare('SELECT * FROM project_shortlist WHERE project_id=? ORDER BY rowid').all(pid).map((r:any)=>({id:r.id,catalogId:r.catalog_id,partnerType:r.partner_type??'kol',profile:(()=>{const {engagementRate,...p}=JSON.parse(r.profile_json);return p;})(),prices:JSON.parse(r.prices_json),revision:r.revision,phaseId:r.phase_id??null}));
+    res.json({brief,briefRevision:b?.revision??0,canManage:access(u,pid,true),canImport:u.organization_role==='admin',catalogCount:catalog.length,matches,rows,communityCount:communityCatalog.length,communityMatches});
   });
   router.post('/projects/:id/brief',(req,res)=>{
     const u=res.locals.user,pid=req.params.id;if(!access(u,pid,true))return res.status(403).json({message:'Chỉ PM/Admin được duyệt brief chung.'});
     const b=readProjectBrief(req.body.brief);
-    if(!b||!str(b.text,10000)||!str(b.category,100)||!str(b.keyword,200)||!str(b.platform,50)||!Number.isSafeInteger(b.minFollowers)||b.minFollowers<0||!['campaign','per_kol'].includes(b.deliverableScope)||!Array.isArray(b.deliverables)||b.deliverables.length>6||b.deliverables.some((d:any)=>!d||!formats.includes(d.format)||!Number.isSafeInteger(d.quantity)||d.quantity<1||d.quantity>100000)||new Set(b.deliverables.map(d=>d.format)).size!==b.deliverables.length||(b.targetCount!==null&&(!Number.isSafeInteger(b.targetCount)||b.targetCount<1||b.targetCount>100000))||!money(b.budget))return res.status(400).json({message:'Kiểm tra brief, tiêu chí, số lượng mục tiêu và ngân sách.'});
+    if(!b||!str(b.text,10000)||!str(b.category,100)||!str(b.keyword,200)||!str(b.platform,50)||!Number.isSafeInteger(b.minFollowers)||b.minFollowers<0||!['campaign','per_kol'].includes(b.deliverableScope)||!Array.isArray(b.deliverables)||b.deliverables.length>6||b.deliverables.some((d:any)=>!d||!formats.includes(d.format)||!Number.isSafeInteger(d.quantity)||d.quantity<1||d.quantity>100000)||new Set(b.deliverables.map(d=>d.format)).size!==b.deliverables.length||(b.targetCount!==null&&(!Number.isSafeInteger(b.targetCount)||b.targetCount<1||b.targetCount>100000))||!money(b.budget)||b.pillars.reduce((a:number,p:any)=>a+p.percent,0)>100)return res.status(400).json({message:'Kiểm tra brief, tiêu chí, số lượng mục tiêu và ngân sách. Tổng tỷ lệ pillar không vượt 100%.'});
     const old=db.prepare('SELECT revision FROM project_briefs WHERE project_id=?').get(pid) as any;
     if(req.body.revision!==(old?.revision??0))return res.status(409).json({message:'Brief đã thay đổi. Tải lại trước khi lưu.'});
     const clean={...b,deliverables:b.deliverables.map(d=>({format:d.format,quantity:d.quantity}))};
@@ -333,21 +360,35 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
   });
   router.post('/projects/:id/shortlist/add',(req,res)=>{
     const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật danh sách dự án.'});
-    if(!Array.isArray(req.body.ids)||!req.body.ids.length||req.body.ids.length>500||req.body.ids.some((id:any)=>typeof id!=='string'))return res.status(400).json({message:'Chọn KOL cần thêm.'});
+    const partnerType=req.body?.partnerType==='community'?'community':'kol';
+    if(!Array.isArray(req.body.ids)||!req.body.ids.length||req.body.ids.length>500||req.body.ids.some((id:any)=>typeof id!=='string'))return res.status(400).json({message:partnerType==='community'?'Chọn Community cần thêm.':'Chọn KOL cần thêm.'});
     let phaseId=req.body.phaseId??null;
     if(phaseId!==null){if(typeof phaseId!=='string')return res.status(400).json({message:'Phase không hợp lệ.'});const ph=db.prepare('SELECT id FROM project_phases WHERE id=? AND project_id=?').get(phaseId,pid);if(!ph)return res.status(400).json({message:'Phase không thuộc dự án này.'});}
     else{const first=db.prepare('SELECT id FROM project_phases WHERE project_id=? ORDER BY sort_order,rowid LIMIT 1').get(pid) as any;phaseId=first?.id??null;}
-    const profiles=req.body.ids.map((id:string)=>db.prepare('SELECT profile_json FROM kol_catalog WHERE id=? AND organization_id=?').get(id,u.organization_id) as any);
-    if(profiles.some((p:any)=>!p))return res.status(400).json({message:'KOL không thuộc thư viện công ty.'});
-    const existing=req.body.ids.map((id:string)=>db.prepare('SELECT catalog_id,phase_id FROM project_shortlist WHERE project_id=? AND catalog_id=?').get(pid,id) as any).filter(Boolean).map((r:any)=>({id:r.catalog_id,phaseId:r.phase_id??null}));
-    let added=0;db.exec('BEGIN');try{for(const row of profiles){const p=JSON.parse(row.profile_json);const prices=Object.fromEntries(formats.map(f=>[f,{value:p.bangGia[f],status:p.bangGia[f]===null?'waiting':'unconfirmed',source:'',checkedAt:null,checkedBy:null}]));added+=Number(db.prepare('INSERT OR IGNORE INTO project_shortlist(id,project_id,catalog_id,profile_json,prices_json,revision,phase_id) VALUES (?,?,?,?,?,1,?)').run(randomUUID(),pid,p.id,JSON.stringify(p),JSON.stringify(prices),phaseId).changes);}audit(u.id,'add_project_shortlist',pid);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
+    const table=partnerType==='community'?'community_catalog':'kol_catalog';
+    const profiles=req.body.ids.map((id:string)=>db.prepare(`SELECT profile_json FROM ${table} WHERE id=? AND organization_id=?`).get(id,u.organization_id) as any);
+    if(profiles.some((p:any)=>!p))return res.status(400).json({message:partnerType==='community'?'Community không thuộc kho Community của công ty.':'KOL không thuộc thư viện công ty.'});
+    const existing=req.body.ids.map((id:string)=>db.prepare('SELECT catalog_id,phase_id FROM project_shortlist WHERE project_id=? AND catalog_id=? AND partner_type=?').get(pid,id,partnerType) as any).filter(Boolean).map((r:any)=>({id:r.catalog_id,phaseId:r.phase_id??null}));
+    let added=0;db.exec('BEGIN');try{for(const row of profiles){const p=JSON.parse(row.profile_json);
+      // Giá khởi tạo của dự án: KOL lấy theo 6 format Creator; Community lấy theo TỪNG DỊCH VỤ
+      // của hồ sơ (giá tham khảo của dịch vụ) — trạng thái luôn là chưa xác nhận/chưa có giá.
+      const prices=partnerType==='community'
+        ?Object.fromEntries((p.dichVu??[]).map((s:any)=>[s.id,{value:s.giaThamKhao??null,status:(s.giaThamKhao??null)===null?'waiting':'unconfirmed',source:'',checkedAt:null,checkedBy:null}]))
+        :Object.fromEntries(formats.map(f=>[f,{value:p.bangGia[f],status:p.bangGia[f]===null?'waiting':'unconfirmed',source:'',checkedAt:null,checkedBy:null}]));
+      added+=Number(db.prepare('INSERT OR IGNORE INTO project_shortlist(id,project_id,catalog_id,profile_json,prices_json,revision,phase_id,partner_type) VALUES (?,?,?,?,?,1,?,?)').run(randomUUID(),pid,p.id,JSON.stringify(p),JSON.stringify(prices),phaseId,partnerType).changes);}audit(u.id,'add_project_shortlist',pid);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
     res.json({added,existing});
   });
   router.post('/projects/:id/shortlist/:rowId/prices',(req,res)=>{
     const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật giá dự án.'});
-    const row=db.prepare('SELECT * FROM project_shortlist WHERE id=? AND project_id=?').get(req.params.rowId,pid) as any;if(!row)return res.status(404).json({message:'Không tìm thấy KOL trong dự án.'});
+    const row=db.prepare('SELECT * FROM project_shortlist WHERE id=? AND project_id=?').get(req.params.rowId,pid) as any;if(!row)return res.status(404).json({message:'Không tìm thấy đối tác trong dự án.'});
     if(req.body.revision!==row.revision)return res.status(409).json({message:'Giá vừa được người khác cập nhật. Tải lại trước khi lưu.'});
-    const {format,value,source,confirm}=req.body;if(!formats.includes(format)||!money(value)||!str(source,1000)||typeof confirm!=='boolean'||(confirm&&(value===null||!source.trim())))return res.status(400).json({message:'Xác nhận giá cần có số tiền và nguồn kiểm tra. Giá 0 là miễn phí; để trống là chưa có giá.'});
+    const {format,value,source,confirm}=req.body;
+    // KOL: format là 1 trong 6 format Creator. Community: format là MÃ DỊCH VỤ trong hồ sơ.
+    const isCommunity=row.partner_type==='community';
+    const formatOk=isCommunity
+      ? typeof format==='string'&&(JSON.parse(row.profile_json).dichVu??[]).some((s:any)=>s.id===format)
+      : formats.includes(format);
+    if(!formatOk||!money(value)||!str(source,1000)||typeof confirm!=='boolean'||(confirm&&(value===null||!source.trim())))return res.status(400).json({message:'Xác nhận giá cần có số tiền và nguồn kiểm tra. Giá 0 là miễn phí; để trống là chưa có giá.'});
     const prices=JSON.parse(row.prices_json);prices[format]={value,source:source.trim(),status:value===null?'waiting':confirm?'confirmed':'unconfirmed',checkedAt:confirm?new Date().toISOString():null,checkedBy:confirm?u.id:null};
     db.prepare('UPDATE project_shortlist SET prices_json=?,revision=revision+1 WHERE id=? AND revision=?').run(JSON.stringify(prices),row.id,row.revision);audit(u.id,'verify_shortlist_price',row.id);res.json({success:true});
   });
@@ -357,7 +398,7 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     if(!q)return res.status(404).json({message:'Không tìm thấy báo giá.'});
     if(!['draft','changes_requested'].includes(q.status)||q.revision!==req.body.revision)return res.status(409).json({message:'Báo giá đã thay đổi hoặc bị khóa. Hãy tạo phiên bản mới hoặc tải lại.'});
     const p=JSON.parse(q.payload_json);let updated=0,missingPrice=0,unconfirmedPrice=0,skipped=0;
-    for(const i of p.items){if(!i.shortlistId)continue;const row=db.prepare('SELECT prices_json FROM project_shortlist WHERE id=? AND project_id=?').get(i.shortlistId,pid) as any;const price=row?JSON.parse(row.prices_json)[i.format]:null;
+    for(const i of p.items){if(!i.shortlistId)continue;const row=db.prepare('SELECT prices_json FROM project_shortlist WHERE id=? AND project_id=?').get(i.shortlistId,pid) as any;const price=row?JSON.parse(row.prices_json)[i.serviceId||i.format]:null;
       // Lấy giá mới nhất kèm trạng thái xác nhận vào bản nháp; dòng chưa xác nhận vẫn được lấy
       // nhưng cổng giá ở bước gửi duyệt/duyệt sẽ chặn cho tới khi xác nhận đủ.
       if(!price){skipped++;continue;}
@@ -374,15 +415,25 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     if(!q)return res.status(404).json({message:'Không tìm thấy báo giá trong dự án.'});
     if(!['draft','changes_requested'].includes(q.status)||q.revision!==revision)return res.status(409).json({message:'Báo giá đã thay đổi hoặc bị khóa. Chọn bản nháp mới nhất và tải lại.'});
     if(!Array.isArray(selections)||!selections.length||selections.length>500)return res.status(400).json({message:'Chọn KOL và hạng mục cần đưa vào phương án.'});
-    const payload=JSON.parse(q.payload_json),newItems=[];const seen=new Set(payload.items.filter((i:any)=>i.shortlistId).map((i:any)=>i.shortlistId+':'+i.format));
+    const payload=JSON.parse(q.payload_json),newItems=[];const seen=new Set(payload.items.filter((i:any)=>i.shortlistId).map((i:any)=>i.shortlistId+':'+(i.serviceId||i.format)));
     for(const s of selections){
-      if(!s||!str(s.id,100)||!formats.includes(s.format)||!Number.isSafeInteger(s.quantity)||s.quantity<1||s.quantity>100000)return res.status(400).json({message:'Hạng mục và số lượng không hợp lệ.'});
-      const row=db.prepare('SELECT * FROM project_shortlist WHERE id=? AND project_id=?').get(s.id,pid) as any;if(!row)return res.status(400).json({message:'KOL không thuộc danh sách dự án.'});
-      const key=s.id+':'+s.format;if(seen.has(key))return res.status(409).json({message:'KOL và hạng mục này đã có trong phương án. Sửa số lượng ở báo giá.'});seen.add(key);
+      if(!s||!str(s.id,100)||typeof s.format!=='string'||!s.format||!Number.isSafeInteger(s.quantity)||s.quantity<1||s.quantity>100000)return res.status(400).json({message:'Hạng mục và số lượng không hợp lệ.'});
+      const row=db.prepare('SELECT * FROM project_shortlist WHERE id=? AND project_id=?').get(s.id,pid) as any;if(!row)return res.status(400).json({message:'Đối tác không thuộc danh sách dự án.'});
+      const key=s.id+':'+s.format;if(seen.has(key))return res.status(409).json({message:'Đối tác và hạng mục này đã có trong phương án. Sửa số lượng ở báo giá.'});seen.add(key);
       // Bản nháp được phép chứa giá thiếu/chưa xác nhận (snapshot giữ nguyên trạng thái giá);
       // cổng giá ở server sẽ chặn gửi duyệt/duyệt/chốt cho tới khi giá được xác nhận đủ.
       const price=JSON.parse(row.prices_json)[s.format];
-      const p=JSON.parse(row.profile_json);newItems.push({id:randomUUID(),creator:p.ten,description:PRICE_FORMAT_LABELS[s.format as keyof typeof PRICE_FORMAT_LABELS],phase:'',kind:'kol',quantity:s.quantity,buyUnitPrice:price.value,sellUnitPrice:null,included:true,shortlistId:row.id,format:s.format,priceSnapshot:price});
+      const p=JSON.parse(row.profile_json);
+      if(row.partner_type==='community'){
+        // Community: format của selection là MÃ DỊCH VỤ — giá lấy đúng dịch vụ đó,
+        // không dùng giá Post/format Creator. Snapshot kèm tên dịch vụ, đơn vị, điều kiện.
+        const svc=(p.dichVu??[]).find((x:any)=>x.id===s.format);
+        if(!svc||!price)return res.status(400).json({message:'Dịch vụ không thuộc hồ sơ Community này.'});
+        newItems.push({id:randomUUID(),creator:p.ten,description:svc.ten,phase:'',kind:'community',partnerType:'community',quantity:s.quantity,buyUnitPrice:price.value,sellUnitPrice:null,included:true,shortlistId:row.id,format:'',serviceId:svc.id,serviceName:svc.ten,unit:svc.donVi,...(svc.dieuKien?{conditions:svc.dieuKien}:{}),priceSnapshot:price});
+      }else{
+        if(!formats.includes(s.format))return res.status(400).json({message:'Hạng mục và số lượng không hợp lệ.'});
+        newItems.push({id:randomUUID(),creator:p.ten,description:PRICE_FORMAT_LABELS[s.format as keyof typeof PRICE_FORMAT_LABELS],phase:'',kind:'kol',quantity:s.quantity,buyUnitPrice:price.value,sellUnitPrice:null,included:true,shortlistId:row.id,format:s.format,priceSnapshot:price});
+      }
     }
     if(payload.items.length+newItems.length>500)return res.status(400).json({message:'Một báo giá hỗ trợ tối đa 500 hạng mục.'});
     payload.items.push(...newItems);if(!validTotals(payload))return res.status(400).json({message:'Tổng tiền vượt phạm vi hỗ trợ. Giảm số lượng hoặc kiểm tra giá.'});db.prepare("UPDATE project_quote_versions SET payload_json=?,revision=revision+1,status='draft' WHERE id=? AND revision=?").run(JSON.stringify(payload),q.id,q.revision);audit(u.id,'shortlist_to_option',q.id);

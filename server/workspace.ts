@@ -1,5 +1,6 @@
 import express, { type Request } from 'express';
 import {installProjectShortlist} from './projectShortlist';
+import {installCommunities} from './communities';
 import {installProjectQuotes} from './projectQuotes';
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
@@ -143,6 +144,7 @@ export function createWorkspace(directory: string, options: { memory?: boolean; 
     if(isAdmin(u))return true;
     return member(u.id,id).some(r=>manage?r.role==='pm':true);
   };
+  installCommunities(router,db,audit);
   installProjectQuotes(router,db,projectAccess,audit);
   installProjectShortlist(router,db,projectAccess,audit);
   router.get('/users',(_req,res)=>{
