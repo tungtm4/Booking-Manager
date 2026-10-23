@@ -31,8 +31,7 @@ async function request(path: string, body?: unknown, method?: string) {
   return d;
 }
 
-const PLATFORMS = ['TikTok', 'YouTube', 'Facebook', 'Instagram'];
-const numOrNull = (v: string) => (v === '' ? null : Math.max(0, Math.floor(Number(v) || 0)) || null);
+const PLATFORMS = ['TikTok', 'YouTube', 'Facebook', 'Instagram', 'Threads'];
 
 type FormValues = {
   briefText: string;
@@ -44,7 +43,6 @@ type FormValues = {
   followerMin: number | '';
   budgetMax: number | '';
   formatKey: PriceFormatKey;
-  soLuong: number;
   kpiTopics: number | null;
   kpiComments: number | null;
   kpiBuzz: number | null;
@@ -72,7 +70,6 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
   const [followerMin, setFollowerMin] = useState<number | ''>('');
   const [budgetMax, setBudgetMax] = useState<number | ''>('');
   const [formatKey, setFormatKey] = useState<PriceFormatKey>('video');
-  const [soLuong, setSoLuong] = useState(10);
   const [kpiTopics, setKpiTopics] = useState<number | null>(null);
   const [kpiComments, setKpiComments] = useState<number | null>(null);
   const [kpiBuzz, setKpiBuzz] = useState<number | null>(null);
@@ -126,7 +123,6 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     followerMin: '',
     budgetMax: '',
     formatKey: 'video',
-    soLuong: 10,
     kpiTopics: null,
     kpiComments: null,
     kpiBuzz: null,
@@ -144,7 +140,6 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     setFollowerMin(v.followerMin);
     setBudgetMax(v.budgetMax);
     setFormatKey(v.formatKey);
-    setSoLuong(v.soLuong);
     setKpiTopics(v.kpiTopics);
     setKpiComments(v.kpiComments);
     setKpiBuzz(v.kpiBuzz);
@@ -173,18 +168,16 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     const b = ph?.brief;
     if (!b) return blankForm();
     const first = b.deliverables?.[0]?.format;
-    const kolTarget = b.kolTargetCount != null ? b.kolTargetCount : (b.targetCount != null ? b.targetCount : null);
     return {
       briefText: b.text ?? '',
       partnerType: (['kol', 'community', 'both'] as const).includes(b.partnerType) ? b.partnerType : null,
       kolTargetCount: b.kolTargetCount ?? null,
       communityTargetCount: b.communityTargetCount ?? null,
       linhVuc: b.category ?? '',
-      nenTang: PLATFORMS.includes(b.platform) ? b.platform : (b.platform === 'Threads' ? 'Threads' : 'TatCa'),
+      nenTang: PLATFORMS.includes(b.platform) ? b.platform : 'TatCa',
       followerMin: b.minFollowers ? b.minFollowers : '',
       budgetMax: '',
       formatKey: first && first in PRICE_FORMAT_LABELS ? (first as PriceFormatKey) : 'video',
-      soLuong: kolTarget ?? 10,
       kpiTopics: b.kpiTopics ?? null,
       kpiComments: b.kpiComments ?? null,
       kpiBuzz: b.kpiBuzz ?? null,
@@ -210,7 +203,6 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     followerMin,
     budgetMax,
     formatKey,
-    soLuong,
     kpiTopics,
     kpiComments,
     kpiBuzz,
@@ -318,23 +310,22 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
         return;
       }
       const x = d.data;
-      const nextLinhVuc = x.linhVuc || linhVuc;
-      const nextNenTang = x.nenTang && (PLATFORMS.includes(x.nenTang) || x.nenTang === 'Threads') ? x.nenTang : nenTang;
-      const nextFollower = x.followerToiThieu > 0 ? Number(x.followerToiThieu) : followerMin;
-      const nextBudget = x.nganSachMoiKol > 0 ? Number(x.nganSachMoiKol) : budgetMax;
+      const nextLinhVuc = typeof x.linhVuc === 'string' && x.linhVuc.trim() ? x.linhVuc.trim() : '';
+      const nextNenTang = x.nenTang && PLATFORMS.includes(x.nenTang) ? x.nenTang : 'TatCa';
+      const nextFollower = typeof x.followerToiThieu === 'number' && x.followerToiThieu > 0 ? Number(x.followerToiThieu) : '';
+      const nextBudget = typeof x.nganSachMoiKol === 'number' && x.nganSachMoiKol > 0 ? Number(x.nganSachMoiKol) : '';
       const first = (x.hangMucMoiKol?.[0] ?? x.hangMucTongCampaign?.[0])?.format;
-      const nextFormatKey = first && first in PRICE_FORMAT_LABELS ? (first as PriceFormatKey) : formatKey;
-      const nextPartnerType = x.doiTac === 'kol' || x.doiTac === 'community' || x.doiTac === 'both' ? x.doiTac : partnerType;
-      const nextKolTarget = x.soLuongKol > 0 ? Number(x.soLuongKol) : kolTargetCount;
-      const nextCommTarget = x.soLuongCommunity > 0 ? Number(x.soLuongCommunity) : communityTargetCount;
-      const nextSoLuong = x.soLuongKol > 0 ? Number(x.soLuongKol) : soLuong;
-      const nextKpiTopics = x.kpiTopics != null ? Number(x.kpiTopics) || null : kpiTopics;
-      const nextKpiComments = x.kpiComments != null ? Number(x.kpiComments) || null : kpiComments;
-      const nextKpiBuzz = x.kpiBuzz != null ? Number(x.kpiBuzz) || null : kpiBuzz;
+      const nextFormatKey = first && first in PRICE_FORMAT_LABELS ? (first as PriceFormatKey) : 'video';
+      const nextPartnerType = ['kol', 'community', 'both'].includes(x.doiTac) ? (x.doiTac as BriefPartnerType) : null;
+      const nextKolTarget = x.soLuongKol && Number(x.soLuongKol) > 0 ? Number(x.soLuongKol) : null;
+      const nextCommTarget = x.soLuongCommunity && Number(x.soLuongCommunity) > 0 ? Number(x.soLuongCommunity) : null;
+      const nextKpiTopics = x.kpiTopics != null && Number(x.kpiTopics) > 0 ? Number(x.kpiTopics) : null;
+      const nextKpiComments = x.kpiComments != null && Number(x.kpiComments) > 0 ? Number(x.kpiComments) : null;
+      const nextKpiBuzz = x.kpiBuzz != null && Number(x.kpiBuzz) > 0 ? Number(x.kpiBuzz) : null;
       const nextPillars =
         Array.isArray(x.pillars) && x.pillars.length > 0
           ? x.pillars.map((p: any) => ({ name: String(p.name ?? '').trim(), percent: Number(p.percent) || 0 }))
-          : pillars;
+          : [];
       const nextServices =
         Array.isArray(x.services) && x.services.length > 0
           ? x.services.map((s: any) => ({
@@ -343,7 +334,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
               quantity: Number(s.quantity ?? s.soLuong) || 1,
               scope: s.scope === 'per_partner' ? 'per_partner' : 'phase',
             }))
-          : services;
+          : [];
 
       setLinhVuc(nextLinhVuc);
       setNenTang(nextNenTang);
@@ -353,7 +344,6 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       setPartnerType(nextPartnerType);
       setKolTargetCount(nextKolTarget);
       setCommunityTargetCount(nextCommTarget);
-      setSoLuong(nextSoLuong);
       setKpiTopics(nextKpiTopics);
       setKpiComments(nextKpiComments);
       setKpiBuzz(nextKpiBuzz);
@@ -370,7 +360,6 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
         followerMin: nextFollower,
         budgetMax: nextBudget,
         formatKey: nextFormatKey,
-        soLuong: nextSoLuong,
         kpiTopics: nextKpiTopics,
         kpiComments: nextKpiComments,
         kpiBuzz: nextKpiBuzz,
@@ -403,13 +392,15 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     const shouldSearchComm = partnerType === 'community' || partnerType === 'both' || partnerType === null;
 
     if (shouldSearchKol) {
+      const minFolNum = followerMin === '' ? undefined : Number(followerMin);
+      const maxBudNum = budgetMax === '' ? undefined : Number(budgetMax);
       const ranked = rankKolsForRecommendation(pool, {
         linhVuc: linhVuc.trim(),
         nenTang: nenTang as any,
-        followerToiThieu: followerMin === '' ? undefined : Number(followerMin),
-        nganSachToiDa: budgetMax === '' ? undefined : Number(budgetMax),
+        followerToiThieu: minFolNum,
+        nganSachToiDa: maxBudNum,
         formatNganSach: formatKey,
-        // Số lượng brief (kolTargetCount/soLuong) CHỈ để đối chiếu ở tiêu đề nhóm —
+        // Số lượng brief (kolTargetCount) CHỈ để đối chiếu ở tiêu đề nhóm —
         // không truyền vào engine vì engine cắt cứng kết quả theo soLuongCan.
         soLuongCan: 0,
       });
@@ -424,10 +415,11 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     }
 
     if (shouldSearchComm) {
+      const minFolForComm = followerMin === '' ? 0 : Number(followerMin);
       const briefForComm = readProjectBrief({
         category: linhVuc.trim(),
         platform: nenTang === 'TatCa' ? '' : nenTang,
-        minFollowers: followerMin === '' ? 0 : Number(followerMin),
+        minFollowers: minFolForComm,
         services: services.map(s => ({
           name: s.name.trim(),
           unit: s.unit.trim() || 'bài',
@@ -448,16 +440,17 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
   async function saveBriefToPhase() {
     if (!phase) return;
     const existingBrief = phase.brief ?? {};
+    const minFolSaved = followerMin === '' ? 0 : Number(followerMin);
     const newBrief = {
       ...existingBrief,
       text: briefText.trim(),
       category: linhVuc.trim(),
       platform: nenTang === 'TatCa' ? '' : nenTang,
-      minFollowers: followerMin === '' ? 0 : Number(followerMin),
+      minFollowers: minFolSaved,
       partnerType: partnerType ?? null,
       kolTargetCount: kolTargetCount != null ? Number(kolTargetCount) : null,
       communityTargetCount: communityTargetCount != null ? Number(communityTargetCount) : null,
-      targetCount: kolTargetCount != null ? Number(kolTargetCount) : soLuong || null,
+      targetCount: kolTargetCount != null ? Number(kolTargetCount) : null,
       kpiTopics: kpiTopics != null ? Number(kpiTopics) : null,
       kpiComments: kpiComments != null ? Number(kpiComments) : null,
       kpiBuzz: kpiBuzz != null ? Number(kpiBuzz) : null,
@@ -669,11 +662,12 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
                 <input
                   aria-label="Số KOL cần"
                   className={field}
-                  type="number"
-                  min={0}
-                  max={10000}
-                  value={kolTargetCount ?? ''}
-                  onChange={e => setKolTargetCount(numOrNull(e.target.value))}
+                  inputMode="numeric"
+                  value={kolTargetCount == null ? '' : formatMoneyInput(kolTargetCount)}
+                  onChange={e => {
+                    const v = parseMoneyInput(e.target.value);
+                    setKolTargetCount(v === '' ? null : v);
+                  }}
                   placeholder="Số creator/KOL"
                 />
               </label>
@@ -682,11 +676,12 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
                 <input
                   aria-label="Số Community cần"
                   className={field}
-                  type="number"
-                  min={0}
-                  max={10000}
-                  value={communityTargetCount ?? ''}
-                  onChange={e => setCommunityTargetCount(numOrNull(e.target.value))}
+                  inputMode="numeric"
+                  value={communityTargetCount == null ? '' : formatMoneyInput(communityTargetCount)}
+                  onChange={e => {
+                    const v = parseMoneyInput(e.target.value);
+                    setCommunityTargetCount(v === '' ? null : v);
+                  }}
                   placeholder="Số page/group"
                 />
               </label>
@@ -696,10 +691,12 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
               <input
                 aria-label="KPI: tổng số bài viết (topics)"
                 className={field}
-                type="number"
-                min={0}
-                value={kpiTopics ?? ''}
-                onChange={e => setKpiTopics(numOrNull(e.target.value))}
+                inputMode="numeric"
+                value={kpiTopics == null ? '' : formatMoneyInput(kpiTopics)}
+                onChange={e => {
+                  const v = parseMoneyInput(e.target.value);
+                  setKpiTopics(v === '' ? null : v);
+                }}
                 placeholder="VD: 100 = tổng 100 bài toàn phase"
               />
             </label>
@@ -708,10 +705,12 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
               <input
                 aria-label="KPI: tổng số bình luận (comments)"
                 className={field}
-                type="number"
-                min={0}
-                value={kpiComments ?? ''}
-                onChange={e => setKpiComments(numOrNull(e.target.value))}
+                inputMode="numeric"
+                value={kpiComments == null ? '' : formatMoneyInput(kpiComments)}
+                onChange={e => {
+                  const v = parseMoneyInput(e.target.value);
+                  setKpiComments(v === '' ? null : v);
+                }}
                 placeholder="VD: 8000 = tổng trên các bài"
               />
             </label>
@@ -720,10 +719,12 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
               <input
                 aria-label="KPI: buzz mục tiêu"
                 className={field}
-                type="number"
-                min={0}
-                value={kpiBuzz ?? ''}
-                onChange={e => setKpiBuzz(numOrNull(e.target.value))}
+                inputMode="numeric"
+                value={kpiBuzz == null ? '' : formatMoneyInput(kpiBuzz)}
+                onChange={e => {
+                  const v = parseMoneyInput(e.target.value);
+                  setKpiBuzz(v === '' ? null : v);
+                }}
                 placeholder="Buzz = like + share + comment"
               />
             </label>
@@ -835,7 +836,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
             Nền tảng
             <select className={field} value={nenTang} disabled={parsing} onChange={e => setNenTang(e.target.value)}>
               <option value="TatCa">Tất cả</option>
-              {[...PLATFORMS, 'Threads'].map(p => (
+              {PLATFORMS.map(p => (
                 <option key={p} value={p}>{p}</option>
               ))}
             </select>
@@ -848,17 +849,13 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
             Ngân sách tối đa / KOL (VND)
             <input className={field} inputMode="numeric" disabled={parsing} value={formatMoneyInput(budgetMax)} onChange={e => setBudgetMax(parseMoneyInput(e.target.value))} />
           </label>
-          <label className="text-sm">
+          <label className="text-sm sm:col-span-2">
             Hạng mục tính giá & điểm
             <select className={field} value={formatKey} disabled={parsing} onChange={e => setFormatKey(e.target.value as PriceFormatKey)}>
               {Object.entries(PRICE_FORMAT_LABELS).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>
               ))}
             </select>
-          </label>
-          <label className="text-sm">
-            Số lượng mục tiêu mặc định (chỉ để đối chiếu, không giới hạn kết quả)
-            <input className={field} type="number" min={1} max={100} disabled={parsing} value={soLuong} onChange={e => setSoLuong(Number(e.target.value) || 10)} />
           </label>
         </div>
 
@@ -911,7 +908,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="font-semibold text-base text-slate-900">
                 Creator / KOL — {kolTargetCount != null ? `cần ${kolTargetCount.toLocaleString('vi-VN')} · ` : ''}tìm thấy {results ? results.length.toLocaleString('vi-VN') : 0} hồ sơ phù hợp
-                <span className="font-normal text-slate-500 text-sm ml-2">· đã chọn {selectedIds.length}</span>
+                <span className="font-normal text-slate-500 text-sm ml-2">· đã chọn {selectedIds.length} {kolTargetCount != null ? `(mục tiêu brief: ${kolTargetCount} KOL — chỉ để đối chiếu tiến độ)` : '(chỉ để đối chiếu tiến độ)'}</span>
               </h3>
               {results && (
                 <p className="text-xs text-slate-500 -mt-1">
