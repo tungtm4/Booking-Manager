@@ -27,6 +27,11 @@ test('Đề xuất: Community tìm từ kho Community riêng', () => {
   assert.ok(proposal.includes('assessCommunity'), 'đề xuất Community phải chấm theo tiêu chí Community');
 });
 
+test('Hồi quy: modal import tìm dòng tiêu đề cột bằng chấm điểm, không chọn nhầm dòng tiêu đề lớn của bảng', () => {
+  const modal = readFileSync(new URL('../src/components/CommunityImportModal.tsx', import.meta.url), 'utf8');
+  assert.ok(modal.includes('findCommunityHeaderRow'), 'modal phải dùng findCommunityHeaderRow để tránh chọn nhầm dòng tiêu đề BÁO GIÁ');
+});
+
 test('Đợt 13: import giữ dịch vụ khi thiếu giá, loại chưa rõ phải chọn, nhãn quy mô thống nhất, ghi chú hạng mục và gói comment', () => {
   const modal = readFileSync(new URL('../src/components/CommunityImportModal.tsx', import.meta.url), 'utf8');
   const domain = readFileSync(new URL('../src/domain/community.ts', import.meta.url), 'utf8');

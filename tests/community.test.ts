@@ -4,7 +4,7 @@ import express from 'express';
 import {createWorkspace} from '../server/workspace';
 import {briefKpiOf,communityScaleLabel,pillarPostCounts} from '../src/domain/community';
 import {calculateProjectFinance} from '../src/domain/projectFinance';
-import {detectCommunityColumns,parseVietnameseCount,rowsToCommunityProfiles,DEFAULT_PRICE_CONDITIONS,DEFAULT_PRICE_SERVICE_NAME} from '../src/utils/communityImport';
+import {detectCommunityColumns,findCommunityHeaderRow,parseVietnameseCount,rowsToCommunityProfiles,DEFAULT_PRICE_CONDITIONS,DEFAULT_PRICE_SERVICE_NAME} from '../src/utils/communityImport';
 
 // Kiểm thử hành vi Community — chạy trên database thử trong bộ nhớ,
 // KHÔNG chạm dữ liệu dự án thật và không nhập dữ liệu thật vào kho.
@@ -394,3 +394,34 @@ test('Đợt 13 — Gói comment: bắt buộc số comment mỗi gói + phạm 
   assert.equal(customer.body.items[0].scopeNote,'Phân bổ trên 100 bài trong tháng 11');
   assert.equal(JSON.stringify(customer.body).includes('buyUnitPrice'),false);
 }));
+
+test('Hồi quy — Sheet thật có dòng tiêu đề lớn: nhận diện đúng dòng tiêu đề cột, không lấy nhầm dòng BÁO GIÁ',()=>{
+  // Cấu trúc y hệt sheet tham chiếu: dòng 1 là tiêu đề lớn chứa sẵn từ khóa
+  // FANPAGE/GROUP + BÁO GIÁ; dòng 2 mới là tiêu đề cột thật.
+  const rows:any[][]=[
+    ['BÁO GIÁ BOOKING FANPAGE/GROUP TRUYỀN THÔNG, TỔNG HỢP, GIẢI TRÍ, PHIM','','','','','','',''],
+    ['NO.','FANPAGE/ GROUP','LINK','FOLLOWERS ','LOẠI ','CHỦ ĐỀ','INSIGHT ','BÀI ĐĂNG ẢNH/VIDEO\n(Do Khách hàng cung cấp)'],
+    ['MASS AUDIENCE','','','','','','',''],
+    ['1',"911. What's your emergency?",'https://www.facebook.com/LovelyMimiFP','1.300.000','Fanpage ','Tin tức, Tổng hợp ','Null','7.500.000'],
+    ['2','Beatvn','https://www.facebook.com/beatvn','3.300.000','Fanpage','Tin tức','https://drive.google.com/insight-beatvn','17.000.000'],
+    ['3','Group Phim Hay','https://www.facebook.com/groups/phimhay','200.000','Group','Phim','URL',''],
+  ];
+  const {headerRowIndex,mapping}=findCommunityHeaderRow(rows);
+  assert.equal(headerRowIndex,1);
+  assert.deepEqual(mapping,{ten:1,link:2,quyMo:3,loai:4,chuDe:5,insight:6,gia:7});
+  const full={ten:mapping.ten!,link:mapping.link!,quyMo:mapping.quyMo!,loai:mapping.loai!,chuDe:mapping.chuDe!,insight:mapping.insight!,gia:mapping.gia!};
+  const {profiles,loaiUndetermined}=rowsToCommunityProfiles(rows,full,{metricMode:'theo_loai',priceServiceName:DEFAULT_PRICE_SERVICE_NAME,priceConditions:DEFAULT_PRICE_CONDITIONS,sourceName:'Google Sheet',dataStartIndex:headerRowIndex+1});
+  assert.equal(profiles.length,3); // dòng tiêu đề nhóm MASS AUDIENCE bị bỏ qua
+  assert.deepEqual(loaiUndetermined,[]); // cột LOẠI ghi rõ Fanpage/Group
+  assert.equal(profiles[0].ten,"911. What's your emergency?");
+  assert.equal(profiles[0].quyMo,1_300_000);
+  assert.equal(profiles[0].loaiChiSo,'followers');
+  assert.equal(profiles[0].dichVu[0].giaThamKhao,7_500_000);
+  assert.equal(profiles[0].linkInsight,undefined); // "Null" không phải link insight
+  assert.equal(profiles[1].linkInsight,'https://drive.google.com/insight-beatvn');
+  assert.equal(profiles[2].loai,'group');assert.equal(profiles[2].loaiChiSo,'members');
+  assert.equal(profiles[2].dichVu[0].giaThamKhao,null); // giá trống vẫn giữ dịch vụ
+  // Bảng không có dòng tiêu đề lớn: dòng đầu tiên chính là tiêu đề cột.
+  const noTitle=findCommunityHeaderRow([rows[1],rows[3]]);
+  assert.equal(noTitle.headerRowIndex,0);
+});

@@ -4,7 +4,7 @@ import type { CommunityProfile } from '../types/community';
 import { CommunityService } from '../services/communityService';
 import { communityScaleLabel } from '../domain/community';
 import {
-  detectCommunityColumns, rowsToCommunityProfiles,
+  findCommunityHeaderRow, rowsToCommunityProfiles,
   DEFAULT_PRICE_SERVICE_NAME, DEFAULT_PRICE_CONDITIONS,
   type CommunityColumnMapping, type CommunityMetricMode, type SkippedRow,
 } from '../utils/communityImport';
@@ -58,13 +58,9 @@ export function CommunityImportModal({ isOpen, onClose, onApplied }: { isOpen: b
   function acceptRows(loaded: unknown[][], sourceLabel: string) {
     setRows(loaded);
     setSourceName(prev => prev || sourceLabel);
-    // Tìm dòng tiêu đề: dòng đầu tiên trong 10 dòng đầu có cột Tên nhận diện được.
-    let headerIdx = 0;
-    let detected: Partial<CommunityColumnMapping> = {};
-    for (let i = 0; i < Math.min(10, loaded.length); i++) {
-      const d = detectCommunityColumns(loaded[i] ?? []);
-      if (d.ten !== undefined) { headerIdx = i; detected = d; break; }
-    }
+    // Tìm dòng tiêu đề cột THẬT bằng chấm điểm (bảng có dòng tiêu đề lớn ở trên
+    // chứa sẵn từ khóa Fanpage/Giá — không được chọn nhầm dòng đó).
+    const { headerRowIndex: headerIdx, mapping: detected } = findCommunityHeaderRow(loaded);
     setHeaderRowIndex(headerIdx);
     setMapping({ ten: detected.ten ?? -1, link: detected.link ?? -1, quyMo: detected.quyMo ?? -1, loai: detected.loai ?? -1, chuDe: detected.chuDe ?? -1, insight: detected.insight ?? -1, gia: detected.gia ?? -1 });
     setStep('mapping');

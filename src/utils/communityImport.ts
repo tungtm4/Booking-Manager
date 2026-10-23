@@ -49,6 +49,32 @@ export function detectCommunityColumns(headerRow: unknown[]): Partial<CommunityC
   return out;
 }
 
+/**
+ * Tìm dòng tiêu đề cột THẬT trong các dòng đầu của bảng. Nhiều bảng báo giá có
+ * dòng tiêu đề lớn ở trên (VD "BÁO GIÁ BOOKING FANPAGE/GROUP…") chứa sẵn các từ
+ * khóa Fanpage/Giá nên nhận diện theo kiểu "dòng đầu tiên có cột Tên" sẽ chọn
+ * nhầm dòng tiêu đề đó. Cách đúng: chấm điểm mọi dòng ứng viên theo số cột nhận
+ * diện được (ưu tiên các cột dữ liệu link/quy mô/loại) và trừ điểm khi mọi cột
+ * nhận diện dồn vào cùng một ô — đặc trưng của dòng tiêu đề gộp.
+ */
+export function findCommunityHeaderRow(rows: unknown[][], maxScan = 10): { headerRowIndex: number; mapping: Partial<CommunityColumnMapping> } {
+  const fields = ['ten', 'link', 'quyMo', 'loai', 'chuDe', 'insight', 'gia'] as const;
+  let best = { headerRowIndex: 0, mapping: {} as Partial<CommunityColumnMapping>, score: -1 };
+  const limit = Math.min(maxScan, rows.length);
+  for (let i = 0; i < limit; i++) {
+    const d = detectCommunityColumns(rows[i] ?? []);
+    if (d.ten === undefined) continue;
+    let score = fields.filter(k => d[k] !== undefined).length * 10;
+    if (d.link !== undefined) score += 3;
+    if (d.quyMo !== undefined) score += 3;
+    if (d.loai !== undefined) score += 2;
+    const distinctCols = new Set(fields.map(k => d[k]).filter(v => v !== undefined));
+    if (distinctCols.size <= 1) score -= 15;
+    if (score > best.score) best = { headerRowIndex: i, mapping: d, score };
+  }
+  return { headerRowIndex: best.headerRowIndex, mapping: best.mapping };
+}
+
 /** Đọc số nguyên kiểu Việt: "1.300.000", "1,300,000", "890.687", "500K", "1.2M", "7.500.000đ". */
 export function parseVietnameseCount(v: unknown): number | null {
   if (typeof v === 'number') return Number.isFinite(v) && v >= 0 ? Math.round(v) : null;
