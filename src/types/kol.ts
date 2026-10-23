@@ -89,7 +89,8 @@ export interface KolProfile {
   danhGiaHieuQua?: RatingReview;
   isSample?: boolean;
   ngayTao: string; // ISO String
-  ngayCapNhat: string; // ISO String
+  ngayCapNhat: string; // ISO String — thời điểm cập nhật chính thức do server ghi
+  ngayCapNhatNguon?: string; // Ngày cập nhật của nguồn nhập (nếu có) — chỉ để đối chiếu, không thay ngày server
 }
 
 // Lập báo giá SOW

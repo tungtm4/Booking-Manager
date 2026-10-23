@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { rankKolsForRecommendation } from '../utils/recommendationEngine';
+import { LatestRequestGuard } from '../utils/latestRequestGuard';
 import { PRICE_FORMAT_LABELS, type PriceFormatKey, type RecommendationScore } from '../types/kol';
 import { formatFollowers, formatVND } from '../utils/formatters';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
@@ -35,6 +36,20 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
   const [resultsPage, setResultsPage] = useState(1), [resultsPageSize, setResultsPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [formSnapshot, setFormSnapshot] = useState('');
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  // Lỗi 3: mỗi yêu cầu phân tích AI gắn với (dự án, phase, lần yêu cầu) qua guard;
+  // yêu cầu cũ bị hủy (AbortController) và phản hồi cũ không được áp dụng vào state nào.
+  const parseGuardRef = useRef(new LatestRequestGuard());
+  const parseAbortRef = useRef<AbortController | null>(null);
+  function cancelParse() {
+    parseGuardRef.current.invalidate();
+    parseAbortRef.current?.abort();
+    parseAbortRef.current = null;
+    setParsing(false);
+  }
+  useEffect(() => () => {
+    parseGuardRef.current.dispose();
+    parseAbortRef.current?.abort();
+  }, []);
 
   type FormValues = { briefText: string; linhVuc: string; nenTang: string; followerMin: number | ''; budgetMax: number | ''; formatKey: PriceFormatKey; soLuong: number };
   const blankForm = (): FormValues => ({ briefText: '', linhVuc: '', nenTang: 'TatCa', followerMin: '', budgetMax: '', formatKey: 'video', soLuong: 10 });
@@ -99,8 +114,10 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
   const phase = phases.find((p: any) => p.id === phaseId) ?? null;
 
   // Chọn phase → xoá toàn bộ kết quả/lựa chọn/thông báo của ngữ cảnh trước, nạp form của phase mới.
+  // Đồng thời hủy mọi yêu cầu phân tích AI của ngữ cảnh trước.
   useEffect(() => {
     if (!phase) return;
+    cancelParse();
     applyForm(formFromPhase(phase));
     clearWork(false);
   }, [phaseId, phase?.id]);
@@ -112,10 +129,18 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
 
   async function parseBrief() {
     if (!briefText.trim()) { setParseMsg('Hãy nhập brief của phase trước khi phân tích.'); return; }
+    // Gắn yêu cầu với dự án + phase + lần yêu cầu này; hủy yêu cầu trước nếu còn chạy.
+    const token = parseGuardRef.current.begin(`${projectId}::${phaseId}`);
+    parseAbortRef.current?.abort();
+    const controller = new AbortController();
+    parseAbortRef.current = controller;
     setParsing(true); setParseMsg('');
     try {
-      const r = await fetch('/api/ai/parse-brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moTa: briefText.trim() }) });
+      const r = await fetch('/api/ai/parse-brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moTa: briefText.trim() }), signal: controller.signal });
       const d = await r.json();
+      // Phản hồi cũ (đổi phase/dự án, A → B → A, yêu cầu mới hơn, component đã đóng)
+      // không được chạm vào bất kỳ state nào.
+      if (!parseGuardRef.current.isCurrent(token)) return;
       if (!d.success || !d.data) { setParseMsg(friendlyAiMessage(d.message) || 'AI chưa phân tích được brief. Bạn vẫn có thể tự điền tiêu chí bên dưới.'); return; }
       const x = d.data;
       if (x.linhVuc) setLinhVuc(x.linhVuc);
@@ -128,8 +153,17 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       // Ảnh chụp = form TRƯỚC khi AI điền: mọi thay đổi sau phân tích đều coi là chỉnh sửa chưa áp dụng.
       setFormSnapshot(JSON.stringify(currentForm()));
       setParseMsg('AI đã phân tích brief và điền tiêu chí. Kiểm tra lại rồi bấm Tìm KOL phù hợp.');
-    } catch { setParseMsg('Không gọi được AI lúc này. Bạn vẫn có thể tự điền tiêu chí bên dưới.'); }
-    finally { setParsing(false); }
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError') return; // yêu cầu đã bị hủy — im lặng
+      if (!parseGuardRef.current.isCurrent(token)) return;
+      setParseMsg('Không gọi được AI lúc này. Bạn vẫn có thể tự điền tiêu chí bên dưới.');
+    } finally {
+      // Chỉ yêu cầu hiện hành mới được tắt trạng thái đang phân tích.
+      if (parseGuardRef.current.isCurrent(token)) {
+        setParsing(false);
+        if (parseAbortRef.current === controller) parseAbortRef.current = null;
+      }
+    }
   }
 
   function search() {
@@ -168,13 +202,13 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
         <h2 className="font-semibold">1. Chọn dự án & phase đích</h2>
         <div className="grid sm:grid-cols-2 gap-3">
           <label className="text-sm">Dự án
-            <select aria-label="Dự án đích" className={field} value={projectId} onChange={e => { const v = e.target.value; guardSwitch(() => { setProjectId(v); setPhaseId(''); setPhases([]); applyForm(blankForm()); clearWork(); }); }}>
+            <select aria-label="Dự án đích" className={field} value={projectId} onChange={e => { const v = e.target.value; guardSwitch(() => { cancelParse(); setProjectId(v); setPhaseId(''); setPhases([]); applyForm(blankForm()); clearWork(); }); }}>
               <option value="">Chọn dự án…</option>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </label>
           <label className="text-sm">Phase
-            <select aria-label="Phase đích" className={field} value={phaseId} onChange={e => { const v = e.target.value; guardSwitch(() => { setPhaseId(v); clearWork(); }); }} disabled={!phases.length}>
+            <select aria-label="Phase đích" className={field} value={phaseId} onChange={e => { const v = e.target.value; guardSwitch(() => { cancelParse(); setPhaseId(v); clearWork(); }); }} disabled={!phases.length}>
               <option value="">Chọn phase…</option>
               {phases.map((p: any) => <option key={p.id} value={p.id}>{p.name} ({PHASE_KIND_LABELS[p.kind as keyof typeof PHASE_KIND_LABELS]})</option>)}
             </select>
@@ -187,37 +221,37 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
 
       <section className="bg-white border rounded-2xl p-5 space-y-3">
         <h2 className="font-semibold">2. Brief & tiêu chí của phase</h2>
-        <textarea aria-label="Brief của phase để AI phân tích" className={field} rows={4} maxLength={10000} value={briefText} onChange={e => setBriefText(e.target.value)} placeholder="Brief của phase (tự nạp khi chọn phase, có thể sửa)…" />
+        <textarea aria-label="Brief của phase để AI phân tích" className={field} rows={4} maxLength={10000} value={briefText} disabled={parsing} onChange={e => setBriefText(e.target.value)} placeholder="Brief của phase (tự nạp khi chọn phase, có thể sửa)…" />
         <div className="flex gap-2 flex-wrap items-center">
           <button type="button" className={button} disabled={parsing || !briefText.trim()} onClick={parseBrief}>{parsing ? 'Đang phân tích…' : 'Phân tích brief bằng AI'}</button>
           {parseMsg && <span className="text-sm text-slate-600">{parseMsg}</span>}
         </div>
         <div className="grid sm:grid-cols-3 gap-3">
           <label className="text-sm">Lĩnh vực
-            <input className={field} value={linhVuc} onChange={e => setLinhVuc(e.target.value)} placeholder="VD: Làm đẹp" />
+            <input className={field} value={linhVuc} disabled={parsing} onChange={e => setLinhVuc(e.target.value)} placeholder="VD: Làm đẹp" />
           </label>
           <label className="text-sm">Nền tảng
-            <select className={field} value={nenTang} onChange={e => setNenTang(e.target.value)}>
+            <select className={field} value={nenTang} disabled={parsing} onChange={e => setNenTang(e.target.value)}>
               <option value="TatCa">Tất cả</option>
               {PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </label>
           <label className="text-sm">Follower tối thiểu
-            <input className={field} inputMode="numeric" value={formatMoneyInput(followerMin)} onChange={e => setFollowerMin(parseMoneyInput(e.target.value))} />
+            <input className={field} inputMode="numeric" disabled={parsing} value={formatMoneyInput(followerMin)} onChange={e => setFollowerMin(parseMoneyInput(e.target.value))} />
           </label>
           <label className="text-sm">Ngân sách tối đa / KOL (VND)
-            <input className={field} inputMode="numeric" value={formatMoneyInput(budgetMax)} onChange={e => setBudgetMax(parseMoneyInput(e.target.value))} />
+            <input className={field} inputMode="numeric" disabled={parsing} value={formatMoneyInput(budgetMax)} onChange={e => setBudgetMax(parseMoneyInput(e.target.value))} />
           </label>
           <label className="text-sm">Hạng mục tính giá & điểm
-            <select className={field} value={formatKey} onChange={e => setFormatKey(e.target.value as PriceFormatKey)}>
+            <select className={field} value={formatKey} disabled={parsing} onChange={e => setFormatKey(e.target.value as PriceFormatKey)}>
               {Object.entries(PRICE_FORMAT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </label>
           <label className="text-sm">Số lượng mục tiêu của brief (chỉ đối chiếu, không giới hạn kết quả)
-            <input className={field} type="number" min={1} max={100} value={soLuong} onChange={e => setSoLuong(Number(e.target.value) || 10)} />
+            <input className={field} type="number" min={1} max={100} disabled={parsing} value={soLuong} onChange={e => setSoLuong(Number(e.target.value) || 10)} />
           </label>
         </div>
-        <button type="button" className={button} disabled={!pool.length} onClick={search}>Tìm KOL phù hợp</button>
+        <button type="button" className={button} disabled={!pool.length || parsing} onClick={search}>Tìm KOL phù hợp</button>
         {!pool.length && <span className="text-sm text-slate-500 ml-2">Thư viện chưa có KOL nào.</span>}
       </section>
 

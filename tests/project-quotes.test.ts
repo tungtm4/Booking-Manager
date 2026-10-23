@@ -60,10 +60,12 @@ test('duyệt, baseline duy nhất, phiên bản bất biến và bản khách k
   const created=(await call(`/projects/${pid}/options`,{name:'A'},cookies.pm)).body;
   const qid=created.quoteId;
   await call(`/projects/${pid}/quotes/${qid}/save`,{revision:1,payload},cookies.pm);
+  // Dòng KOL nhập tay phải có xác nhận giá đầu vào do server ghi mới gửi duyệt được (Lỗi 1).
+  assert.equal((await call(`/projects/${pid}/quotes/${qid}/confirm-buy`,{itemId:'line-a',source:'Báo giá KOL A',revision:2},cookies.pm)).status,200);
   assert.equal((await call(`/projects/${pid}/quotes/${qid}/select`,{},cookies.pm)).status,400);
-  assert.equal((await call(`/projects/${pid}/quotes/${qid}/status`,{revision:2,status:'submitted'},cookies.pm)).status,200);
-  assert.equal((await call(`/projects/${pid}/quotes/${qid}/status`,{revision:3,status:'approved'},cookies.pm)).status,200);
-  assert.equal((await call(`/projects/${pid}/quotes/${qid}/save`,{revision:4,payload},cookies.pm)).status,409);
+  assert.equal((await call(`/projects/${pid}/quotes/${qid}/status`,{revision:3,status:'submitted'},cookies.pm)).status,200);
+  assert.equal((await call(`/projects/${pid}/quotes/${qid}/status`,{revision:4,status:'approved'},cookies.pm)).status,200);
+  assert.equal((await call(`/projects/${pid}/quotes/${qid}/save`,{revision:5,payload},cookies.pm)).status,409);
   assert.equal((await call(`/projects/${pid}/quotes/${qid}/select`,{},cookies.booking)).status,403);
   assert.equal((await call(`/projects/${pid}/quotes/${qid}/select`,{},cookies.pm)).status,200);
   const customer=await call(`/projects/${pid}/quotes/${qid}/customer`,undefined,cookies.pm);
@@ -75,8 +77,10 @@ test('duyệt, baseline duy nhất, phiên bản bất biến và bản khách k
   assert.equal(list.baselineId,qid);assert.equal(list.options[0].versions.length,2);assert.equal(list.options[0].versions[0].number,2);assert.equal(list.options[0].versions[0].id,next);
   const alt=(await call(`/projects/${pid}/options`,{name:'B'},cookies.pm)).body.quoteId;
   await call(`/projects/${pid}/quotes/${alt}/save`,{revision:1,payload},cookies.pm);
-  await call(`/projects/${pid}/quotes/${alt}/status`,{revision:2,status:'submitted'},cookies.pm);
-  await call(`/projects/${pid}/quotes/${alt}/status`,{revision:3,status:'approved'},cookies.pm);
+  // Phương án B dùng cùng dòng KOL nhập tay — cũng phải xác nhận giá trước khi duyệt (Lỗi 1).
+  assert.equal((await call(`/projects/${pid}/quotes/${alt}/confirm-buy`,{itemId:'line-a',source:'Báo giá KOL A',revision:2},cookies.pm)).status,200);
+  await call(`/projects/${pid}/quotes/${alt}/status`,{revision:3,status:'submitted'},cookies.pm);
+  await call(`/projects/${pid}/quotes/${alt}/status`,{revision:4,status:'approved'},cookies.pm);
   await call(`/projects/${pid}/quotes/${alt}/select`,{},cookies.pm);
   assert.equal((await call(`/projects/${pid}/options`,undefined,cookies.pm)).body.baselineId,alt);
 }));

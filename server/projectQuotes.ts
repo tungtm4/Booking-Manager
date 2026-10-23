@@ -10,6 +10,9 @@ export interface ProjectQuoteItem {
   kind:'kol'|'buzz'|'seeding'|'production'|'other';
   quantity:number; buyUnitPrice:number|null; sellUnitPrice:number|null; included:boolean;
   shortlistId?:string; format?:string; priceSnapshot?:unknown;
+  // Xác nhận giá đầu vào cho dòng KOL nhập tay — CHỈ server ghi qua endpoint xác nhận,
+  // client không tự đặt được (bản lưu luôn lấy từ dữ liệu server đã có).
+  buyConfirmation?:{value:number; source:string; checkedBy:string; checkedByName:string; checkedAt:string};
 }
 export interface QuotePayload {
   client:string; campaign:string; items:ProjectQuoteItem[];
@@ -37,16 +40,26 @@ const finance=(p:QuotePayload)=>{
 };
 // Cổng giá (kiểm soát ở server): chỉ các dòng ĐƯỢC TÍNH vào báo giá (included) mới chặn
 // gửi duyệt / duyệt / chốt. Giá 0 là giá hợp lệ, không tính là thiếu giá.
-// Giá đầu vào "chưa xác nhận" áp dụng cho dòng lấy từ danh sách KOL (có priceSnapshot);
-// dòng chi phí nhập trực tiếp không có bước xác nhận riêng nên chỉ cần có giá.
+// MỌI dòng KOL được tính đều phải có giá đầu vào ĐÃ XÁC NHẬN, bất kể tạo thủ công,
+// từ danh sách hay từ phase:
+// - Dòng lấy từ danh sách KOL: xác nhận nằm trong priceSnapshot (Booking xác nhận ở danh sách).
+// - Dòng KOL nhập tay: xác nhận nằm trong buyConfirmation do server ghi qua endpoint xác nhận;
+//   xác nhận chỉ còn hiệu lực khi giá hiện tại đúng bằng giá đã xác nhận (đổi giá = mất xác nhận).
+// Chi phí trực tiếp không phải KOL chỉ cần có đủ giá, không có bước xác nhận riêng.
+const buyConfirmed=(i:ProjectQuoteItem):boolean=>{
+  const snap=(i as unknown as {priceSnapshot?:{status?:string}}).priceSnapshot;
+  if(snap)return snap.status==='confirmed';
+  if(i.kind!=='kol')return true;
+  const c=i.buyConfirmation;
+  return !!c&&c.value===i.buyUnitPrice;
+};
 const priceGate=(p:QuotePayload)=>{
   let missingBuy=0,missingSell=0,unconfirmedBuy=0;
   for(const i of p.items){
     if(!i.included)continue;
     if(i.buyUnitPrice===null)missingBuy++;
     if(i.sellUnitPrice===null)missingSell++;
-    const snap=(i as unknown as {priceSnapshot?:{status?:string}}).priceSnapshot;
-    if(i.buyUnitPrice!==null&&snap&&snap.status!=='confirmed')unconfirmedBuy++;
+    if(i.buyUnitPrice!==null&&i.kind==='kol'&&!buyConfirmed(i))unconfirmedBuy++;
   }
   return {missingBuy,missingSell,unconfirmedBuy,ok:missingBuy===0&&missingSell===0&&unconfirmedBuy===0};
 };
@@ -55,7 +68,7 @@ const priceGateMessage=(g:ReturnType<typeof priceGate>)=>{
   if(g.missingBuy)parts.push(`thiếu giá đầu vào ở ${g.missingBuy} dòng`);
   if(g.unconfirmedBuy)parts.push(`giá đầu vào chưa xác nhận ở ${g.unconfirmedBuy} dòng`);
   if(g.missingSell)parts.push(`thiếu giá bán ở ${g.missingSell} dòng`);
-  return `Chưa thể gửi duyệt, duyệt hoặc chốt báo giá: ${parts.join('; ')}. Hãy bổ sung/xác nhận giá trong danh sách KOL của dự án rồi lấy lại giá vào bản nháp.`;
+  return `Chưa thể gửi duyệt, duyệt hoặc chốt báo giá: ${parts.join('; ')}. Với dòng KOL nhập tay, hãy xác nhận giá ngay trong bản nháp; với dòng lấy từ danh sách KOL, hãy xác nhận trong danh sách KOL của dự án rồi lấy lại giá vào bản nháp.`;
 };
 const cleanItems=(items:ProjectQuoteItem[])=>items.map(i=>({id:i.id,creator:i.creator.trim(),description:i.description.trim(),phase:i.phase.trim(),kind:i.kind,quantity:i.quantity,buyUnitPrice:i.buyUnitPrice,sellUnitPrice:i.sellUnitPrice,included:i.included}));
 
@@ -83,7 +96,7 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     const common={id:q.id,optionId:q.option_id,number:q.number,status:q.status,revision:q.revision,createdAt:q.created_at};
     if(manage)return {...common,...p,finance:finance(p)};
     // Allowlist: không gửi giá bán, fee, chiết khấu, thuế, tổng doanh thu hay P&L cho Booking.
-    return {...common,client:p.client,campaign:p.campaign,items:p.items.map(i=>({id:i.id,creator:i.creator,description:i.description,phase:i.phase,kind:i.kind,quantity:i.quantity,buyUnitPrice:i.buyUnitPrice,included:i.included,shortlistId:i.shortlistId,format:i.format,priceSnapshot:i.priceSnapshot}))};
+    return {...common,client:p.client,campaign:p.campaign,items:p.items.map(i=>({id:i.id,creator:i.creator,description:i.description,phase:i.phase,kind:i.kind,quantity:i.quantity,buyUnitPrice:i.buyUnitPrice,included:i.included,shortlistId:i.shortlistId,format:i.format,priceSnapshot:i.priceSnapshot,buyConfirmation:i.buyConfirmation}))};
   };
   router.post('/projects/:id/details',(req,res)=>{
     const u=res.locals.user;if(!access(u,req.params.id,true))return res.status(403).json({message:'Chỉ PM hoặc Admin hệ thống được cập nhật thông tin.'});
@@ -131,18 +144,48 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
       const current=project(pid);
       p={client:current.client_name,campaign:current.campaign_name||current.name,items:cleanItems(req.body.payload.items),discount:req.body.payload.discount,agencyFee:req.body.payload.agencyFee,taxRate:req.body.payload.taxRate};
       p.items=p.items.map(i=>{const old=originalItems.find(o=>o.id===i.id);return old?.shortlistId?{...i,kind:'kol',creator:old.creator,buyUnitPrice:old.buyUnitPrice,shortlistId:old.shortlistId,format:old.format,priceSnapshot:old.priceSnapshot}:i;});
+      // Xác nhận giá của dòng KOL nhập tay: KHÔNG nhận từ payload của client (cleanItems đã
+      // loại bỏ). Chỉ giữ lại xác nhận server đã ghi khi giá đầu vào không đổi; đổi giá là
+      // mất xác nhận và phải xác nhận lại qua endpoint xác nhận.
+      p.items=p.items.map(i=>{
+        if(i.shortlistId)return i;
+        const old=originalItems.find(o=>o.id===i.id);
+        return old&&!old.shortlistId&&old.buyConfirmation&&old.buyUnitPrice===i.buyUnitPrice?{...i,buyConfirmation:old.buyConfirmation}:i;
+      });
     }else{
       if(Object.keys(req.body).some(k=>!['revision','buyPrices'].includes(k))||!Array.isArray(req.body.buyPrices)||req.body.buyPrices.length>500)return res.status(403).json({message:'Booking chỉ được cập nhật giá đầu vào.'});
       const updates=req.body.buyPrices;
       if(updates.some((x:any)=>!x||Object.keys(x).some(k=>!['id','buyUnitPrice'].includes(k))||!p.items.some(i=>i.id===x.id)||!validMoney(x.buyUnitPrice)))return res.status(400).json({message:'Giá đầu vào hoặc hạng mục không hợp lệ.'});
       if(updates.some((x:any)=>{const i=p.items.find(i=>i.id===x.id)!;return i.shortlistId&&i.buyUnitPrice!==x.buyUnitPrice;}))return res.status(403).json({message:'Giá KOL đã chụp vào phương án không được sửa tại đây. Cập nhật giá tại danh sách chung rồi đề nghị PM lập phiên bản mới.'});
       // null là xóa giá về trạng thái chờ xác nhận, không phải giá miễn phí.
-      for(const update of updates)p.items.find(i=>i.id===update.id)!.buyUnitPrice=update.buyUnitPrice;
+      // Đổi giá đầu vào của dòng KOL nhập tay làm mất xác nhận đã ghi trước đó.
+      for(const update of updates){const it=p.items.find(i=>i.id===update.id)!;if(it.buyUnitPrice!==update.buyUnitPrice&&it.buyConfirmation)delete it.buyConfirmation;it.buyUnitPrice=update.buyUnitPrice;}
     }
     try{finance(p);}catch{return res.status(400).json({message:'Chiết khấu hoặc tổng tiền vượt phạm vi hợp lệ.'});}
     const result=db.prepare('UPDATE project_quote_versions SET payload_json=?,revision=revision+1,status=\'draft\' WHERE id=? AND revision=?').run(JSON.stringify(p),q.id,q.revision);
     if(!result.changes)return res.status(409).json({message:'Báo giá đã thay đổi. Vui lòng tải lại.'});
     audit(u.id,'save_quote',q.id);res.json({quote:serialized(quote(q.id,pid),access(u,pid,true))});
+  });
+  // Xác nhận giá đầu vào cho dòng KOL NHẬP TAY trong bản nháp. Server tự ghi nguồn,
+  // người xác nhận (từ phiên đăng nhập) và thời điểm — client không tự đặt được các thông tin này.
+  router.post('/projects/:id/quotes/:quoteId/confirm-buy',(req,res)=>{
+    const u=res.locals.user;const pid=req.params.id;
+    if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật dự án này.'});
+    const q=quote(req.params.quoteId,pid);if(!q)return res.status(404).json({message:'Không tìm thấy báo giá trong dự án.'});
+    if(!['draft','changes_requested'].includes(q.status))return res.status(409).json({message:'Phiên bản đã gửi duyệt, duyệt hoặc chốt không sửa được. Hãy tạo phiên bản mới để bổ sung xác nhận giá.'});
+    if(!Number.isSafeInteger(req.body.revision)||req.body.revision!==q.revision)return res.status(409).json({message:'Báo giá đã thay đổi. Tải lại trước khi xác nhận.'});
+    const p=JSON.parse(q.payload_json) as QuotePayload;
+    const item=p.items.find(i=>i.id===req.body.itemId);
+    if(!item)return res.status(404).json({message:'Không tìm thấy dòng cần xác nhận trong báo giá.'});
+    if(item.kind!=='kol')return res.status(400).json({message:'Chỉ dòng KOL mới cần xác nhận giá đầu vào. Chi phí trực tiếp không có bước xác nhận riêng.'});
+    if(item.shortlistId)return res.status(400).json({message:'Dòng KOL lấy từ danh sách dự án được xác nhận tại danh sách KOL của dự án. Hãy xác nhận ở đó rồi lấy lại giá vào bản nháp.'});
+    if(item.buyUnitPrice===null)return res.status(400).json({message:'Dòng này chưa có giá đầu vào nên chưa thể xác nhận. Hãy nhập và lưu giá đầu vào trước.'});
+    const source=text(req.body.source,200);
+    if(!source)return res.status(400).json({message:'Nhập nguồn kiểm tra giá (ví dụ: báo giá KOL gửi ngày…, tin nhắn/email xác nhận…).'});
+    item.buyConfirmation={value:item.buyUnitPrice,source,checkedBy:u.id,checkedByName:typeof u.display_name==='string'?u.display_name:(typeof u.name==='string'?u.name:''),checkedAt:new Date().toISOString()};
+    const result=db.prepare('UPDATE project_quote_versions SET payload_json=?,revision=revision+1 WHERE id=? AND revision=?').run(JSON.stringify(p),q.id,q.revision);
+    if(!result.changes)return res.status(409).json({message:'Báo giá đã thay đổi. Vui lòng tải lại.'});
+    audit(u.id,'confirm_manual_buy_price',q.id);res.json({quote:serialized(quote(q.id,pid),access(u,pid,true))});
   });
   router.post('/projects/:id/quotes/:quoteId/new-version',(req,res)=>{
     const u=res.locals.user;const pid=req.params.id;

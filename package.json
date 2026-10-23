@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "node --import tsx --test tests/money-input.test.ts tests/ai-retry.test.mjs tests/project-foundation.test.ts tests/storage-update.test.ts tests/workspace.test.ts tests/project-quotes.test.ts tests/project-shortlist.test.ts tests/project-kol-card.test.ts tests/pagination.test.ts tests/project-phases.test.ts tests/project-phases-ui.test.mjs tests/phase-quote.test.ts tests/seven-fixes.test.ts tests/seven-fixes-ui.test.mjs"
+    "test": "node --import tsx --test tests/money-input.test.ts tests/ai-retry.test.mjs tests/project-foundation.test.ts tests/storage-update.test.ts tests/workspace.test.ts tests/project-quotes.test.ts tests/project-shortlist.test.ts tests/project-kol-card.test.ts tests/pagination.test.ts tests/project-phases.test.ts tests/project-phases-ui.test.mjs tests/phase-quote.test.ts tests/seven-fixes.test.ts tests/seven-fixes-ui.test.mjs tests/four-fixes.test.ts tests/four-fixes-ui.test.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

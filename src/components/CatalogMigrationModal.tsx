@@ -3,11 +3,13 @@ import type { KolProfile } from '../types/kol';
 import { CatalogService } from '../services/catalogService';
 
 interface PreviewData {
-  newItems: { id: string; ten: string }[];
-  unchanged: { id: string; ten: string }[];
-  conflicts: { id: string; ten: string; differentFields: string[] }[];
+  newItems: { id: string; ten: string; revision: null }[];
+  unchanged: { id: string; ten: string; revision: number }[];
+  conflicts: { id: string; ten: string; differentFields: string[]; revision: number }[];
   serverOnly: { id: string; ten: string }[];
 }
+
+interface StaleItem { id: string; ten: string; reason: string; }
 
 const CHUNK = 400;
 
@@ -24,15 +26,28 @@ async function previewAll(profiles: KolProfile[]): Promise<PreviewData> {
   return acc;
 }
 
-async function applyAll(profiles: KolProfile[], resolutions: Record<string, 'imported' | 'server'>) {
-  const total = { added: 0, updated: 0, unchanged: 0, keptServer: 0, serverOnly: 0 };
+/** Revision của bản server ĐÃ XEM ở bước xem trước — bước áp dụng gửi kèm để server
+ *  chỉ ghi đè đúng phiên bản đó; hồ sơ thay đổi sau xem trước sẽ bị chặn lại (stale). */
+function expectedRevisionsOf(preview: PreviewData): Record<string, number | null> {
+  const map: Record<string, number | null> = {};
+  for (const x of preview.newItems) map[x.id] = null;
+  for (const x of preview.unchanged) map[x.id] = x.revision;
+  for (const x of preview.conflicts) map[x.id] = x.revision;
+  return map;
+}
+
+async function applyAll(profiles: KolProfile[], resolutions: Record<string, 'imported' | 'server'>, expectedRevisions: Record<string, number | null>) {
+  const total = { added: 0, updated: 0, unchanged: 0, keptServer: 0, serverOnly: 0, stale: [] as StaleItem[] };
   for (let i = 0; i < profiles.length; i += CHUNK) {
     const part = profiles.slice(i, i + CHUNK);
     const ids = new Set(part.map(p => p.id));
     const sub: Record<string, 'imported' | 'server'> = {};
     for (const [k, v] of Object.entries(resolutions)) if (ids.has(k)) sub[k] = v;
-    const r = await CatalogService.migrationApply(part, sub);
+    const subExpected: Record<string, number | null> = {};
+    for (const [k, v] of Object.entries(expectedRevisions)) if (ids.has(k)) subExpected[k] = v;
+    const r = await CatalogService.migrationApply(part, sub, subExpected);
     total.added += r.added; total.updated += r.updated; total.unchanged += r.unchanged; total.keptServer += r.keptServer; total.serverOnly = r.serverOnly;
+    total.stale.push(...(r.stale ?? []));
   }
   return total;
 }
@@ -50,7 +65,7 @@ export function CatalogMigrationModal({ isOpen, onClose, sourceProfiles, sourceL
   const [resolutions, setResolutions] = useState<Record<string, 'imported' | 'server'>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<{ added: number; updated: number; unchanged: number; keptServer: number; serverOnly: number } | null>(null);
+  const [result, setResult] = useState<{ added: number; updated: number; unchanged: number; keptServer: number; serverOnly: number; stale: StaleItem[] } | null>(null);
 
   useEffect(() => {
     if (!isOpen || !sourceProfiles) return;
@@ -67,7 +82,7 @@ export function CatalogMigrationModal({ isOpen, onClose, sourceProfiles, sourceL
     if (!sourceProfiles || !preview) return;
     setBusy(true); setError('');
     try {
-      const r = await applyAll(sourceProfiles, resolutions);
+      const r = await applyAll(sourceProfiles, resolutions, expectedRevisionsOf(preview));
       setResult(r);
       onApplied();
     } catch (e) {
@@ -135,8 +150,17 @@ export function CatalogMigrationModal({ isOpen, onClose, sourceProfiles, sourceL
           {result && (
             <div className="space-y-3">
               <p role="status" className="p-3 bg-emerald-50 text-emerald-800 rounded-lg text-sm">
-                Đã nhập chuyển đổi xong: thêm mới {result.added} hồ sơ, ghi đè {result.updated} hồ sơ xung đột theo lựa chọn của bạn, giữ bản server ở {result.keptServer} hồ sơ xung đột, {result.unchanged} hồ sơ giống hệt được bỏ qua, {result.serverOnly} hồ sơ chỉ có trên server được giữ nguyên.
+                Đã áp dụng: thêm mới {result.added} hồ sơ, ghi đè {result.updated} hồ sơ xung đột theo lựa chọn của bạn, giữ bản server ở {result.keptServer} hồ sơ xung đột, {result.unchanged} hồ sơ giống hệt được bỏ qua, {result.serverOnly} hồ sơ chỉ có trên server được giữ nguyên.
               </p>
+              {result.stale.length > 0 && (
+                <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg text-sm space-y-1">
+                  <p className="font-semibold">{result.stale.length} hồ sơ CHƯA được áp dụng vì đã thay đổi trên server sau khi bạn xem trước:</p>
+                  <ul className="list-disc pl-5 max-h-32 overflow-y-auto">
+                    {result.stale.map(s => <li key={s.id}>{s.ten} — {s.reason}</li>)}
+                  </ul>
+                  <p>Bản trên server của các hồ sơ này được giữ nguyên. Đóng cửa sổ rồi mở lại nhập chuyển đổi để xem lại các xung đột mới.</p>
+                </div>
+              )}
               <div className="flex justify-end">
                 <button type="button" className="rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm font-semibold" onClick={onClose}>Xong</button>
               </div>

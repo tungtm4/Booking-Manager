@@ -84,7 +84,9 @@ export const CatalogService = {
     return api('/catalog/migration/preview', { profiles });
   },
 
-  async migrationApply(profiles: KolProfile[], resolutions: Record<string, 'imported' | 'server'>) {
-    return api('/catalog/migration/apply', { profiles, resolutions });
+  /** expectedRevisions: revision của bản server đã xem ở bước xem trước theo từng hồ sơ
+   *  (null = lúc xem trước chưa có trên server). Server chỉ ghi đè đúng phiên bản đã xem. */
+  async migrationApply(profiles: KolProfile[], resolutions: Record<string, 'imported' | 'server'>, expectedRevisions: Record<string, number | null>) {
+    return api('/catalog/migration/apply', { profiles, resolutions, expectedRevisions });
   },
 };

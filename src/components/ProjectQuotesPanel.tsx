@@ -1,8 +1,9 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {formatMoneyInput,parseMoneyInput} from '../utils/moneyInput';
+import {formatDateTimeVN} from '../utils/formatters';
 import {StorageService} from '../services/storageService';
 
-type Item={id:string;creator:string;description:string;phase:string;kind:string;quantity:number;buyUnitPrice:number|null;sellUnitPrice?:number|null;included:boolean;shortlistId?:string;format?:string;priceSnapshot?:any};
+type Item={id:string;creator:string;description:string;phase:string;kind:string;quantity:number;buyUnitPrice:number|null;sellUnitPrice?:number|null;included:boolean;shortlistId?:string;format?:string;priceSnapshot?:any;buyConfirmation?:{value:number;source:string;checkedByName:string;checkedAt:string}};
 async function request(path:string,body?:unknown){
   const r=await fetch('/api/workspace'+path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const d=await r.json();if(r.status===401)window.dispatchEvent(new Event('workspace_session_expired'));if(!r.ok)throw new Error(d.message||'Không thực hiện được yêu cầu.');return d;
@@ -12,13 +13,19 @@ const button='rounded-lg bg-indigo-600 text-white px-3 py-2 font-semibold text-s
 const statusLabel:Record<string,string>={draft:'Bản nháp',submitted:'Chờ duyệt',approved:'Đã duyệt',changes_requested:'Cần chỉnh sửa'};
 const money=(v:number|null|undefined)=>v==null?'Chưa đủ dữ liệu':formatMoneyInput(v)+' ₫';
 // Vấn đề giá của các dòng ĐƯỢC TÍNH vào báo giá (dòng bỏ chọn không gây chặn).
+// Khớp quy tắc ở server: mọi dòng KOL phải có giá đầu vào đã xác nhận — dòng từ danh sách
+// xét theo priceSnapshot, dòng nhập tay xét theo buyConfirmation còn khớp giá hiện tại.
+function manualBuyConfirmed(i:Item){const c=i.buyConfirmation;return !!c&&c.value===i.buyUnitPrice;}
 function priceProblems(list:Item[]){
   let lines=0,missingBuy=0,missingSell=0,unconfirmedBuy=0;
   for(const i of list){
     if(!i.included)continue;let bad=false;
     if(i.buyUnitPrice===null){missingBuy++;bad=true;}
     if(i.sellUnitPrice==null){missingSell++;bad=true;}
-    if(i.buyUnitPrice!==null&&i.priceSnapshot&&i.priceSnapshot.status!=='confirmed'){unconfirmedBuy++;bad=true;}
+    if(i.buyUnitPrice!==null&&i.kind==='kol'){
+      if(i.priceSnapshot){if(i.priceSnapshot.status!=='confirmed'){unconfirmedBuy++;bad=true;}}
+      else if(!manualBuyConfirmed(i)){unconfirmedBuy++;bad=true;}
+    }
     if(bad)lines++;
   }
   return {lines,missingBuy,missingSell,unconfirmedBuy};
@@ -31,6 +38,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
   const [customer,setCustomer]=useState<any>(null),[legacyId,setLegacyId]=useState('');
   const [phases,setPhases]=useState<any[]>([]),[fromName,setFromName]=useState(''),[fromPhaseIds,setFromPhaseIds]=useState<string[]>([]),[showPrint,setShowPrint]=useState(false);
   const [loadState,setLoadState]=useState<'loading'|'ready'|'error'>('loading'),[loadError,setLoadError]=useState('');
+  const [confirmSources,setConfirmSources]=useState<Record<string,string>>({});
   const loadSeqRef=useRef(0);
   const base=`/projects/${projectId}`;
   function loadQuote(q:any){setQuote(q);setItems(q?.items??[]);setDiscount(q?.discount??{mode:'fixed',value:0});setFee(q?.agencyFee??{mode:'percent',value:0});setTax(q?.taxRate??0);setDirty(false);setCustomer(null);}
@@ -120,7 +128,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
           <td className="p-3"><input aria-label={'Tính hạng mục '+(i.creator||'mới')} type="checkbox" checked={i.included} disabled={!editable||!manage} onChange={e=>updateItem(i.id,'included',e.target.checked)}/></td>
           <td className="p-3 space-y-2 min-w-64"><input aria-label="Tên KOL hoặc hạng mục" placeholder="Tên KOL / Buzz / Seeding" className={field} value={i.creator} disabled={!editable||!manage||Boolean(i.shortlistId)} onChange={e=>updateItem(i.id,'creator',e.target.value)}/><input aria-label="Mô tả SOW" placeholder="SOW: 1 video review, 2 clip ngắn…" className={field} value={i.description} disabled={!editable||!manage} onChange={e=>updateItem(i.id,'description',e.target.value)}/><div className="flex gap-2"><select aria-label="Loại chi phí" className={field} value={i.kind} disabled={!editable||!manage||Boolean(i.shortlistId)} onChange={e=>updateItem(i.id,'kind',e.target.value)}><option value="kol">KOL</option><option value="buzz">Buzz</option><option value="seeding">Seeding</option><option value="production">Sản xuất</option><option value="other">Khác</option></select><input aria-label="Phase" placeholder="Phase / Pillar" className={field} value={i.phase} disabled={!editable||!manage} onChange={e=>updateItem(i.id,'phase',e.target.value)}/></div></td>
           <td className="p-3 w-24"><input aria-label="Số lượng hạng mục" type="number" min={1} step={1} className={field} value={i.quantity} disabled={!editable||!manage} onChange={e=>updateItem(i.id,'quantity',Number(e.target.value))}/></td>
-          <td className="p-3 min-w-40"><input aria-label={'Giá đầu vào '+(i.creator||'mới')} className={field} inputMode="numeric" placeholder="Chưa có giá" disabled={!editable||Boolean(i.shortlistId)} value={formatMoneyInput(i.buyUnitPrice??'')} onChange={e=>{const n=parseMoneyInput(e.target.value);updateItem(i.id,'buyUnitPrice',n===''?null:n);}}/><p className="text-xs text-slate-500 mt-2">{!i.shortlistId?'':i.buyUnitPrice===null?'Chưa có giá đầu vào · ':i.priceSnapshot?.status==='confirmed'?`Đã xác nhận${i.priceSnapshot.source?' · nguồn: '+i.priceSnapshot.source:''} · `:'Giá đầu vào chưa xác nhận · '}Thành tiền: {i.buyUnitPrice===null?'Chờ giá':money(i.buyUnitPrice*i.quantity)}</p></td>
+          <td className="p-3 min-w-40"><input aria-label={'Giá đầu vào '+(i.creator||'mới')} className={field} inputMode="numeric" placeholder="Chưa có giá" disabled={!editable||Boolean(i.shortlistId)} value={formatMoneyInput(i.buyUnitPrice??'')} onChange={e=>{const n=parseMoneyInput(e.target.value);updateItem(i.id,'buyUnitPrice',n===''?null:n);}}/><p className="text-xs text-slate-500 mt-2">{i.shortlistId?(i.buyUnitPrice===null?'Chưa có giá đầu vào · ':i.priceSnapshot?.status==='confirmed'?`Đã xác nhận${i.priceSnapshot.source?' · nguồn: '+i.priceSnapshot.source:''} · `:'Giá đầu vào chưa xác nhận · '):i.kind==='kol'?(i.buyUnitPrice===null?'Chưa có giá đầu vào · ':manualBuyConfirmed(i)?`Đã xác nhận giá đầu vào · nguồn: ${i.buyConfirmation!.source}${i.buyConfirmation!.checkedByName?' · '+i.buyConfirmation!.checkedByName:''} · ${formatDateTimeVN(i.buyConfirmation!.checkedAt)} · `:i.buyConfirmation?'Giá đã thay đổi sau khi xác nhận — cần xác nhận lại · ':'Giá đầu vào chưa xác nhận · '):''}Thành tiền: {i.buyUnitPrice===null?'Chờ giá':money(i.buyUnitPrice*i.quantity)}</p>{editable&&!i.shortlistId&&i.kind==='kol'&&i.buyUnitPrice!==null&&!manualBuyConfirmed(i)&&<div className="mt-2 space-y-1">{dirty?<p className="text-xs text-amber-700">Lưu báo giá trước, rồi xác nhận giá của dòng nhập tay này.</p>:<div className="flex gap-1"><input aria-label={'Nguồn kiểm tra giá '+(i.creator||'mới')} className={field+' text-xs'} placeholder="Nguồn kiểm tra giá…" maxLength={200} value={confirmSources[i.id]??''} onChange={e=>setConfirmSources(prev=>({...prev,[i.id]:e.target.value}))}/><button type="button" className="border rounded-lg px-2 py-1 text-xs whitespace-nowrap bg-white" disabled={busy} onClick={()=>{const src=(confirmSources[i.id]??'').trim();if(!src){setError('Nhập nguồn kiểm tra giá trước khi xác nhận.');return;}run(async()=>{const r=await request(`${base}/quotes/${quote.id}/confirm-buy`,{itemId:i.id,source:src,revision:quote.revision});await refresh(r.quote.id);setNotice(`Đã xác nhận giá đầu vào cho dòng “${i.creator||'KOL nhập tay'}”.`);});}}>Xác nhận giá</button></div>}</div>}</td>
           {manage&&<td className="p-3 min-w-40"><input aria-label={'Giá báo khách '+(i.creator||'mới')} className={field} inputMode="numeric" placeholder="PM nhập giá bán" disabled={!editable} value={formatMoneyInput(i.sellUnitPrice??'')} onChange={e=>{const n=parseMoneyInput(e.target.value);updateItem(i.id,'sellUnitPrice',n===''?null:n);}}/><p className="text-xs text-slate-500 mt-2">Thành tiền: {i.sellUnitPrice==null?'Chưa có giá bán':money(i.sellUnitPrice*i.quantity)}</p></td>}{manage&&<td className="p-3 min-w-36">{i.buyUnitPrice===null||i.sellUnitPrice==null?'Chưa đủ giá':money((i.sellUnitPrice-i.buyUnitPrice)*i.quantity)}</td>}
         </tr>)}</tbody></table>{items.length===0&&<p className="p-6 text-slate-500">Chưa có hạng mục. Thêm dòng hoặc lấy từ báo giá cũ nếu bạn là Admin.</p>}</div>
         {manage&&<div className="grid sm:grid-cols-3 gap-3"><label className="text-sm">Chiết khấu khách hàng<select aria-label="Cách chiết khấu" className={field} disabled={!editable} value={discount.mode} onChange={e=>{setDiscount({mode:e.target.value,value:0});setDirty(true);}}><option value="fixed">Số tiền VND</option><option value="percent">Phần trăm</option></select><input aria-label="Giá trị chiết khấu" className={field} disabled={!editable} inputMode="decimal" value={discount.mode==='fixed'?formatMoneyInput(discount.value):discount.value} onChange={e=>{setDiscount({...discount,value:discount.mode==='fixed'?(parseMoneyInput(e.target.value)||0):Number(e.target.value)});setDirty(true);}}/></label>
@@ -128,6 +136,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
           <label className="text-sm">Thuế suất (%) — PM xác nhận<input aria-label="Thuế suất" type="number" min={0} max={100} step="0.01" className={field} value={tax} disabled={!editable} onChange={e=>{setTax(Number(e.target.value));setDirty(true);}}/><span className="text-xs text-slate-500">Không mặc định áp dụng mức thuế cho mọi dự án.</span></label>
         </div>}
         {manage&&['draft','changes_requested','submitted'].includes(quote.status)&&(()=>{const g=priceProblems(items);return g.lines>0?<p className="text-sm bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-lg">Còn {g.lines} dòng cần xử lý trước khi gửi duyệt, duyệt hoặc chốt{g.missingBuy?` · thiếu giá đầu vào: ${g.missingBuy} dòng`:''}{g.unconfirmedBuy?` · giá đầu vào chưa xác nhận: ${g.unconfirmedBuy} dòng`:''}{g.missingSell?` · thiếu giá bán: ${g.missingSell} dòng`:''}. Dòng không được tính vào báo giá (bỏ chọn) không gây chặn.</p>:null;})()}
+        {manage&&quote&&!editable&&(()=>{const g=priceProblems(items);return g.lines>0?<p className="text-sm bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-lg">Phiên bản V{quote.number} ({statusLabel[quote.status]}) còn {g.lines} dòng chưa đạt điều kiện giá hiện tại — có thể do dữ liệu cũ chưa có thông tin xác nhận giá đầu vào. Phiên bản đã gửi/duyệt/chốt không sửa được: hãy bấm “Tạo phiên bản mới” để bổ sung xác nhận giá rồi gửi duyệt lại.</p>:null;})()}
         <div className="flex flex-wrap gap-2">
           {editable&&<button className={button} disabled={busy||!dirty} onClick={()=>run(save)}>Lưu {manage?'báo giá':'giá đầu vào'}</button>}
           <button className="border px-3 py-2 rounded-lg text-sm" disabled={busy} onClick={()=>{if(!dirty||window.confirm('Bỏ các chỉnh sửa chưa lưu và tải lại?'))run(()=>refresh());}}>Tải lại dữ liệu</button>

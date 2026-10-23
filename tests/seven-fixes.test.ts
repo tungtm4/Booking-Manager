@@ -145,17 +145,19 @@ test('Vấn đề 7: nhập chuyển đổi có xem trước — không ghi đè
   const preview=(await call('/catalog/migration/preview',{profiles:incoming},cookies.admin)).body;
   assert.deepEqual(preview.unchanged.map((x:any)=>x.id),['mig-a']); // chỉ khác ngày cập nhật → coi như giống hệt
   assert.equal(preview.conflicts.length,1);assert.equal(preview.conflicts[0].id,'mig-b');
+  assert.equal(preview.conflicts[0].revision,1); // xem trước ghi nhận revision của bản server
   assert.ok(preview.conflicts[0].differentFields.includes('Bảng giá'));
   assert.deepEqual(preview.newItems.map((x:any)=>x.id),['mig-c']);
   assert.deepEqual(preview.serverOnly.map((x:any)=>x.id),['mig-d']);
+  const expected=Object.fromEntries([...preview.newItems.map((x:any)=>[x.id,null]),...preview.unchanged.map((x:any)=>[x.id,x.revision]),...preview.conflicts.map((x:any)=>[x.id,x.revision])]);
   // Áp dụng không chọn gì: xung đột giữ bản server, hồ sơ mới được thêm, hồ sơ riêng server còn nguyên.
-  const applied=(await call('/catalog/migration/apply',{profiles:incoming,resolutions:{}},cookies.admin)).body;
-  assert.equal(applied.added,1);assert.equal(applied.keptServer,1);assert.equal(applied.updated,0);
+  const applied=(await call('/catalog/migration/apply',{profiles:incoming,resolutions:{},expectedRevisions:expected},cookies.admin)).body;
+  assert.equal(applied.added,1);assert.equal(applied.keptServer,1);assert.equal(applied.updated,0);assert.equal(applied.stale.length,0);
   let list=(await call('/catalog',undefined,cookies.admin)).body.kols;
   assert.equal(list.find((k:any)=>k.id==='mig-b').bangGia.video,200);
   assert.ok(list.some((k:any)=>k.id==='mig-d'));
-  // Chọn rõ "dùng bản nhập" mới ghi đè.
-  const applied2=(await call('/catalog/migration/apply',{profiles:incoming,resolutions:{'mig-b':'imported'}},cookies.admin)).body;
+  // Chọn rõ "dùng bản nhập" mới ghi đè (mig-b vẫn ở revision đã xem trước vì lần áp dụng trước không ghi nó).
+  const applied2=(await call('/catalog/migration/apply',{profiles:incoming,resolutions:{'mig-b':'imported'},expectedRevisions:expected},cookies.admin)).body;
   assert.equal(applied2.updated,1);
   list=(await call('/catalog',undefined,cookies.admin)).body.kols;
   assert.equal(list.find((k:any)=>k.id==='mig-b').bangGia.video,999);
