@@ -93,9 +93,12 @@ export function rowsToCommunityProfiles(
   rows: unknown[][],
   mapping: CommunityColumnMapping,
   opts: CommunityImportOptions,
-): { profiles: CommunityProfile[]; skipped: SkippedRow[] } {
+): { profiles: CommunityProfile[]; skipped: SkippedRow[]; loaiUndetermined: number[] } {
   const profiles: CommunityProfile[] = [];
   const skipped: SkippedRow[] = [];
+  /** Vị trí (index trong profiles) của các hồ sơ chưa xác định được loại Page/Group
+   *  từ cột nguồn — người dùng bắt buộc chọn ở bước xem trước mới được áp dụng. */
+  const loaiUndetermined: number[] = [];
   const priceServiceId = 'svc_' + stableHashHex(fold(opts.priceServiceName || DEFAULT_PRICE_SERVICE_NAME));
   rows.forEach((row, rowIndex) => {
     if (rowIndex < opts.dataStartIndex) return;
@@ -133,12 +136,18 @@ export function rowsToCommunityProfiles(
       return;
     }
     const loaiText = fold(cell(row, mapping.loai));
-    const loai: CommunityProfile['loai'] = loaiText.includes('group') ? 'group' : 'page';
+    // Loại Page/Group chỉ kết luận khi cột nguồn nói rõ. Chưa xác định được thì
+    // đánh dấu để người dùng CHỌN ở bước xem trước — không âm thầm mặc định Page.
+    const loaiKnown: CommunityProfile['loai'] | null = loaiText.includes('group') ? 'group' : loaiText.includes('page') ? 'page' : null;
+    const loai: CommunityProfile['loai'] = loaiKnown ?? 'page'; // giá trị tạm; hồ sơ chưa rõ loại bị chặn ở bước áp dụng cho tới khi người dùng chọn
     const loaiChiSo: CommunityProfile['loaiChiSo'] =
       opts.metricMode === 'followers' ? 'followers' : opts.metricMode === 'members' ? 'members' : loai === 'group' ? 'members' : 'followers';
     const linhVuc = cell(row, mapping.chuDe).split(/[,;]/).map(s => s.trim()).filter(Boolean).slice(0, 50);
     const linkInsight = validInsightValue(cell(row, mapping.insight));
-    const dichVu = price !== null
+    // Dịch vụ được xác định từ cột giá của nguồn: ô giá TRỐNG vẫn tạo dịch vụ với
+    // giá null (chưa có giá) — không bỏ dịch vụ, không thay bằng 0. Tên dịch vụ,
+    // đơn vị, điều kiện và nguồn được giữ nguyên để Booking bổ sung giá sau.
+    const dichVu = mapping.gia >= 0
       ? [{
           id: priceServiceId,
           ten: opts.priceServiceName || DEFAULT_PRICE_SERVICE_NAME,
@@ -166,6 +175,7 @@ export function rowsToCommunityProfiles(
       ngayTao: '',
       ngayCapNhat: '',
     });
+    if (!loaiKnown) loaiUndetermined.push(profiles.length - 1);
   });
-  return { profiles, skipped };
+  return { profiles, skipped, loaiUndetermined };
 }

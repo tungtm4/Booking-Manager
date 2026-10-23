@@ -35,6 +35,15 @@ export function communityIdFromLink(link: string): string | null {
   return key ? 'comm_' + stableHashHex(key) : null;
 }
 
+/** Nhãn quy mô THỐNG NHẤT toàn app: "Page · 500.000 người theo dõi" /
+ *  "Group · 500.000 thành viên" — số giữ nguyên giá trị, chỉ nhãn đơn vị theo
+ *  loại chỉ số của hồ sơ (followers = người theo dõi, members = thành viên). */
+export function communityScaleLabel(p: { loai?: string; quyMo?: number | null; loaiChiSo?: string }): string {
+  if (p.quyMo == null) return 'Chưa rõ quy mô';
+  const unit = p.loaiChiSo === 'members' ? 'thành viên' : 'người theo dõi';
+  return `${p.loai === 'group' ? 'Group' : 'Page'} · ${p.quyMo.toLocaleString('vi-VN')} ${unit}`;
+}
+
 // ---------------------------------------------------------------------------
 // Đánh giá phù hợp Community <-> brief phase. Mọi lý do đều bám dữ kiện hồ sơ:
 // không khẳng định điều hồ sơ không có.
@@ -60,7 +69,7 @@ export function assessCommunity(p: CommunityProfile, brief: ProjectBrief) {
   if (brief.minFollowers > 0) {
     checks.push({
       label: p.quyMo != null
-        ? `Quy mô ${p.quyMo.toLocaleString('vi-VN')} ${p.loaiChiSo} / yêu cầu tối thiểu ${brief.minFollowers.toLocaleString('vi-VN')}`
+        ? `Quy mô ${p.quyMo.toLocaleString('vi-VN')} ${p.loaiChiSo === 'members' ? 'thành viên' : 'người theo dõi'} / yêu cầu tối thiểu ${brief.minFollowers.toLocaleString('vi-VN')}`
         : `Chưa có số quy mô trong hồ sơ / yêu cầu tối thiểu ${brief.minFollowers.toLocaleString('vi-VN')}`,
       met: p.quyMo != null && p.quyMo >= brief.minFollowers,
     });

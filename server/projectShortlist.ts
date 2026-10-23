@@ -429,7 +429,7 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
         // không dùng giá Post/format Creator. Snapshot kèm tên dịch vụ, đơn vị, điều kiện.
         const svc=(p.dichVu??[]).find((x:any)=>x.id===s.format);
         if(!svc||!price)return res.status(400).json({message:'Dịch vụ không thuộc hồ sơ Community này.'});
-        newItems.push({id:randomUUID(),creator:p.ten,description:svc.ten,phase:'',kind:'community',partnerType:'community',quantity:s.quantity,buyUnitPrice:price.value,sellUnitPrice:null,included:true,shortlistId:row.id,format:'',serviceId:svc.id,serviceName:svc.ten,unit:svc.donVi,...(svc.dieuKien?{conditions:svc.dieuKien}:{}),priceSnapshot:price});
+        newItems.push({id:randomUUID(),creator:p.ten,description:svc.ten,phase:'',kind:'community',partnerType:'community',quantity:s.quantity,buyUnitPrice:price.value,sellUnitPrice:null,included:true,shortlistId:row.id,format:'',serviceId:svc.id,serviceName:svc.ten,unit:svc.donVi,...(svc.dieuKien?{conditions:svc.dieuKien,note:svc.dieuKien}:{}),priceSnapshot:price});
       }else{
         if(!formats.includes(s.format))return res.status(400).json({message:'Hạng mục và số lượng không hợp lệ.'});
         newItems.push({id:randomUUID(),creator:p.ten,description:PRICE_FORMAT_LABELS[s.format as keyof typeof PRICE_FORMAT_LABELS],phase:'',kind:'kol',quantity:s.quantity,buyUnitPrice:price.value,sellUnitPrice:null,included:true,shortlistId:row.id,format:s.format,priceSnapshot:price});

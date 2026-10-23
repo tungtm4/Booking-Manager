@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import {createWorkspace} from '../server/workspace';
-import {briefKpiOf,pillarPostCounts} from '../src/domain/community';
+import {briefKpiOf,communityScaleLabel,pillarPostCounts} from '../src/domain/community';
 import {calculateProjectFinance} from '../src/domain/projectFinance';
 import {detectCommunityColumns,parseVietnameseCount,rowsToCommunityProfiles,DEFAULT_PRICE_CONDITIONS,DEFAULT_PRICE_SERVICE_NAME} from '../src/utils/communityImport';
 
@@ -272,4 +272,125 @@ test('Dịch vụ comment thuê ngoài: 8.000 x 900 = 7,2 triệu; cổng xác n
   assert.equal(confirmed.body.quote.items[0].buyConfirmation.value,900);
   const q2=await getQuote(call,pid,cookies.pm,made.body.quoteId);
   assert.equal((await call(`/projects/${pid}/quotes/${made.body.quoteId}/status`,{revision:q2.revision,status:'submitted'},cookies.pm)).status,200);
+}));
+
+test('Đợt 13 — Import: ô giá trống vẫn giữ dịch vụ với giá null; loại chưa rõ bị đánh dấu chờ chọn, không mặc định',()=>{
+  const header=['NO.','FANPAGE/GROUP','LINK','FOLLOWERS','LOẠI','CHỦ ĐỀ','INSIGHT','GIÁ BÀI ĐĂNG'];
+  const mapping=detectCommunityColumns(header) as any;
+  const rows:any[][]=[
+    header,
+    ['1','Page Chưa Giá','https://facebook.com/chuagia','900.000','Fanpage','Giải trí','Null',''],
+    ['2','Trang Chưa Rõ Loại','https://facebook.com/chuaro','100.000','','Du lịch','','3.000.000'],
+    ['3','Group Rõ Loại','https://facebook.com/groups/rol','200.000','Group','Phim','',''],
+  ];
+  const {profiles,loaiUndetermined}=rowsToCommunityProfiles(rows,mapping,{metricMode:'theo_loai',priceServiceName:DEFAULT_PRICE_SERVICE_NAME,priceConditions:DEFAULT_PRICE_CONDITIONS,sourceName:'Sheet tham chiếu',dataStartIndex:1});
+  assert.equal(profiles.length,3);
+  // Giá trống: dịch vụ vẫn được tạo, giá null (không phải 0), tên/đơn vị/điều kiện giữ nguyên.
+  assert.equal(profiles[0].dichVu.length,1);
+  assert.equal(profiles[0].dichVu[0].giaThamKhao,null);
+  assert.equal(profiles[0].dichVu[0].ten,DEFAULT_PRICE_SERVICE_NAME);
+  assert.equal(profiles[0].dichVu[0].donVi,'bài');
+  assert.ok(profiles[0].dichVu[0].dieuKien.includes('chưa gồm sản xuất nội dung'));
+  // Loại chưa rõ: chỉ hồ sơ thứ 2 bị đánh dấu; Page/Group rõ ràng thì không.
+  assert.deepEqual(loaiUndetermined,[1]);
+  assert.equal(profiles[2].loai,'group');assert.equal(profiles[2].loaiChiSo,'members');
+  // Nhãn quy mô thống nhất.
+  assert.equal(communityScaleLabel({loai:'page',quyMo:500_000,loaiChiSo:'followers'}),'Page · 500.000 người theo dõi');
+  assert.equal(communityScaleLabel({loai:'group',quyMo:500_000,loaiChiSo:'members'}),'Group · 500.000 thành viên');
+  assert.equal(communityScaleLabel({loai:'page',quyMo:null,loaiChiSo:'followers'}),'Chưa rõ quy mô');
+});
+
+test('Đợt 13 — Community thiếu giá vẫn được đề xuất theo brief và vào được danh sách dự án',()=>fixture(async({call,pid,cookies}:any)=>{
+  const noPrice=commProfile('noprice',{dichVu:[{...SVC_POST,giaThamKhao:null}]});
+  await call('/communities',{profile:noPrice},cookies.admin);
+  const sl=await call(`/projects/${pid}/shortlist`,undefined,cookies.pm);
+  assert.ok(sl.body.communityMatches.some((c:any)=>c.id==='noprice')); // phù hợp nội dung thì vẫn được đề xuất dù chưa có giá
+  const add=await call(`/projects/${pid}/shortlist/add`,{ids:['noprice'],partnerType:'community'},cookies.pm);
+  assert.equal(add.body.added,1);
+  const row=(await call(`/projects/${pid}/shortlist`,undefined,cookies.pm)).body.rows[0];
+  assert.equal(row.prices.svc_post.value,null);
+  assert.equal(row.prices.svc_post.status,'waiting'); // chờ Booking bổ sung giá — cổng xác nhận giá vẫn giữ ở bước gửi duyệt
+}));
+
+test('Đợt 13 — Ghi chú hạng mục: chụp từ điều kiện dịch vụ, PM sửa được, lấy lại giá/đổi kho không ghi đè, bản khách có ghi chú mà không lộ nội bộ',()=>fixture(async({call,pid,cookies}:any)=>{
+  const dieuKienGoc='Khách cung cấp nội dung; chưa gồm sản xuất nội dung, comment, like/share.';
+  await call('/communities',{profile:commProfile('c1',{dichVu:[{...SVC_POST,dieuKien:dieuKienGoc}]})},cookies.admin);
+  await call(`/projects/${pid}/shortlist/add`,{ids:['c1'],partnerType:'community'},cookies.pm);
+  const row=(await call(`/projects/${pid}/shortlist`,undefined,cookies.pm)).body.rows[0];
+  await call(`/projects/${pid}/shortlist/${row.id}/prices`,{revision:row.revision,format:'svc_post',value:7_500_000,source:'Báo giá Community',confirm:true},cookies.booking);
+  const opt=(await call(`/projects/${pid}/options`,{name:'PA ghi chú'},cookies.pm)).body;
+  const rowNow=(await call(`/projects/${pid}/shortlist`,undefined,cookies.pm)).body.rows[0];
+  await call(`/projects/${pid}/shortlist/to-option`,{quoteId:opt.quoteId,revision:1,selections:[{id:row.id,format:'svc_post',quantity:10}]},cookies.pm);
+  let q=await getQuote(call,pid,cookies.pm,opt.quoteId);
+  assert.equal(q.items[0].note,dieuKienGoc); // bản chụp tại thời điểm đưa vào phương án
+  assert.equal(q.items[0].conditions,dieuKienGoc); // điều kiện nội bộ vẫn giữ riêng
+  // PM chỉnh ghi chú (có xuống dòng) + điền giá bán rồi lưu.
+  const edited='Phạm vi đã chốt với khách: đăng bài ảnh do khách cung cấp.\nChưa gồm sản xuất nội dung.';
+  const payload={items:q.items.map((i:any)=>({...i,note:edited,sellUnitPrice:9_000_000})),discount:q.discount,agencyFee:q.agencyFee,taxRate:q.taxRate};
+  assert.equal((await call(`/projects/${pid}/quotes/${opt.quoteId}/save`,{revision:q.revision,payload},cookies.pm)).status,200);
+  // Đổi điều kiện trong KHO rồi lấy lại giá vào bản nháp: ghi chú đã chỉnh không bị ghi đè.
+  const serverComm=(await call('/communities',undefined,cookies.admin)).body.communities.find((c:any)=>c.id==='c1');
+  await call('/communities/c1/update',{profile:{...serverComm,dichVu:[{...SVC_POST,dieuKien:'ĐIỀU KIỆN NỘI BỘ MỚI'}]},revision:serverComm.revision},cookies.admin);
+  q=await getQuote(call,pid,cookies.pm,opt.quoteId);
+  assert.equal((await call(`/projects/${pid}/quotes/${opt.quoteId}/refresh-prices`,{revision:q.revision},cookies.pm)).status,200);
+  q=await getQuote(call,pid,cookies.pm,opt.quoteId);
+  assert.equal(q.items[0].note,edited);
+  // Gửi duyệt + duyệt rồi xuất bản khách.
+  assert.equal((await call(`/projects/${pid}/quotes/${opt.quoteId}/status`,{revision:q.revision,status:'submitted'},cookies.pm)).status,200);
+  q=await getQuote(call,pid,cookies.pm,opt.quoteId);
+  assert.equal((await call(`/projects/${pid}/quotes/${opt.quoteId}/status`,{revision:q.revision,status:'approved'},cookies.pm)).status,200);
+  const customer=await call(`/projects/${pid}/quotes/${opt.quoteId}/customer`,undefined,cookies.pm);
+  assert.equal(customer.status,200);
+  assert.equal(customer.body.items[0].note,edited); // ghi chú hạng mục có trong API bản khách, giữ xuống dòng
+  const raw=JSON.stringify(customer.body);
+  assert.equal(raw.includes('ĐIỀU KIỆN NỘI BỘ MỚI'),false); // điều kiện nội bộ không xuất cho khách
+  assert.equal(raw.includes('conditions'),false);
+  assert.equal(raw.includes('buyUnitPrice'),false); // không lộ giá mua
+  assert.equal(raw.includes('profit'),false); // không lộ P&L
+  assert.equal(raw.includes('knownBuyTotal'),false);
+}));
+
+test('Đợt 13 — Gói comment: bắt buộc số comment mỗi gói + phạm vi; tiền = số gói x giá gói; khối lượng = số gói x comment mỗi gói; nháp thiếu thông tin bị chặn gửi duyệt',()=>fixture(async({call,pid,cookies}:any)=>{
+  const ph=await firstPhase(call,pid,cookies.pm);
+  await call(`/projects/${pid}/phases/${ph.id}`,{revision:ph.revision,brief:{...briefBase,kpiComments:8_000}},cookies.pm,'PATCH');
+  const base={phase:ph.name,vendor:'Đơn vị Comment B',pricingMode:'package',buyUnitPrice:7_200_000,sellUnitPrice:9_000_000,includedNote:''};
+  // Thiếu số comment mỗi gói -> 400. Thiếu phạm vi -> 400.
+  assert.equal((await call(`/projects/${pid}/options/from-phases`,{name:'Gói thiếu comment',allocations:[],commentLines:[{...base,quantity:1,scopeNote:'Phân bổ trên 100 bài'}]},cookies.pm)).status,400);
+  assert.equal((await call(`/projects/${pid}/options/from-phases`,{name:'Gói thiếu phạm vi',allocations:[],commentLines:[{...base,quantity:1,commentsPerPackage:8_000,scopeNote:''}]},cookies.pm)).status,400);
+  // 1 gói gồm 8.000 comment, giá 7.200.000 đ -> tiền 7.200.000 đ, khối lượng 8.000 comment.
+  const one=await call(`/projects/${pid}/options/from-phases`,{name:'Một gói',allocations:[],commentLines:[{...base,quantity:1,commentsPerPackage:8_000,scopeNote:'Phân bổ trên 100 bài trong tháng 11'}]},cookies.pm);
+  assert.equal(one.status,200);
+  const qOne=await getQuote(call,pid,cookies.pm,one.body.quoteId);
+  assert.equal(qOne.items[0].quantity,1);
+  assert.equal(qOne.items[0].commentInfo.commentsPerPackage,8_000);
+  assert.equal(qOne.items[0].commentInfo.includedComments,8_000);
+  assert.equal(qOne.finance.knownBuyTotal,7_200_000);
+  // 2 gói, mỗi gói 4.000 comment, giá 3.600.000 đ/gói -> tiền 7.200.000 đ, khối lượng 8.000 comment.
+  const two=await call(`/projects/${pid}/options/from-phases`,{name:'Hai gói',allocations:[],commentLines:[{...base,quantity:2,commentsPerPackage:4_000,buyUnitPrice:3_600_000,sellUnitPrice:4_500_000,scopeNote:'Phân bổ trên 100 bài trong tháng 11'}]},cookies.pm);
+  assert.equal(two.status,200);
+  const qTwo=await getQuote(call,pid,cookies.pm,two.body.quoteId);
+  assert.equal(qTwo.items[0].commentInfo.includedComments,8_000);
+  assert.equal(qTwo.finance.knownBuyTotal,7_200_000);
+  // Bản nháp bị xoá số comment mỗi gói (dữ kiện kiểu cũ thiếu) vẫn lưu được nhưng bị chặn gửi duyệt.
+  const payload={items:qOne.items.map((i:any)=>({...i,commentInfo:{...i.commentInfo,commentsPerPackage:null}})),discount:qOne.discount,agencyFee:qOne.agencyFee,taxRate:qOne.taxRate};
+  assert.equal((await call(`/projects/${pid}/quotes/${one.body.quoteId}/save`,{revision:qOne.revision,payload},cookies.pm)).status,200);
+  let q=await getQuote(call,pid,cookies.pm,one.body.quoteId);
+  assert.equal(q.items[0].commentInfo.commentsPerPackage,null);
+  const confirmed=await call(`/projects/${pid}/quotes/${one.body.quoteId}/confirm-buy`,{itemId:q.items[0].id,source:'Nhà cung cấp xác nhận giá gói',revision:q.revision},cookies.pm);
+  assert.equal(confirmed.status,200);
+  q=await getQuote(call,pid,cookies.pm,one.body.quoteId);
+  const blocked=await call(`/projects/${pid}/quotes/${one.body.quoteId}/status`,{revision:q.revision,status:'submitted'},cookies.pm);
+  assert.equal(blocked.status,400);assert.ok(blocked.body.packageGate);
+  // Bổ sung lại số comment mỗi gói trong bản nháp -> gửi duyệt được.
+  const fixed={items:q.items.map((i:any)=>({...i,commentInfo:{...i.commentInfo,commentsPerPackage:8_000}})),discount:q.discount,agencyFee:q.agencyFee,taxRate:q.taxRate};
+  assert.equal((await call(`/projects/${pid}/quotes/${one.body.quoteId}/save`,{revision:q.revision,payload:fixed},cookies.pm)).status,200);
+  q=await getQuote(call,pid,cookies.pm,one.body.quoteId);
+  assert.equal(q.items[0].commentInfo.includedComments,8_000);
+  assert.equal((await call(`/projects/${pid}/quotes/${one.body.quoteId}/status`,{revision:q.revision,status:'submitted'},cookies.pm)).status,200);
+  // Bản khách của dòng gói: có phạm vi + tổng số comment bao gồm, không lộ giá mua.
+  assert.equal((await call(`/projects/${pid}/quotes/${one.body.quoteId}/status`,{revision:(await getQuote(call,pid,cookies.pm,one.body.quoteId)).revision,status:'approved'},cookies.pm)).status,200);
+  const customer=await call(`/projects/${pid}/quotes/${one.body.quoteId}/customer`,undefined,cookies.pm);
+  assert.equal(customer.body.items[0].commentsIncluded,8_000);
+  assert.equal(customer.body.items[0].scopeNote,'Phân bổ trên 100 bài trong tháng 11');
+  assert.equal(JSON.stringify(customer.body).includes('buyUnitPrice'),false);
 }));

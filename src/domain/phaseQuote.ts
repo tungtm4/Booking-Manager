@@ -57,6 +57,9 @@ export interface AllocatedQuoteItem {
   serviceName?: string;
   unit?: string;
   conditions?: string;
+  /** Ghi chú hạng mục (xuất cho khách): chụp từ điều kiện dịch vụ tại thời điểm
+   *  đưa vào phương án; PM được sửa trong bản nháp, cập nhật kho không ghi đè. */
+  note?: string;
   priceSnapshot: PhaseQuotePrice;
 }
 
@@ -90,6 +93,7 @@ export function buildAllocatedQuoteItems(
       ...(line.serviceName ? { serviceName: line.serviceName } : {}),
       ...(line.unit ? { unit: line.unit } : {}),
       ...(line.conditions ? { conditions: line.conditions } : {}),
+      ...(line.conditions ? { note: line.conditions } : {}),
       priceSnapshot: price,
     });
   }

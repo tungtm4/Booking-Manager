@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { CommunityProfile, CommunityService } from '../types/community';
 import { COMMUNITY_KIND_LABELS, COMMUNITY_METRIC_LABELS, COMMUNITY_SERVICE_UNIT_SUGGESTIONS } from '../types/community';
 import { CommunityService as CommunityApi, type CatalogCommunity } from '../services/communityService';
+import { communityScaleLabel } from '../domain/community';
 import { CommunityImportModal } from './CommunityImportModal';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { formatDateTimeVN, formatVND } from '../utils/formatters';
@@ -152,7 +153,7 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
                 )}
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
-                <span>Quy mô: <strong>{c.quyMo != null ? c.quyMo.toLocaleString('vi-VN') : 'Chưa có số'}</strong> {COMMUNITY_METRIC_LABELS[c.loaiChiSo]}</span>
+                <span>{communityScaleLabel(c)}</span>
                 {c.linkInsight && <a className="text-indigo-700 underline" href={c.linkInsight} target="_blank" rel="noreferrer">Link insight</a>}
                 <span>Cập nhật: {c.updatedAt ? formatDateTimeVN(c.updatedAt) : (c.ngayCapNhat ? formatDateTimeVN(c.ngayCapNhat) : '—')}</span>
               </div>

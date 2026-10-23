@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import type { CommunityProfile } from '../types/community';
 import { CommunityService } from '../services/communityService';
+import { communityScaleLabel } from '../domain/community';
 import {
   detectCommunityColumns, rowsToCommunityProfiles,
   DEFAULT_PRICE_SERVICE_NAME, DEFAULT_PRICE_CONDITIONS,
@@ -44,6 +45,8 @@ export function CommunityImportModal({ isOpen, onClose, onApplied }: { isOpen: b
   const [profiles, setProfiles] = useState<CommunityProfile[]>([]);
   const [preview, setPreview] = useState<any>(null);
   const [resolutions, setResolutions] = useState<Record<string, 'imported' | 'server'>>({});
+  const [undetermined, setUndetermined] = useState<number[]>([]);
+  const [loaiChoices, setLoaiChoices] = useState<Record<number, 'page' | 'group'>>({});
   const [result, setResult] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -114,11 +117,13 @@ export function CommunityImportModal({ isOpen, onClose, onApplied }: { isOpen: b
     if (mapping.ten < 0) { setError('Hãy chọn cột Tên Fanpage/Group.'); return; }
     setBusy(true); setError('');
     try {
-      const { profiles: parsed, skipped: skippedRows } = rowsToCommunityProfiles(rows, mapping, {
+      const { profiles: parsed, skipped: skippedRows, loaiUndetermined } = rowsToCommunityProfiles(rows, mapping, {
         metricMode, priceServiceName: priceServiceName.trim() || DEFAULT_PRICE_SERVICE_NAME,
         priceConditions: priceConditions.trim(), sourceName: sourceName.trim(),
         dataStartIndex: headerRowIndex + 1,
       });
+      setUndetermined(loaiUndetermined);
+      setLoaiChoices({});
       if (!parsed.length) { setError('Không chuyển được hồ sơ nào từ bảng. Kiểm tra lại ánh xạ cột và dòng tiêu đề.'); setSkipped(skippedRows); return; }
       setSkipped(skippedRows);
       let merged: any = { newItems: [], unchanged: [], conflicts: [], serverOnly: [], resolvedProfiles: [] };
@@ -142,7 +147,22 @@ export function CommunityImportModal({ isOpen, onClose, onApplied }: { isOpen: b
     } finally { setBusy(false); }
   }
 
+  const unresolvedLoai = undetermined.filter(i => !loaiChoices[i]);
+
+  function chooseLoai(idx: number, choice: 'page' | 'group') {
+    setLoaiChoices(prev => ({ ...prev, [idx]: choice }));
+    setProfiles(prev => prev.map((p, i) => i === idx
+      ? { ...p, loai: choice, loaiChiSo: metricMode === 'theo_loai' ? (choice === 'group' ? 'members' : 'followers') : p.loaiChiSo }
+      : p));
+    const p = profiles[idx];
+    // Hồ sơ đã có trên server mà đổi loại thì khi áp dụng phải dùng bản nhập.
+    if (p && (preview?.unchanged?.some((x: any) => x.id === p.id) || preview?.conflicts?.some((x: any) => x.id === p.id))) {
+      setResolutions(prev => ({ ...prev, [p.id]: 'imported' }));
+    }
+  }
+
   async function runApply() {
+    if (unresolvedLoai.length) { setError(`Còn ${unresolvedLoai.length} hồ sơ chưa xác định được loại Page/Group từ bảng nguồn. Hãy chọn loại cho từng hồ sơ ở mục “Loại Page/Group của hồ sơ nhập” trước khi áp dụng — hệ thống không tự mặc định.`); return; }
     setBusy(true); setError('');
     try {
       const expected: Record<string, number | null> = {};
@@ -259,6 +279,37 @@ export function CommunityImportModal({ isOpen, onClose, onApplied }: { isOpen: b
                 </ul>
               </details>
             )}
+            <div className="border rounded-xl p-3 space-y-2">
+              <p className="text-sm font-semibold">Loại Page/Group của hồ sơ nhập — kiểm tra và sửa trước khi lưu</p>
+              <p className="text-xs text-slate-500">Đơn vị quy mô đi theo loại: Page = người theo dõi, Group = thành viên; giá trị số giữ nguyên như nguồn. {undetermined.length > 0 ? <>Có <strong className="text-amber-700">{undetermined.length} hồ sơ chưa xác định được loại từ bảng nguồn</strong> — bắt buộc chọn, hệ thống không tự mặc định.</> : 'Mọi hồ sơ đã xác định được loại từ bảng nguồn; vẫn có thể sửa nếu nguồn ghi chưa đúng.'}</p>
+              {undetermined.length > 1 && (
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <span className="text-slate-500 py-1">Áp dụng cho tất cả hồ sơ chưa xác định:</span>
+                  <button type="button" className="border rounded-lg px-2 py-1 bg-white" onClick={() => undetermined.forEach(i => { if (!loaiChoices[i]) chooseLoai(i, 'page'); })}>Tất cả là Page</button>
+                  <button type="button" className="border rounded-lg px-2 py-1 bg-white" onClick={() => undetermined.forEach(i => { if (!loaiChoices[i]) chooseLoai(i, 'group'); })}>Tất cả là Group</button>
+                </div>
+              )}
+              <ul className="space-y-1 max-h-64 overflow-y-auto">
+                {profiles.map((p, idx) => {
+                  const needsChoice = undetermined.includes(idx);
+                  const current = loaiChoices[idx] ?? (needsChoice ? '' : p.loai);
+                  const effLoai = (current || p.loai) as 'page' | 'group';
+                  const effMetric = metricMode === 'theo_loai' ? (effLoai === 'group' ? 'members' : 'followers') : p.loaiChiSo;
+                  return (
+                    <li key={p.id || idx} className={'flex flex-wrap items-center gap-2 text-sm border rounded-lg px-2 py-1.5 ' + (needsChoice && !loaiChoices[idx] ? 'border-amber-300 bg-amber-50' : 'border-slate-200')}>
+                      <span className="font-medium">{p.ten}</span>
+                      <span className="text-xs text-slate-500">{communityScaleLabel({ loai: effLoai, quyMo: p.quyMo, loaiChiSo: effMetric })}</span>
+                      {p.dichVu?.some(s => s.giaThamKhao == null) && <span className="text-xs text-amber-700">Có dịch vụ chưa có giá — vẫn giữ dịch vụ, Booking bổ sung giá sau</span>}
+                      <select aria-label={'Loại của ' + p.ten} className="ml-auto rounded-lg border border-slate-300 px-2 py-1 text-sm bg-white" value={current} onChange={e => { const v = e.target.value; if (v === 'page' || v === 'group') chooseLoai(idx, v); }}>
+                        {needsChoice && <option value="">— Chọn loại —</option>}
+                        <option value="page">Page (người theo dõi)</option>
+                        <option value="group">Group (thành viên)</option>
+                      </select>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
             {preview.conflicts.length > 0 && (
               <div className="space-y-2">
                 <p className="text-sm font-semibold">Xung đột — chọn bản ghi cho từng hồ sơ</p>
@@ -277,7 +328,7 @@ export function CommunityImportModal({ isOpen, onClose, onApplied }: { isOpen: b
             <p className="text-xs text-slate-500">Khi áp dụng, server kiểm tra lại đúng phiên bản đã xem trước: hồ sơ nào bị người khác sửa/xoá/tạo mới sau bước này sẽ bị chặn và liệt kê riêng, không ghi đè.</p>
             <div className="flex gap-2">
               <button type="button" className="border rounded-lg px-3 py-2 text-sm" onClick={() => setStep('mapping')}>Quay lại ánh xạ</button>
-              <button type="button" className={button} disabled={busy} onClick={runApply}>{busy ? 'Đang áp dụng…' : 'Áp dụng nhập dữ liệu'}</button>
+              <button type="button" className={button} disabled={busy || unresolvedLoai.length > 0} onClick={runApply}>{busy ? 'Đang áp dụng…' : unresolvedLoai.length > 0 ? `Chọn loại cho ${unresolvedLoai.length} hồ sơ chưa rõ loại trước khi áp dụng` : 'Áp dụng nhập dữ liệu'}</button>
             </div>
           </div>
         )}

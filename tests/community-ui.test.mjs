@@ -27,6 +27,19 @@ test('Đề xuất: Community tìm từ kho Community riêng', () => {
   assert.ok(proposal.includes('assessCommunity'), 'đề xuất Community phải chấm theo tiêu chí Community');
 });
 
+test('Đợt 13: import giữ dịch vụ khi thiếu giá, loại chưa rõ phải chọn, nhãn quy mô thống nhất, ghi chú hạng mục và gói comment', () => {
+  const modal = readFileSync(new URL('../src/components/CommunityImportModal.tsx', import.meta.url), 'utf8');
+  const domain = readFileSync(new URL('../src/domain/community.ts', import.meta.url), 'utf8');
+  assert.ok(modal.includes('chưa xác định được loại'), 'import phải báo hồ sơ chưa xác định được loại Page/Group');
+  assert.ok(modal.includes('không tự mặc định'), 'import không được âm thầm mặc định loại');
+  assert.ok(domain.includes('người theo dõi') && domain.includes('thành viên'), 'nhãn quy mô thống nhất Page/Group');
+  assert.ok(proposal.includes('Chưa có giá — Booking cần bổ sung'), 'đề xuất phải ghi rõ Community chưa có giá');
+  assert.ok(panel.includes('Chưa có giá — Booking cần bổ sung'), 'danh sách ứng viên phải ghi rõ Community chưa có giá');
+  assert.ok(quotes.includes('Ghi chú hạng mục'), 'báo giá phải có ô ghi chú hạng mục xuất cho khách');
+  assert.ok(quotes.includes('Số comment trong mỗi gói'), 'dòng gói comment phải có ô số comment mỗi gói');
+  assert.ok(quotes.includes('Tổng số comment bao gồm'), 'bản khách phải hiển thị tổng số comment bao gồm của gói');
+});
+
 test('Báo giá: trình phân bổ PM chọn + gợi ý có duyệt + dòng comment thuê ngoài', () => {
   assert.ok(quotes.includes('/options/from-phases'), 'panel gọi route tạo phương án từ phân bổ');
   assert.ok(quotes.includes('/options/suggest-allocations'), 'panel gọi route gợi ý phân bổ');

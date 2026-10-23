@@ -6,7 +6,7 @@ import { formatFollowers, formatVND } from '../utils/formatters';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { friendlyAiMessage } from '../utils/aiMessages';
 import { PHASE_KIND_LABELS } from '../domain/phases';
-import { assessCommunity } from '../domain/community';
+import { assessCommunity, communityScaleLabel } from '../domain/community';
 import { readProjectBrief } from '../domain/projectBrief';
 import { COMMUNITY_KIND_LABELS, COMMUNITY_METRIC_LABELS } from '../types/community';
 import { paginateItems, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../utils/pagination';
@@ -419,12 +419,12 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
                       <span className="ml-1 text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{c.nenTang}</span>
                     </span>
                   </label>
-                  <p className="text-xs text-slate-500">Quy mô: <strong>{c.quyMo != null ? c.quyMo.toLocaleString('vi-VN') : 'Chưa có số'}</strong> {COMMUNITY_METRIC_LABELS[c.loaiChiSo as keyof typeof COMMUNITY_METRIC_LABELS] ?? 'followers'}{(c.linhVuc ?? []).length ? ' · ' + c.linhVuc.join(', ') : ''}</p>
+                  <p className="text-xs text-slate-500">{communityScaleLabel(c)}{(c.linhVuc ?? []).length ? ' · ' + c.linhVuc.join(', ') : ''}</p>
                   {(c.dichVu ?? []).length > 0 && (
                     <ul className="text-xs text-slate-600">
                       {c.dichVu.map((s: any) => {
                         const highlighted = required && (s.ten.toLowerCase().includes(required.toLowerCase()) || required.toLowerCase().includes(s.ten.toLowerCase()));
-                        return <li key={s.id} className={highlighted ? 'bg-amber-50 rounded px-1' : ''}>{s.ten} ({s.donVi}): {s.giaThamKhao != null ? formatVND(s.giaThamKhao) : 'Chưa có giá'}{highlighted ? ' — dịch vụ brief yêu cầu' : ''}{s.dieuKien ? ' · ' + s.dieuKien : ''}</li>;
+                        return <li key={s.id} className={highlighted ? 'bg-amber-50 rounded px-1' : ''}>{s.ten} ({s.donVi}): {s.giaThamKhao != null ? formatVND(s.giaThamKhao) : <span className="text-amber-700 font-medium">Chưa có giá — Booking cần bổ sung</span>}{highlighted ? ' — dịch vụ brief yêu cầu' : ''}{s.dieuKien ? ' · ' + s.dieuKien : ''}</li>;
                       })}
                     </ul>
                   )}

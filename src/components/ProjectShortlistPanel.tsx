@@ -8,7 +8,7 @@ import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { paginateItems, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../utils/pagination';
 import { PHASE_KIND_LABELS, normalizePhaseDrafts } from '../domain/phases';
 import { assessProjectKol } from '../domain/projectBrief';
-import { assessCommunity, briefKpiOf, pillarPostCounts } from '../domain/community';
+import { assessCommunity, briefKpiOf, communityScaleLabel, pillarPostCounts } from '../domain/community';
 import { COMMUNITY_KIND_LABELS, COMMUNITY_METRIC_LABELS } from '../types/community';
 import { formatVND } from '../utils/formatters';
 
@@ -212,7 +212,7 @@ function CommunityCandidateCard({ profile, brief, selected, disabled, onSelect, 
         {badge && <span className="text-xs px-2 py-1 bg-emerald-50 text-emerald-700 rounded-lg">{badge}</span>}
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
-        <span>Quy mô: <strong>{profile.quyMo != null ? profile.quyMo.toLocaleString('vi-VN') : 'Chưa có số'}</strong> {COMMUNITY_METRIC_LABELS[profile.loaiChiSo as keyof typeof COMMUNITY_METRIC_LABELS] ?? 'followers'}</span>
+        <span>{communityScaleLabel(profile)}</span>
         {profile.linkInsight && <a className="text-indigo-700 underline" href={profile.linkInsight} target="_blank" rel="noreferrer">Link insight</a>}
       </div>
       {(profile.linhVuc ?? []).length > 0 && <div className="flex flex-wrap gap-1">{profile.linhVuc.map((t: string) => <span key={t} className="text-xs px-2 py-0.5 bg-slate-100 rounded-full">{t}</span>)}</div>}
@@ -228,7 +228,7 @@ function CommunityCandidateCard({ profile, brief, selected, disabled, onSelect, 
                   <tr key={s.id} className={'border-t ' + (highlighted ? 'bg-amber-50' : '')}>
                     <td className="px-3 py-1.5 font-medium">{s.ten}{highlighted && <span className="ml-1 text-xs text-amber-700">(brief yêu cầu)</span>}</td>
                     <td className="px-3 py-1.5">{s.donVi}</td>
-                    <td className="px-3 py-1.5">{s.giaThamKhao != null ? formatVND(s.giaThamKhao) : <span className="text-amber-700">Chưa có giá</span>}</td>
+                    <td className="px-3 py-1.5">{s.giaThamKhao != null ? formatVND(s.giaThamKhao) : <span className="text-amber-700">Chưa có giá — Booking cần bổ sung</span>}</td>
                     <td className="px-3 py-1.5 text-slate-500 text-xs">{s.dieuKien || '—'}</td>
                   </tr>
                 );

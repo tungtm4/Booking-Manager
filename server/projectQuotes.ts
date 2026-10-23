@@ -18,9 +18,18 @@ export interface ProjectQuoteItem {
   // Dòng dịch vụ comment thuê ngoài PHẢI xác nhận giá đầu vào như dòng KOL nhập tay.
   // Cờ này do server đặt khi tạo dòng — client không tự đặt/gỡ được qua bản lưu.
   needsBuyConfirmation?:boolean;
+  // Ghi chú HẠNG MỤC — nội dung phạm vi/điều kiện của riêng dòng này, ĐƯỢC xuất cho
+  // khách (bản báo khách + bản in/PDF). Khác với conditions/nguồn giá là thông tin
+  // nội bộ không xuất cho khách. Khi đưa dịch vụ vào phương án, ghi chú được chụp từ
+  // điều kiện dịch vụ tại thời điểm đó; PM/Admin sửa được trong bản nháp; cập nhật
+  // kho hoặc lấy lại giá KHÔNG ghi đè ghi chú đã chỉnh.
+  note?:string;
   // Bối cảnh comment thuê ngoài: tổng comments mục tiêu của brief (chỉ để đối chiếu —
   // KHÔNG tự suy ra số lượng mua), phạm vi áp dụng và phần gói đã bao gồm để tránh tính trùng.
-  commentInfo?:{briefTargetTotal:number|null; scopeNote:string; includedNote:string};
+  // Cách tính gói: pricingMode='package' -> thành tiền = số gói (quantity) x giá gói;
+  // commentsPerPackage là TRƯỜNG RIÊNG (số comment gồm trong mỗi gói) — tổng comment
+  // thuê = số gói x số comment mỗi gói (includedComments), không nhân vào giá lần nữa.
+  commentInfo?:{briefTargetTotal:number|null; scopeNote:string; includedNote:string; pricingMode?:'per_comment'|'package'; commentsPerPackage?:number|null; includedComments?:number|null};
   // Số lượng thực tế đã nghiệm thu (phân biệt với số lượng mục tiêu và số đã phân bổ).
   acceptedQty?:number|null;
   // Xác nhận giá đầu vào cho dòng nhập tay — CHỈ server ghi qua endpoint xác nhận,
@@ -41,6 +50,7 @@ function validate(payload: any): payload is QuotePayload {
   for(const it of payload.items){
     if(!it||!text(it.id,100)||ids.has(it.id)||!text(it.creator,200)||!text(it.description)||text(it.phase,200)===null||!['kol','community','buzz','seeding','production','other'].includes(it.kind)||!Number.isSafeInteger(it.quantity)||it.quantity<=0||it.quantity>10000000||!validMoney(it.buyUnitPrice)||!validMoney(it.sellUnitPrice)||typeof it.included!=='boolean')return false;
     if(it.partnerType!==undefined&&!['kol','community','service','other'].includes(it.partnerType))return false;
+    if(it.note!==undefined&&(typeof it.note!=='string'||it.note.length>2000))return false;
     if(it.acceptedQty!==undefined&&it.acceptedQty!==null&&(!Number.isSafeInteger(it.acceptedQty)||it.acceptedQty<0||it.acceptedQty>10000000))return false;
     ids.add(it.id);
   }
@@ -79,6 +89,18 @@ const priceGate=(p:QuotePayload)=>{
   }
   return {missingBuy,missingSell,unconfirmedBuy,ok:missingBuy===0&&missingSell===0&&unconfirmedBuy===0};
 };
+// Cổng phạm vi gói comment: dòng gói ĐƯỢC TÍNH phải có đủ số comment mỗi gói và
+// ghi chú phạm vi mới được gửi duyệt/duyệt. Bản nháp vẫn lưu được để PM bổ sung;
+// dữ liệu cũ thiếu hai thông tin này KHÔNG bị tự suy đoán — chỉ bị chặn ở bước này.
+const packageGate=(p:QuotePayload)=>{
+  let incomplete=0;
+  for(const i of p.items){
+    if(!i.included)continue;
+    const ci=i.commentInfo;
+    if(ci&&ci.pricingMode==='package'&&(!(ci.commentsPerPackage&&ci.commentsPerPackage>=1)||!ci.scopeNote?.trim()))incomplete++;
+  }
+  return incomplete;
+};
 const priceGateMessage=(g:ReturnType<typeof priceGate>)=>{
   const parts:string[]=[];
   if(g.missingBuy)parts.push(`thiếu giá đầu vào ở ${g.missingBuy} dòng`);
@@ -87,14 +109,33 @@ const priceGateMessage=(g:ReturnType<typeof priceGate>)=>{
   return `Chưa thể gửi duyệt, duyệt hoặc chốt báo giá: ${parts.join('; ')}. Với dòng nhập tay (KOL, Community, dịch vụ comment), hãy xác nhận giá ngay trong bản nháp; với dòng lấy từ danh sách của dự án, hãy xác nhận trong danh sách rồi lấy lại giá vào bản nháp.`;
 };
 // cleanItems chỉ giữ các trường client được sửa. Các trường server sở hữu (shortlistId,
-// format, serviceId, priceSnapshot, buyConfirmation, needsBuyConfirmation, commentInfo)
-// KHÔNG lấy từ payload — chúng được khôi phục từ bản đã lưu ở bước hợp nhất phía dưới.
-const cleanItems=(items:ProjectQuoteItem[])=>items.map(i=>({id:i.id,creator:i.creator.trim(),description:i.description.trim(),phase:i.phase.trim(),kind:i.kind,quantity:i.quantity,buyUnitPrice:i.buyUnitPrice,sellUnitPrice:i.sellUnitPrice,included:i.included,
+// format, serviceId, priceSnapshot, buyConfirmation, needsBuyConfirmation) KHÔNG lấy từ
+// payload — chúng được khôi phục từ bản đã lưu ở bước hợp nhất phía dưới. Riêng ghi chú
+// hạng mục (note) là nội dung PM soạn cho khách nên nhận từ payload; commentInfo chỉ
+// nhận hai trường PM được bổ sung cho gói comment (phạm vi + số comment mỗi gói),
+// phần còn lại hợp nhất với bản đã lưu ở bước dưới.
+const cleanCommentInfo=(ci:any)=>{
+  if(!ci||typeof ci!=='object')return undefined;
+  return {
+    scopeNote:typeof ci.scopeNote==='string'?ci.scopeNote.trim().slice(0,1000):'',
+    commentsPerPackage:(Number.isSafeInteger(ci.commentsPerPackage)&&ci.commentsPerPackage>=1&&ci.commentsPerPackage<=100000000)?ci.commentsPerPackage:null,
+  };
+};
+const cleanItems=(items:ProjectQuoteItem[]):ProjectQuoteItem[]=>items.map(i=>({id:i.id,creator:i.creator.trim(),description:i.description.trim(),phase:i.phase.trim(),kind:i.kind,quantity:i.quantity,buyUnitPrice:i.buyUnitPrice,sellUnitPrice:i.sellUnitPrice,included:i.included,
   ...(i.partnerType?{partnerType:i.partnerType}:{}),
   ...(typeof i.serviceName==='string'&&i.serviceName.trim()?{serviceName:i.serviceName.trim().slice(0,200)}:{}),
   ...(typeof i.unit==='string'&&i.unit.trim()?{unit:i.unit.trim().slice(0,50)}:{}),
   ...(typeof i.conditions==='string'&&i.conditions.trim()?{conditions:i.conditions.trim().slice(0,1000)}:{}),
-  ...(i.acceptedQty!==undefined?{acceptedQty:i.acceptedQty}:{})}));
+  ...(typeof i.note==='string'&&i.note.trim()?{note:i.note.trim().slice(0,2000)}:{}),
+  ...(cleanCommentInfo(i.commentInfo)?{commentInfo:cleanCommentInfo(i.commentInfo) as ProjectQuoteItem['commentInfo']}:{}),
+  ...(i.acceptedQty!==undefined?{acceptedQty:i.acceptedQty}:{})}));;
+// Tổng số comment thuê của một dòng dịch vụ: theo comment = chính số lượng dòng;
+// theo gói = số gói x số comment mỗi gói (thiếu số comment mỗi gói thì chưa xác định).
+const includedCommentsOf=(i:ProjectQuoteItem):number|null=>{
+  const ci=i.commentInfo;if(!ci)return null;
+  if(ci.pricingMode==='package')return ci.commentsPerPackage?i.quantity*ci.commentsPerPackage:null;
+  return i.quantity;
+};
 
 export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:any,id:string,manage?:boolean)=>boolean,audit:(actor:string|null,action:string,target:string)=>unknown){
   const cols=db.prepare('PRAGMA table_info(projects)').all() as any[];
@@ -120,7 +161,7 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     const common={id:q.id,optionId:q.option_id,number:q.number,status:q.status,revision:q.revision,createdAt:q.created_at};
     if(manage)return {...common,...p,finance:finance(p)};
     // Allowlist: không gửi giá bán, fee, chiết khấu, thuế, tổng doanh thu hay P&L cho Booking.
-    return {...common,client:p.client,campaign:p.campaign,items:p.items.map(i=>({id:i.id,creator:i.creator,description:i.description,phase:i.phase,kind:i.kind,quantity:i.quantity,buyUnitPrice:i.buyUnitPrice,included:i.included,shortlistId:i.shortlistId,format:i.format,priceSnapshot:i.priceSnapshot,buyConfirmation:i.buyConfirmation,partnerType:i.partnerType,serviceId:i.serviceId,serviceName:i.serviceName,unit:i.unit,conditions:i.conditions,needsBuyConfirmation:i.needsBuyConfirmation,commentInfo:i.commentInfo,acceptedQty:i.acceptedQty}))};
+    return {...common,client:p.client,campaign:p.campaign,items:p.items.map(i=>({id:i.id,creator:i.creator,description:i.description,phase:i.phase,kind:i.kind,quantity:i.quantity,buyUnitPrice:i.buyUnitPrice,included:i.included,shortlistId:i.shortlistId,format:i.format,priceSnapshot:i.priceSnapshot,buyConfirmation:i.buyConfirmation,partnerType:i.partnerType,serviceId:i.serviceId,serviceName:i.serviceName,unit:i.unit,conditions:i.conditions,note:i.note,needsBuyConfirmation:i.needsBuyConfirmation,commentInfo:i.commentInfo,acceptedQty:i.acceptedQty}))};
   };
   router.post('/projects/:id/details',(req,res)=>{
     const u=res.locals.user;if(!access(u,req.params.id,true))return res.status(403).json({message:'Chỉ PM hoặc Admin hệ thống được cập nhật thông tin.'});
@@ -169,15 +210,25 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
       p={client:current.client_name,campaign:current.campaign_name||current.name,items:cleanItems(req.body.payload.items),discount:req.body.payload.discount,agencyFee:req.body.payload.agencyFee,taxRate:req.body.payload.taxRate};
       p.items=p.items.map(i=>{const old=originalItems.find(o=>o.id===i.id);return old?.shortlistId?{...i,kind:old.kind,creator:old.creator,buyUnitPrice:old.buyUnitPrice,shortlistId:old.shortlistId,format:old.format,priceSnapshot:old.priceSnapshot,...(old.serviceId?{serviceId:old.serviceId,serviceName:old.serviceName,unit:old.unit,conditions:old.conditions,partnerType:old.partnerType}:{})}:i;});
       // Các trường server sở hữu của dòng nhập tay: KHÔNG nhận từ payload của client.
-      // needsBuyConfirmation/commentInfo luôn lấy từ bản đã lưu; xác nhận giá chỉ giữ lại
+      // needsBuyConfirmation luôn lấy từ bản đã lưu; xác nhận giá chỉ giữ lại
       // khi giá đầu vào không đổi — đổi giá là mất xác nhận và phải xác nhận lại.
+      // commentInfo: nền (mục tiêu brief, cách tính gói, phần đã bao gồm) lấy từ bản
+      // đã lưu; PM chỉ bổ sung được phạm vi (scopeNote) và số comment mỗi gói —
+      // tổng comment thuê được tính lại từ số lượng dòng hiện tại.
       p.items=p.items.map(i=>{
         if(i.shortlistId)return i;
         const old=originalItems.find(o=>o.id===i.id);
-        if(!old||old.shortlistId)return i;
-        return {...i,
+        const base:any={...i};delete base.commentInfo;
+        if(!old||old.shortlistId)return base;
+        let mergedInfo:ProjectQuoteItem['commentInfo'];
+        if(old.commentInfo){
+          mergedInfo={...old.commentInfo,
+            ...(i.commentInfo?{scopeNote:i.commentInfo.scopeNote,commentsPerPackage:i.commentInfo.commentsPerPackage}:{})};
+          mergedInfo.includedComments=includedCommentsOf({...i,commentInfo:mergedInfo})??undefined;
+        }
+        return {...base,
           ...(old.needsBuyConfirmation?{needsBuyConfirmation:true}:{}),
-          ...(old.commentInfo?{commentInfo:old.commentInfo}:{}),
+          ...(mergedInfo?{commentInfo:mergedInfo}:{}),
           ...(old.partnerType?{partnerType:old.partnerType}:{}),
           ...(old.buyConfirmation&&old.buyUnitPrice===i.buyUnitPrice?{buyConfirmation:old.buyConfirmation}:{})};
       });
@@ -236,6 +287,8 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     if(['submitted','approved'].includes(req.body.status)){
       const gate=priceGate(p);
       if(!gate.ok)return res.status(400).json({message:priceGateMessage(gate),priceGate:gate});
+      const incompletePackages=packageGate(p);
+      if(incompletePackages)return res.status(400).json({message:`Chưa thể gửi duyệt, duyệt hoặc chốt báo giá: còn ${incompletePackages} dòng gói comment thiếu số comment bao gồm trong mỗi gói hoặc thiếu ghi chú phạm vi. Hãy bổ sung trong bản nháp (số comment mỗi gói được lưu riêng, không suy đoán từ mục tiêu của brief).`,packageGate:{incompletePackages}});
       if(!finance(p).complete)return res.status(400).json({message:'Cần đủ giá đầu vào và giá bán trước khi duyệt.'});
     }
     db.prepare('UPDATE project_quote_versions SET status=?,approved_by=?,revision=revision+1 WHERE id=? AND revision=?').run(req.body.status,req.body.status==='approved'?u.id:null,q.id,q.revision);audit(u.id,req.body.status+'_quote',q.id);res.json({success:true});
@@ -318,9 +371,18 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
       usedPhaseIds.add(ph.id);
       const mode=c.pricingMode==='package'?'package':'per_comment';
       if(mode==='per_comment'&&(!Number.isSafeInteger(c.quantity)||c.quantity<1||c.quantity>100000000))return res.status(400).json({message:'Số comments thuê ngoài phải do PM chọn (số nguyên dương) — hệ thống không tự lấy theo KPI mục tiêu.'});
+      // Theo gói: quantity là SỐ GÓI; bắt buộc số comment gồm trong mỗi gói (trường
+      // riêng) và ghi chú phạm vi. Thành tiền = số gói x giá gói — số comment KHÔNG
+      // bị nhân vào giá lần nữa, chỉ dùng để tính tổng khối lượng comment thuê.
+      if(mode==='package'){
+        if(!Number.isSafeInteger(c.quantity)||c.quantity<1||c.quantity>100000)return res.status(400).json({message:'Số gói comment phải là số nguyên dương do PM chọn.'});
+        if(!Number.isSafeInteger(c.commentsPerPackage)||c.commentsPerPackage<1||c.commentsPerPackage>100000000)return res.status(400).json({message:'Gói comment bắt buộc nhập số comment bao gồm trong mỗi gói (số nguyên dương, lưu bằng trường riêng).'});
+        if(!text(c.scopeNote,1000))return res.status(400).json({message:'Gói comment bắt buộc nhập ghi chú phạm vi, ví dụ “Phân bổ trên 100 bài trong tháng 11”.'});
+      }
       if(!validMoney(c.buyUnitPrice??null)||!validMoney(c.sellUnitPrice??null))return res.status(400).json({message:'Giá dịch vụ comment không hợp lệ.'});
       const brief=briefOf(ph);
-      items.push({id:randomUUID(),creator:vendor,description:text(c.scopeNote,1000)||'Dịch vụ comment thuê ngoài',phase:phaseName,kind:'seeding',partnerType:'service',quantity:mode==='package'?1:c.quantity,buyUnitPrice:c.buyUnitPrice??null,sellUnitPrice:c.sellUnitPrice??null,included:true,unit:mode==='package'?'gói':'comment',needsBuyConfirmation:true,commentInfo:{briefTargetTotal:brief?.kpiComments??null,scopeNote:text(c.scopeNote,1000)??'',includedNote:text(c.includedNote,1000)??''}});
+      const scopeNote=text(c.scopeNote,1000)??'';
+      items.push({id:randomUUID(),creator:vendor,description:scopeNote||'Dịch vụ comment thuê ngoài',phase:phaseName,kind:'seeding',partnerType:'service',quantity:c.quantity,buyUnitPrice:c.buyUnitPrice??null,sellUnitPrice:c.sellUnitPrice??null,included:true,unit:mode==='package'?'gói':'comment',needsBuyConfirmation:true,note:scopeNote||undefined,commentInfo:{briefTargetTotal:brief?.kpiComments??null,scopeNote,includedNote:text(c.includedNote,1000)??'',pricingMode:mode,commentsPerPackage:mode==='package'?c.commentsPerPackage:null,includedComments:mode==='package'?c.quantity*c.commentsPerPackage:c.quantity}});
     }
     if(items.length>500)return res.status(400).json({message:'Phương án vượt quá 500 hạng mục. Tách bớt phase hoặc giảm số dòng.'});
     // Đối chiếu mục tiêu: tổng số lượng ĐÃ PHÂN BỔ so với mục tiêu của brief từng phase
@@ -367,8 +429,10 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     if(!access(u,pid,true))return res.status(403).json({message:'Booking không được xem bản giá bán.'});
     const q=quote(req.params.quoteId,pid);if(!q||q.status!=='approved')return res.status(400).json({message:'Báo giá cần được duyệt trước khi xuất khách.'});
     const p=JSON.parse(q.payload_json) as QuotePayload;const f=finance(p);
-    // Bản khách chỉ chứa thông tin bán: đối tác, mô tả, đơn vị, số lượng, giá bán.
-    // Không lộ giá mua, nguồn xác nhận hay bất kỳ thông tin nội bộ nào.
-    res.json({version:q.number,client:p.client,campaign:p.campaign,items:p.items.filter(i=>i.included).map(i=>({creator:i.creator,description:i.description,phase:i.phase,quantity:i.quantity,unit:i.unit??null,serviceName:i.serviceName??null,partnerType:i.partnerType??(i.kind==='kol'?'kol':i.kind==='community'?'community':'other'),sellUnitPrice:i.sellUnitPrice,total:i.quantity*i.sellUnitPrice!})),subtotal:f.knownSellTotal,discount:f.discount,agencyFee:f.agencyFee,revenueBeforeTax:f.revenueBeforeTax,taxRate:p.taxRate,tax:f.tax,totalWithTax:f.totalWithTax});
+    // Bản khách chỉ chứa thông tin bán: đối tác, mô tả, GHI CHÚ HẠNG MỤC (note —
+    // nội dung dành cho khách), đơn vị, số lượng, giá bán; với dòng dịch vụ comment
+    // có thêm phạm vi và tổng số comment bao gồm. Không lộ giá mua, điều kiện nội bộ
+    // (conditions), nguồn xác nhận, P&L hay bất kỳ thông tin nội bộ nào khác.
+    res.json({version:q.number,client:p.client,campaign:p.campaign,items:p.items.filter(i=>i.included).map(i=>({creator:i.creator,description:i.description,phase:i.phase,quantity:i.quantity,unit:i.unit??null,serviceName:i.serviceName??null,partnerType:i.partnerType??(i.kind==='kol'?'kol':i.kind==='community'?'community':'other'),...(i.note?{note:i.note}:{}),...(i.partnerType==='service'&&i.commentInfo?{scopeNote:i.commentInfo.scopeNote,commentsIncluded:includedCommentsOf(i)}:{}),sellUnitPrice:i.sellUnitPrice,total:i.quantity*i.sellUnitPrice!})),subtotal:f.knownSellTotal,discount:f.discount,agencyFee:f.agencyFee,revenueBeforeTax:f.revenueBeforeTax,taxRate:p.taxRate,tax:f.tax,totalWithTax:f.totalWithTax});
   });
 }
