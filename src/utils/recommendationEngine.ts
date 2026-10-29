@@ -5,6 +5,7 @@
 
 import { KolProfile, PriceFormatKey, PRICE_FORMAT_LABELS, RecommendationFilter, RecommendationScore } from '../types/kol';
 import { formatVND } from './formatters';
+import { categoryKey, categoriesMatch, relatedCategories, canonicalCategory } from '../domain/categories';
 
 export function calculateKolRecommendation(
   kol: KolProfile,
@@ -17,35 +18,40 @@ export function calculateKolRecommendation(
   let vuotNganSach = false;
 
   // 1. CHẤM ĐIỂM LĨNH VỰC (Max 40 điểm)
-  const reqCategory = filter.linhVuc.trim().toLowerCase();
-  const kolCategories = kol.linhVuc.map((c) => c.toLowerCase());
-
-  if (kolCategories.includes(reqCategory)) {
-    diemLinhVuc = 40;
-    lyDo.push(`Khớp chuẩn lĩnh vực "${filter.linhVuc}"`);
-  } else if (kolCategories.some((c) => c.includes(reqCategory) || reqCategory.includes(c))) {
-    diemLinhVuc = 32;
-    lyDo.push(`Tương đồng với lĩnh vực "${filter.linhVuc}"`);
-  } else {
-    // Nhóm lĩnh vực gần gũi
-    const relatedGroups: Record<string, string[]> = {
-      'ẩm thực': ['du lịch', 'lifestyle', 'giải trí'],
-      'du lịch': ['ẩm thực', 'lifestyle'],
-      'làm đẹp': ['thời trang', 'mẹ & bé', 'lifestyle'],
-      'thời trang': ['làm đẹp', 'lifestyle'],
-      'công nghệ': ['gaming', 'tài chính', 'giáo dục'],
-      'gaming': ['công nghệ', 'giải trí'],
-      'sức khỏe & gym': ['lifestyle', 'ẩm thực'],
-    };
-
-    const related = relatedGroups[reqCategory] || [];
-    const isRelated = kolCategories.some((c) => related.includes(c));
-    if (isRelated) {
-      diemLinhVuc = 20;
-      lyDo.push(`Lĩnh vực bổ trợ (${kol.linhVuc.join(', ')}) phù hợp mở rộng tệp khán giả`);
+  const rawLinhVuc = filter.linhVuc.trim();
+  if (!rawLinhVuc) {
+    const kolCategories = kol.linhVuc.map((c) => c.toLowerCase());
+    if (kolCategories.some((c) => c.includes('') || ''.includes(c))) {
+      diemLinhVuc = 32;
+      lyDo.push(`Tương đồng với lĩnh vực "${filter.linhVuc}"`);
     } else {
       diemLinhVuc = 0;
       lyDo.push(`Khác lĩnh vực chính (${kol.linhVuc.join(', ')})`);
+    }
+  } else {
+    const reqKey = categoryKey(rawLinhVuc);
+    const kolKeys = kol.linhVuc.map(categoryKey);
+
+    if (kolKeys.includes(reqKey)) {
+      diemLinhVuc = 40;
+      lyDo.push(`Khớp chuẩn lĩnh vực "${filter.linhVuc}"`);
+    } else if (kol.linhVuc.some((c) => categoriesMatch(rawLinhVuc, c))) {
+      diemLinhVuc = 32;
+      lyDo.push(`Tương đồng với lĩnh vực "${filter.linhVuc}"`);
+    } else {
+      const related = relatedCategories(rawLinhVuc);
+      const isRelated = kol.linhVuc.some((c) => {
+        const cCanon = canonicalCategory(c);
+        return cCanon ? related.includes(cCanon) : false;
+      });
+
+      if (isRelated) {
+        diemLinhVuc = 20;
+        lyDo.push(`Lĩnh vực bổ trợ (${kol.linhVuc.join(', ')}) phù hợp mở rộng tệp khán giả`);
+      } else {
+        diemLinhVuc = 0;
+        lyDo.push(`Khác lĩnh vực chính (${kol.linhVuc.join(', ')})`);
+      }
     }
   }
 

@@ -1,5 +1,6 @@
 import type { CommunityProfile } from '../types/community';
 import type { ProjectBrief } from './projectBrief';
+import { categoriesMatch } from './categories';
 
 // Domain Community dùng chung client/server/test: định danh theo link đã chuẩn hoá,
 // đánh giá mức phù hợp theo brief (chỉ dựa trên dữ kiện có trong hồ sơ),
@@ -70,7 +71,7 @@ export function assessCommunity(p: CommunityProfile, brief: ProjectBrief) {
   if (brief.category) {
     checks.push({
       label: `Chủ đề ${brief.category}`,
-      met: (p.linhVuc ?? []).some(c => fold(c).includes(fold(brief.category)) || fold(brief.category).includes(fold(c))),
+      met: (p.linhVuc ?? []).some(c => categoriesMatch(brief.category, c)),
     });
   }
   if (brief.keyword) {

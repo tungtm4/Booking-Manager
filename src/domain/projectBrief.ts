@@ -1,4 +1,5 @@
 import {PRICE_FORMAT_LABELS, type PriceFormatKey} from '../types/kol';
+import {categoriesMatch} from './categories';
 export type BriefDeliverable={format:PriceFormatKey;quantity:number};
 /** Loại đối tác brief hướng tới; null = brief chưa nói rõ — để chưa xác định, yêu cầu người dùng duyệt. */
 export type BriefPartnerType='kol'|'community'|'both';
@@ -71,7 +72,7 @@ export function readProjectBrief(raw:any):ProjectBrief {
 const fold=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/đ/g,'d').trim();
 export function assessProjectKol(p:any,brief:ProjectBrief){
   const checks:{label:string;met:boolean}[]=[];
-  if(brief.category)checks.push({label:`Lĩnh vực ${brief.category}`,met:(p.linhVuc??[]).some((c:string)=>fold(c).includes(fold(brief.category)))});
+  if(brief.category)checks.push({label:`Lĩnh vực ${brief.category}`,met:(p.linhVuc??[]).some((c:string)=>categoriesMatch(brief.category,c))});
   if(brief.keyword)checks.push({label:`Hồ sơ chứa từ khóa “${brief.keyword}”`,met:fold(p.ten+' '+(p.reviewSoBo??'')+' '+(p.linhVuc??[]).join(' ')).includes(fold(brief.keyword))});
   let reqPlatforms: string[] = [];
   if (Array.isArray(brief.platforms) && brief.platforms.length > 0) {
