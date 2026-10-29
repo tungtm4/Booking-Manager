@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ProjectKolCard } from './ProjectKolCard';
+import { PartnerSigningPanel } from './PartnerSigningPanel';
 import { readLegacyLocalKols } from '../services/catalogService';
 import { CatalogMigrationModal } from './CatalogMigrationModal';
 import type { KolProfile } from '../types/kol';
@@ -313,6 +314,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
   const [showMigration, setShowMigration] = useState(false), [migrationProfiles, setMigrationProfiles] = useState<KolProfile[]>([]);
   const [phaseInfo, setPhaseInfo] = useState<any>({ name: '', kind: 'other', description: '', budget: '' }), [phaseInfoDirty, setPhaseInfoDirty] = useState(false);
   const [phaseBrief, setPhaseBrief] = useState<any>(null), [phaseBriefDirty, setPhaseBriefDirty] = useState(false);
+  const [signingTarget, setSigningTarget] = useState<{ type: 'kol' | 'community'; id: string; name: string } | null>(null);
   const [newPhase, setNewPhase] = useState<any>({ name: '', kind: 'creator', budget: '' });
   const [aiText, setAiText] = useState(''), [aiDrafts, setAiDrafts] = useState<any[] | null>(null), [aiBusy, setAiBusy] = useState(false), [aiMsg, setAiMsg] = useState('');
   const activePhaseIdRef = useRef(''), syncedPhaseRev = useRef<Record<string, number>>({});
@@ -1031,6 +1033,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
                     </select>
                   </label>
                 )}
+                <button type="button" className="text-indigo-700 underline disabled:opacity-50" disabled={busy} onClick={() => setSigningTarget({ type: 'kol', id: row.catalogId, name: row.profile?.ten ?? '' })}>Hồ sơ ký kết</button>
                 <button type="button" className="text-red-700 underline disabled:opacity-50" disabled={busy} onClick={() => { if (window.confirm('Xoá KOL này khỏi danh sách dự án?')) run(async () => { await request(base + `/shortlist/${row.id}/remove`, {}); await refresh(); setNotice('Đã xoá KOL khỏi danh sách dự án.'); }); }}>Xoá khỏi dự án</button>
               </div>
             </div>
@@ -1087,6 +1090,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
                     </select>
                   </label>
                 )}
+                <button type="button" className="text-indigo-700 underline disabled:opacity-50" disabled={busy} onClick={() => setSigningTarget({ type: 'community', id: row.catalogId, name: row.profile?.ten ?? '' })}>Hồ sơ ký kết</button>
                 <button type="button" className="text-red-700 underline disabled:opacity-50" disabled={busy} onClick={() => { if (window.confirm('Xoá Community này khỏi danh sách dự án?')) run(async () => { await request(base + `/shortlist/${row.id}/remove`, {}); await refresh(); setNotice('Đã xoá Community khỏi danh sách dự án.'); }); }}>Xoá khỏi dự án</button>
               </div>
             </div>
@@ -1152,6 +1156,17 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
           </div>
           <p className="text-xs text-slate-500">Giá chụp vào phương án kèm trạng thái xác nhận; bản nháp được thiếu giá/chưa xác nhận nhưng cổng giá ở server chặn gửi duyệt tới khi đủ. Không tự tạo phương án, không tự chia đều SOW toàn chiến dịch. Community đưa vào theo từng dịch vụ ở mục 4, hoặc phân bổ hàng loạt khi tạo phương án từ phase trong mục Phương án & Báo giá.</p>
         </section>
+      )}
+      {signingTarget && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto p-4" onClick={() => setSigningTarget(null)}>
+          <div className="bg-white rounded-2xl max-w-3xl w-full p-5 space-y-3 my-8" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="font-semibold">Hồ sơ ký kết — {signingTarget.name}</h4>
+              <button type="button" aria-label="Đóng hồ sơ ký kết" className="text-slate-500 hover:text-slate-800 px-2" onClick={() => setSigningTarget(null)}>✕</button>
+            </div>
+            <PartnerSigningPanel partnerType={signingTarget.type} partnerId={signingTarget.id} />
+          </div>
+        </div>
       )}
       <CatalogMigrationModal
         isOpen={showMigration}

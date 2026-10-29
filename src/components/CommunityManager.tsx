@@ -4,6 +4,7 @@ import { COMMUNITY_KIND_LABELS, COMMUNITY_METRIC_LABELS, COMMUNITY_SERVICE_UNIT_
 import { CommunityService as CommunityApi, type CatalogCommunity } from '../services/communityService';
 import { communityScaleLabel } from '../domain/community';
 import { CommunityImportModal } from './CommunityImportModal';
+import { PartnerSigningPanel } from './PartnerSigningPanel';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { formatDateTimeVN, formatVND } from '../utils/formatters';
 import { paginateItems, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../utils/pagination';
@@ -287,6 +288,11 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
               <button type="button" className="border rounded-lg px-3 py-2 text-sm" onClick={() => setEditing(null)}>Huỷ</button>
               <button type="button" className={button} disabled={busy || !editing.ten.trim()} onClick={save}>{busy ? 'Đang lưu…' : 'Lưu Community'}</button>
             </div>
+            {!isNew && editing.id && (
+              <div className="border-t pt-3">
+                <PartnerSigningPanel partnerType="community" partnerId={editing.id} />
+              </div>
+            )}
           </div>
         </div>
       )}
