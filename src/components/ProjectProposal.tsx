@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { passesProposalThreshold, rankKolsForRecommendation, PROPOSAL_MIN_CATEGORY_SCORE, PROPOSAL_MIN_TOTAL_SCORE } from '../utils/recommendationEngine';
+import { toggleRangeSelection } from '../utils/rangeSelection';
 import { LatestRequestGuard } from '../utils/latestRequestGuard';
 import { PRICE_FORMAT_LABELS, type PriceFormatKey, type RecommendationScore } from '../types/kol';
 import { formatFollowers, formatVND } from '../utils/formatters';
@@ -32,6 +33,20 @@ async function request(path: string, body?: unknown, method?: string) {
 }
 
 const PLATFORMS = ['TikTok', 'YouTube', 'Facebook', 'Instagram', 'Threads'];
+
+function SelectionToolbar({ label, total, pageCount, selected, disabled, onPage, onAll, onClear }: {
+  label: string; total: number; pageCount: number; selected: number; disabled: boolean;
+  onPage: () => void; onAll: () => void; onClear: () => void;
+}) {
+  return <div className="rounded-lg bg-slate-50 border p-3 space-y-2">
+    <div className="flex flex-wrap gap-2 text-sm">
+      <button type="button" aria-label={'Chọn trang hiện tại ' + label} className={button} disabled={disabled || !pageCount} onClick={onPage}>Chọn trang này ({pageCount})</button>
+      <button type="button" aria-label={'Chọn tất cả kết quả ' + label} className={button} disabled={disabled || !total} onClick={onAll}>Chọn tất cả {total.toLocaleString('vi-VN')} kết quả</button>
+      <button type="button" aria-label={'Bỏ chọn tất cả ' + label} className="rounded-lg border px-3 py-2 disabled:opacity-50 cursor-pointer" disabled={disabled || !selected} onClick={onClear}>Bỏ chọn tất cả</button>
+    </div>
+    <p className="text-xs text-slate-600">Bấm ô đầu, giữ Shift rồi bấm ô cuối để chọn cả khoảng; bấm ngược chiều cũng được. Shift + bấm ô đã chọn để bỏ chọn cả khoảng. Lựa chọn được giữ khi chuyển trang.</p>
+  </div>;
+}
 
 export type FormValues = {
   briefText: string;
@@ -226,6 +241,9 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
   // Kết quả KOL
   const [results, setResults] = useState<RecommendationScore[] | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const kolAnchorRef = useRef<string | null>(null);
+  const commAnchorRef = useRef<string | null>(null);
+  function resetSelectionAnchors() { kolAnchorRef.current = null; commAnchorRef.current = null; }
   const [resultsPage, setResultsPage] = useState(1);
   const [resultsPageSize, setResultsPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   // Số hồ sơ KOL bị ẩn vì dưới ngưỡng điểm phù hợp tối thiểu (để báo minh bạch).
@@ -278,6 +296,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
   }
 
   function clearWork(clearMessages = true) {
+    resetSelectionAnchors();
     setResults(null);
     setKolBelowThreshold(0);
     setSelectedIds([]);
@@ -447,6 +466,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
   }
 
   function search() {
+    resetSelectionAnchors();
     setSelectedIds([]);
     setResultsPage(1);
     setCommSelected([]);
@@ -604,13 +624,22 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       setNotice(`${addedText}${existText} Mở dự án để kiểm tra và xác nhận giá.`);
       setSelectedIds([]);
       setCommSelected([]);
+      resetSelectionAnchors();
     });
   }
 
-  const toggle = (id: string) =>
-    setSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
-  const toggleComm = (id: string) =>
-    setCommSelected(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+  const toggle = (id: string, shiftKey = false) => {
+    const ordered = (results ?? []).map(r => r.kol.id);
+    const anchor = kolAnchorRef.current;
+    setSelectedIds(prev => toggleRangeSelection(prev, ordered, id, anchor, shiftKey));
+    if (!shiftKey || !anchor || !ordered.includes(anchor)) kolAnchorRef.current = id;
+  };
+  const toggleComm = (id: string, shiftKey = false) => {
+    const ordered = (commResults ?? []).map(r => r.profile.id);
+    const anchor = commAnchorRef.current;
+    setCommSelected(prev => toggleRangeSelection(prev, ordered, id, anchor, shiftKey));
+    if (!shiftKey || !anchor || !ordered.includes(anchor)) commAnchorRef.current = id;
+  };
 
   const paged = results ? paginateItems(results, resultsPage, resultsPageSize) : null;
   const selectedKols = (results ?? []).filter(r => selectedIds.includes(r.kol.id));
@@ -1107,6 +1136,11 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
             ) : (
               results && (
                 <>
+                  {results.length > 0 && <SelectionToolbar label="KOL" total={results.length} pageCount={paged?.pageItems.length ?? 0} selected={selectedIds.length} disabled={busy}
+                    onPage={() => { kolAnchorRef.current = null; setSelectedIds(prev => [...new Set([...prev, ...(paged?.pageItems ?? []).map(r => r.kol.id)])]); }}
+                    onAll={() => { kolAnchorRef.current = null; setSelectedIds(results.map(r => r.kol.id)); }}
+                    onClear={() => { kolAnchorRef.current = null; setSelectedIds([]); }}
+                  />}
                   {selectedKols.length > 0 && (
                     <div className="text-sm">
                       <p className="text-slate-600 mb-1">Đã chọn {selectedKols.length} KOL — lựa chọn được giữ nguyên khi chuyển trang:</p>
@@ -1127,7 +1161,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
                       const price = kol.bangGia?.[formatKey];
                       return (
                         <label key={kol.id} className="flex gap-3 py-3 cursor-pointer items-start">
-                          <input type="checkbox" className="mt-1" checked={selectedIds.includes(kol.id)} onChange={() => toggle(kol.id)} />
+                          <input type="checkbox" aria-label={'Chọn KOL ' + kol.ten} className="mt-1" disabled={busy} checked={selectedIds.includes(kol.id)} onClick={e => toggle(kol.id, e.shiftKey)} onChange={() => {}} />
                           <span className="flex-1 min-w-0">
                             <span className="flex flex-wrap items-baseline gap-2">
                               <strong>{kol.ten}</strong>
@@ -1216,13 +1250,18 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
                   <p className="text-xs text-slate-500">
                     Community lấy từ kho Community riêng. Lý do đề xuất chỉ dựa trên dữ kiện có trong hồ sơ (chủ đề, nền tảng, quy mô, dịch vụ). PM chọn từ danh sách sơ bộ vào phương án A/B/C sau khi Booking xác nhận giá.
                   </p>
+                  {commResults.length > 0 && <SelectionToolbar label="Community" total={commResults.length} pageCount={commPaged?.pageItems.length ?? 0} selected={commSelected.length} disabled={busy}
+                    onPage={() => { commAnchorRef.current = null; setCommSelected(prev => [...new Set([...prev, ...(commPaged?.pageItems ?? []).map(r => r.profile.id)])]); }}
+                    onAll={() => { commAnchorRef.current = null; setCommSelected(commResults.map(r => r.profile.id)); }}
+                    onClear={() => { commAnchorRef.current = null; setCommSelected([]); }}
+                  />}
                   <div className="space-y-3">
                     {(commPaged?.pageItems ?? []).map(({ profile: c, assessment }: any) => {
                       const requiredServices = services.map(s => s.name.trim().toLowerCase()).filter(Boolean);
                       return (
                         <article key={c.id} className="border rounded-xl p-3 space-y-1 bg-white">
                           <label className="flex gap-2 items-start cursor-pointer">
-                            <input type="checkbox" className="mt-1" checked={commSelected.includes(c.id)} onChange={() => toggleComm(c.id)} />
+                            <input type="checkbox" aria-label={'Chọn Community ' + c.ten} className="mt-1" disabled={busy} checked={commSelected.includes(c.id)} onClick={e => toggleComm(c.id, e.shiftKey)} onChange={() => {}} />
                             <span className="font-semibold">
                               {c.ten}
                               <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">
