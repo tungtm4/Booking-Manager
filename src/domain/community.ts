@@ -51,6 +51,20 @@ export function communityScaleLabel(p: { loai?: string; quyMo?: number | null; l
 
 const fold = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/đ/g, 'd').trim();
 
+export function serviceMatches(profileServiceName: string, briefServiceName: string): boolean {
+  const p = fold(profileServiceName);
+  const b = fold(briefServiceName);
+  if (!p || !b) return false;
+  if (p.includes(b) || b.includes(p)) return true;
+  const cleanWords = (s: string) => s.split(/[\s,./()+-]+/).filter(w => w.length > 1 && !/^\d+$/.test(w) && !['tren','cho','cua','va','theo','bang','moi','toan','ngoai','thue'].includes(w));
+  const bWords = cleanWords(b);
+  const pWords = cleanWords(p);
+  const common = bWords.filter(w => pWords.includes(w));
+  if (common.length >= 2) return true;
+  if (common.length === 1 && (common[0] === 'post' || common[0] === 'livestream' || common[0] === 'reel' || common[0] === 'reels')) return true;
+  return false;
+}
+
 export function assessCommunity(p: CommunityProfile, brief: ProjectBrief) {
   const checks: { label: string; met: boolean }[] = [];
   if (brief.category) {
@@ -74,11 +88,49 @@ export function assessCommunity(p: CommunityProfile, brief: ProjectBrief) {
       met: p.quyMo != null && p.quyMo >= brief.minFollowers,
     });
   }
-  for (const s of brief.services ?? []) {
-    const found = (p.dichVu ?? []).find(d => fold(d.ten).includes(fold(s.name)) || fold(s.name).includes(fold(d.ten)));
-    checks.push({ label: found ? `Có dịch vụ “${found.ten}”` : `Chưa thấy dịch vụ “${s.name}” trong bảng giá`, met: Boolean(found) });
+
+  // Tách nhu cầu dịch vụ của phase khỏi khả năng cung cấp của từng đối tác:
+  // - Dịch vụ do đối tác khác thực hiện (KOL, nhà cung cấp comment/seeding ngoài) không bắt buộc Community phải có.
+  // - Một Community không cần đáp ứng toàn bộ dịch vụ của phase.
+  // - Nếu có dịch vụ phù hợp nhưng thiếu giá: vẫn ghi nhận phù hợp để Booking bổ sung.
+  const services = brief.services ?? [];
+  let matchingServiceCount = 0;
+  let communityTargetedServiceCount = 0;
+
+  for (const s of services) {
+    const isOtherPartner = s.targetPartner === 'kol' || s.targetPartner === 'vendor';
+    if (isOtherPartner) {
+      checks.push({
+        label: `Dịch vụ “${s.name}”: dành cho ${s.targetPartner === 'kol' ? 'KOL' : 'nhà cung cấp ngoài'}`,
+        met: true,
+      });
+      continue;
+    }
+
+    const found = (p.dichVu ?? []).find(d => serviceMatches(d.ten, s.name));
+    if (found) {
+      matchingServiceCount++;
+      communityTargetedServiceCount++;
+      const priceText = found.giaThamKhao != null ? '' : ' (chưa có giá tham khảo — Booking cần bổ sung)';
+      checks.push({
+        label: `Có dịch vụ “${found.ten}”${priceText}`,
+        met: true,
+      });
+    } else {
+      communityTargetedServiceCount++;
+      checks.push({
+        label: `Chưa thấy dịch vụ “${s.name}” trong bảng giá (cần đơn vị khác hoặc bổ sung)`,
+        met: false,
+      });
+    }
   }
-  return { matches: checks.every(c => c.met), checks, hasCriteria: checks.length > 0 };
+
+  const coreChecks = checks.filter(c => !c.label.startsWith('Có dịch vụ') && !c.label.startsWith('Chưa thấy dịch vụ') && !c.label.includes('dành cho'));
+  const coreMet = coreChecks.every(c => c.met);
+  const servicesMet = communityTargetedServiceCount === 0 || matchingServiceCount > 0;
+  const matches = coreMet && servicesMet;
+
+  return { matches, checks, hasCriteria: checks.length > 0 };
 }
 
 // ---------------------------------------------------------------------------

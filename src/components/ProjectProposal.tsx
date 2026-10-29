@@ -7,7 +7,7 @@ import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { friendlyAiMessage } from '../utils/aiMessages';
 import { PHASE_KIND_LABELS } from '../domain/phases';
 import { assessCommunity, communityScaleLabel, pillarPostCounts } from '../domain/community';
-import { readProjectBrief, type BriefPartnerType, type BriefPillar, type BriefService } from '../domain/projectBrief';
+import { readProjectBrief, type BriefDeliverable, type BriefPartnerType, type BriefPillar, type BriefService } from '../domain/projectBrief';
 import { COMMUNITY_KIND_LABELS } from '../types/community';
 import { paginateItems, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../utils/pagination';
 
@@ -42,6 +42,9 @@ type FormValues = {
   nenTang: string;
   followerMin: number | '';
   budgetMax: number | '';
+  totalBudget: number | '';
+  deliverableScope: 'campaign' | 'per_kol';
+  deliverables: BriefDeliverable[];
   formatKey: PriceFormatKey;
   kpiTopics: number | null;
   kpiComments: number | null;
@@ -69,6 +72,9 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
   const [nenTang, setNenTang] = useState('TatCa');
   const [followerMin, setFollowerMin] = useState<number | ''>('');
   const [budgetMax, setBudgetMax] = useState<number | ''>('');
+  const [totalBudget, setTotalBudget] = useState<number | ''>('');
+  const [deliverableScope, setDeliverableScope] = useState<'campaign' | 'per_kol'>('campaign');
+  const [deliverables, setDeliverables] = useState<BriefDeliverable[]>([]);
   const [formatKey, setFormatKey] = useState<PriceFormatKey>('video');
   const [kpiTopics, setKpiTopics] = useState<number | null>(null);
   const [kpiComments, setKpiComments] = useState<number | null>(null);
@@ -122,6 +128,9 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     nenTang: 'TatCa',
     followerMin: '',
     budgetMax: '',
+    totalBudget: '',
+    deliverableScope: 'campaign',
+    deliverables: [],
     formatKey: 'video',
     kpiTopics: null,
     kpiComments: null,
@@ -139,6 +148,9 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     setNenTang(v.nenTang);
     setFollowerMin(v.followerMin);
     setBudgetMax(v.budgetMax);
+    setTotalBudget(v.totalBudget);
+    setDeliverableScope(v.deliverableScope);
+    setDeliverables(v.deliverables);
     setFormatKey(v.formatKey);
     setKpiTopics(v.kpiTopics);
     setKpiComments(v.kpiComments);
@@ -166,8 +178,20 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
 
   function formFromPhase(ph: any): FormValues {
     const b = ph?.brief;
-    if (!b) return blankForm();
-    const first = b.deliverables?.[0]?.format;
+    const phBudget = typeof ph?.budget === 'number' && ph.budget > 0 ? ph.budget : '';
+    if (!b) {
+      const bf = blankForm();
+      bf.totalBudget = phBudget;
+      return bf;
+    }
+    const delivs: BriefDeliverable[] = Array.isArray(b.deliverables)
+      ? b.deliverables
+          .filter((d: any) => d && d.format in PRICE_FORMAT_LABELS && Number(d.quantity) > 0)
+          .map((d: any) => ({ format: d.format as PriceFormatKey, quantity: Number(d.quantity) || 1 }))
+      : [];
+    const first = delivs[0]?.format ?? b.deliverables?.[0]?.format;
+    const bBudget = typeof b.budget === 'number' && b.budget > 0 ? b.budget : phBudget;
+    const bMaxKol = typeof b.maxBudgetPerKol === 'number' && b.maxBudgetPerKol > 0 ? b.maxBudgetPerKol : '';
     return {
       briefText: b.text ?? '',
       partnerType: (['kol', 'community', 'both'] as const).includes(b.partnerType) ? b.partnerType : null,
@@ -176,7 +200,10 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       linhVuc: b.category ?? '',
       nenTang: PLATFORMS.includes(b.platform) ? b.platform : 'TatCa',
       followerMin: b.minFollowers ? b.minFollowers : '',
-      budgetMax: '',
+      budgetMax: bMaxKol,
+      totalBudget: bBudget,
+      deliverableScope: b.deliverableScope === 'per_kol' ? 'per_kol' : 'campaign',
+      deliverables: delivs,
       formatKey: first && first in PRICE_FORMAT_LABELS ? (first as PriceFormatKey) : 'video',
       kpiTopics: b.kpiTopics ?? null,
       kpiComments: b.kpiComments ?? null,
@@ -188,6 +215,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
             unit: s.unit ?? 'bài',
             quantity: s.quantity ?? 1,
             scope: s.scope === 'per_partner' ? 'per_partner' : 'phase',
+            ...(s.targetPartner ? { targetPartner: s.targetPartner } : {}),
           }))
         : [],
     };
@@ -202,6 +230,9 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     nenTang,
     followerMin,
     budgetMax,
+    totalBudget,
+    deliverableScope,
+    deliverables,
     formatKey,
     kpiTopics,
     kpiComments,
@@ -314,7 +345,29 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       const nextNenTang = x.nenTang && PLATFORMS.includes(x.nenTang) ? x.nenTang : 'TatCa';
       const nextFollower = typeof x.followerToiThieu === 'number' && x.followerToiThieu > 0 ? Number(x.followerToiThieu) : '';
       const nextBudget = typeof x.nganSachMoiKol === 'number' && x.nganSachMoiKol > 0 ? Number(x.nganSachMoiKol) : '';
-      const first = (x.hangMucMoiKol?.[0] ?? x.hangMucTongCampaign?.[0])?.format;
+      const nextTotalBudget = typeof x.nganSachTong === 'number' && x.nganSachTong > 0 ? Number(x.nganSachTong) : '';
+
+      const validFormats = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
+      const rawDelivs = (Array.isArray(x.hangMucMoiKol) && x.hangMucMoiKol.length > 0)
+        ? { scope: 'per_kol' as const, list: x.hangMucMoiKol }
+        : (Array.isArray(x.hangMucTongCampaign) && x.hangMucTongCampaign.length > 0)
+          ? { scope: 'campaign' as const, list: x.hangMucTongCampaign }
+          : { scope: 'campaign' as const, list: [] };
+
+      const formatMap = new Map<string, number>();
+      for (const item of rawDelivs.list) {
+        if (item && item.format && validFormats.includes(item.format)) {
+          const itemQty = Number(item.soLuong ?? item.quantity) || 1;
+          formatMap.set(item.format, (formatMap.get(item.format) || 0) + itemQty);
+        }
+      }
+      const nextDeliverables: BriefDeliverable[] = Array.from(formatMap.entries()).map(([fKey, qNum]) => ({
+        format: fKey as PriceFormatKey,
+        quantity: qNum,
+      }));
+      const nextDeliverableScope: 'campaign' | 'per_kol' = rawDelivs.scope;
+
+      const first = nextDeliverables[0]?.format;
       const nextFormatKey = first && first in PRICE_FORMAT_LABELS ? (first as PriceFormatKey) : 'video';
       const nextPartnerType = ['kol', 'community', 'both'].includes(x.doiTac) ? (x.doiTac as BriefPartnerType) : null;
       const nextKolTarget = x.soLuongKol && Number(x.soLuongKol) > 0 ? Number(x.soLuongKol) : null;
@@ -326,20 +379,22 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
         Array.isArray(x.pillars) && x.pillars.length > 0
           ? x.pillars.map((p: any) => ({ name: String(p.name ?? '').trim(), percent: Number(p.percent) || 0 }))
           : [];
-      const nextServices =
-        Array.isArray(x.services) && x.services.length > 0
-          ? x.services.map((s: any) => ({
-              name: String(s.name ?? '').trim(),
-              unit: String(s.unit ?? 'bài').trim() || 'bài',
-              quantity: Number(s.quantity ?? s.soLuong) || 1,
-              scope: s.scope === 'per_partner' ? 'per_partner' : 'phase',
-            }))
-          : [];
+      const rawServices = Array.isArray(x.services) && x.services.length > 0 ? x.services : (Array.isArray(x.dichVu) ? x.dichVu : []);
+      const nextServices = rawServices.map((s: any) => ({
+        name: String(s.name ?? s.ten ?? '').trim(),
+        unit: String(s.unit ?? s.donVi ?? 'bài').trim() || 'bài',
+        quantity: Number(s.quantity ?? s.soLuong) || 1,
+        scope: (s.scope === 'per_partner' || s.phamVi === 'per_partner') ? 'per_partner' : 'phase',
+        ...(s.targetPartner ? { targetPartner: s.targetPartner } : {}),
+      }));
 
       setLinhVuc(nextLinhVuc);
       setNenTang(nextNenTang);
       setFollowerMin(nextFollower);
       setBudgetMax(nextBudget);
+      setTotalBudget(nextTotalBudget);
+      setDeliverableScope(nextDeliverableScope);
+      setDeliverables(nextDeliverables);
       setFormatKey(nextFormatKey);
       setPartnerType(nextPartnerType);
       setKolTargetCount(nextKolTarget);
@@ -359,6 +414,9 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
         nenTang: nextNenTang,
         followerMin: nextFollower,
         budgetMax: nextBudget,
+        totalBudget: nextTotalBudget,
+        deliverableScope: nextDeliverableScope,
+        deliverables: nextDeliverables,
         formatKey: nextFormatKey,
         kpiTopics: nextKpiTopics,
         kpiComments: nextKpiComments,
@@ -441,12 +499,21 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     if (!phase) return;
     const existingBrief = phase.brief ?? {};
     const minFolSaved = followerMin === '' ? 0 : Number(followerMin);
+    const maxBudVal = budgetMax === '' ? null : Number(budgetMax);
+    const totalBudgetVal = totalBudget === '' ? null : Number(totalBudget);
     const newBrief = {
       ...existingBrief,
       text: briefText.trim(),
       category: linhVuc.trim(),
       platform: nenTang === 'TatCa' ? '' : nenTang,
       minFollowers: minFolSaved,
+      budget: totalBudgetVal,
+      maxBudgetPerKol: maxBudVal,
+      deliverableScope,
+      deliverables: deliverables.map(d => ({
+        format: d.format,
+        quantity: Number(d.quantity) || 1,
+      })),
       partnerType: partnerType ?? null,
       kolTargetCount: kolTargetCount != null ? Number(kolTargetCount) : null,
       communityTargetCount: communityTargetCount != null ? Number(communityTargetCount) : null,
@@ -460,6 +527,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
         unit: s.unit.trim() || 'bài',
         quantity: Number(s.quantity) || 1,
         scope: s.scope,
+        ...(s.targetPartner ? { targetPartner: s.targetPartner } : {}),
       })),
     };
     try {
@@ -470,12 +538,13 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
         `/projects/${projectId}/phases/${phase.id}`,
         {
           revision: phase.revision,
+          budget: totalBudgetVal,
           brief: newBrief,
         },
         'PATCH'
       );
       setPhases(prev =>
-        prev.map(p => (p.id === phase.id ? { ...p, revision: p.revision + 1, brief: newBrief } : p))
+        prev.map(p => (p.id === phase.id ? { ...p, revision: p.revision + 1, budget: totalBudgetVal, brief: newBrief } : p))
       );
       setFormSnapshot(JSON.stringify(currentForm()));
       setNotice(`Đã lưu brief và tiêu chí vào phase “${phase.name}”.`);
@@ -620,7 +689,14 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       </section>
 
       <section className="bg-white border rounded-2xl p-5 space-y-4">
-        <h2 className="font-semibold">2. Brief & tiêu chí của phase</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-semibold">2. Brief & tiêu chí của phase</h2>
+          {formDirty() && (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+              Có chỉnh sửa chưa lưu
+            </span>
+          )}
+        </div>
         <textarea
           aria-label="Brief của phase để AI phân tích"
           className={field}
@@ -640,7 +716,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
 
         {/* Cụm trường Thông tin brief mở rộng */}
         <div className="rounded-xl border border-sky-100 bg-sky-50/40 p-4 space-y-3">
-          <p className="text-sm font-semibold text-slate-900">Thông tin brief mở rộng (loại đối tác, số lượng, KPI & dịch vụ)</p>
+          <p className="text-sm font-semibold text-slate-900">Thông tin brief mở rộng (loại đối tác, số lượng, KPI, deliverables & dịch vụ)</p>
           <div className="grid sm:grid-cols-2 gap-3">
             <label className="text-sm">
               Loại đối tác của brief
@@ -732,6 +808,73 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
           <p className="text-xs text-slate-500">
             KPI là MỤC TIÊU cần đạt, không phải kết quả thực tế và không tự thành dòng chi phí. Comments đã nằm trong buzz — không cộng thêm; số bài viết không cộng vào buzz.
           </p>
+
+          <div className="space-y-2 pt-1 border-t border-sky-100">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold">Danh sách hạng mục công việc (Deliverables)</p>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-slate-600">Phạm vi:</span>
+                <select
+                  aria-label="Phạm vi hạng mục"
+                  className="rounded border border-slate-300 px-2 py-1 bg-white text-xs"
+                  value={deliverableScope}
+                  onChange={e => setDeliverableScope(e.target.value as 'campaign' | 'per_kol')}
+                >
+                  <option value="campaign">Toàn chiến dịch</option>
+                  <option value="per_kol">Từng KOL</option>
+                </select>
+              </div>
+            </div>
+            {deliverables.map((d, i) => (
+              <div key={i} className="flex flex-wrap gap-2 items-center">
+                <select
+                  aria-label={'Định dạng hạng mục ' + (i + 1)}
+                  className="rounded-lg border border-slate-300 px-2 py-1.5 bg-white text-sm"
+                  value={d.format}
+                  onChange={e => {
+                    const nextF = e.target.value as PriceFormatKey;
+                    setDeliverables(prev => prev.map((x, j) => j === i ? { ...x, format: nextF } : x));
+                  }}
+                >
+                  {Object.entries(PRICE_FORMAT_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </select>
+                <input
+                  aria-label={'Số lượng hạng mục ' + (i + 1)}
+                  className="rounded-lg border border-slate-300 px-2 py-1.5 w-24 text-sm"
+                  type="number"
+                  min={1}
+                  value={d.quantity}
+                  onChange={e => {
+                    const qNum = Math.max(1, parseInt(e.target.value, 10) || 1);
+                    setDeliverables(prev => prev.map((x, j) => j === i ? { ...x, quantity: qNum } : x));
+                  }}
+                />
+                <span className="text-xs text-slate-500">{deliverableScope === 'campaign' ? 'toàn chiến dịch' : '/ KOL'}</span>
+                <button
+                  type="button"
+                  className="text-xs text-red-700 underline cursor-pointer"
+                  onClick={() => setDeliverables(prev => prev.filter((_, j) => j !== i))}
+                >
+                  Xoá
+                </button>
+              </div>
+            ))}
+            {deliverables.length < 6 && (
+              <button
+                type="button"
+                className="text-xs text-indigo-700 underline cursor-pointer"
+                onClick={() => {
+                  const used = new Set(deliverables.map(d => d.format));
+                  const available = (Object.keys(PRICE_FORMAT_LABELS) as PriceFormatKey[]).find(f => !used.has(f)) || 'video';
+                  setDeliverables(prev => [...prev, { format: available, quantity: 1 }]);
+                }}
+              >
+                Thêm hạng mục
+              </button>
+            )}
+          </div>
 
           <div className="space-y-2 pt-1 border-t border-sky-100">
             <p className="text-xs font-semibold">Pillar nội dung và tỷ lệ (nếu brief có nêu)</p>
@@ -846,10 +989,14 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
             <input className={field} inputMode="numeric" disabled={parsing} value={formatMoneyInput(followerMin)} onChange={e => setFollowerMin(parseMoneyInput(e.target.value))} />
           </label>
           <label className="text-sm">
-            Ngân sách tối đa / KOL (VND)
-            <input className={field} inputMode="numeric" disabled={parsing} value={formatMoneyInput(budgetMax)} onChange={e => setBudgetMax(parseMoneyInput(e.target.value))} />
+            Ngân sách tổng của phase (VND)
+            <input aria-label="Ngân sách tổng của phase" className={field} inputMode="numeric" disabled={parsing} value={formatMoneyInput(totalBudget)} onChange={e => setTotalBudget(parseMoneyInput(e.target.value))} placeholder="VD: 300.000.000" />
           </label>
-          <label className="text-sm sm:col-span-2">
+          <label className="text-sm">
+            Ngân sách tối đa / KOL (VND)
+            <input aria-label="Ngân sách tối đa / KOL" className={field} inputMode="numeric" disabled={parsing} value={formatMoneyInput(budgetMax)} onChange={e => setBudgetMax(parseMoneyInput(e.target.value))} placeholder="VD: 40.000.000" />
+          </label>
+          <label className="text-sm">
             Hạng mục tính giá & điểm
             <select className={field} value={formatKey} disabled={parsing} onChange={e => setFormatKey(e.target.value as PriceFormatKey)}>
               {Object.entries(PRICE_FORMAT_LABELS).map(([k, v]) => (
@@ -858,6 +1005,12 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
             </select>
           </label>
         </div>
+
+        {formDirty() && (
+          <p className="text-xs text-amber-800 font-medium">
+            Có chỉnh sửa brief/tiêu chí chưa lưu vào phase. Bấm “Lưu vào brief của phase” để cập nhật hệ thống.
+          </p>
+        )}
 
         <div className="flex flex-wrap gap-3 items-center pt-2">
           <button
