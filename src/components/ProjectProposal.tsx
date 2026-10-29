@@ -33,7 +33,7 @@ async function request(path: string, body?: unknown, method?: string) {
 
 const PLATFORMS = ['TikTok', 'YouTube', 'Facebook', 'Instagram', 'Threads'];
 
-type FormValues = {
+export type FormValues = {
   briefText: string;
   partnerType: BriefPartnerType | null;
   kolTargetCount: number | null;
@@ -52,6 +52,143 @@ type FormValues = {
   pillars: BriefPillar[];
   services: BriefService[];
 };
+
+export const isFormDirty = (current: FormValues, snapshot: string): boolean =>
+  snapshot !== '' && JSON.stringify(current) !== snapshot;
+
+export function extractFormFromAiResult(briefText: string, x: any): FormValues {
+  const nextLinhVuc = typeof x?.linhVuc === 'string' && x.linhVuc.trim() ? x.linhVuc.trim() : '';
+  const nextNenTang = x?.nenTang && PLATFORMS.includes(x.nenTang) ? x.nenTang : 'TatCa';
+  const minFolNum = typeof x?.followerToiThieu === 'number' && x.followerToiThieu > 0 ? Number(x.followerToiThieu) : '';
+  const maxBudNum = typeof x?.nganSachMoiKol === 'number' && x.nganSachMoiKol > 0 ? Number(x.nganSachMoiKol) : '';
+  const nextTotalBudget = typeof x?.nganSachTong === 'number' && x.nganSachTong > 0 ? Number(x.nganSachTong) : '';
+
+  const validFormats = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
+  const rawDelivs = (Array.isArray(x?.hangMucMoiKol) && x.hangMucMoiKol.length > 0)
+    ? { scope: 'per_kol' as const, list: x.hangMucMoiKol }
+    : (Array.isArray(x?.hangMucTongCampaign) && x.hangMucTongCampaign.length > 0)
+      ? { scope: 'campaign' as const, list: x.hangMucTongCampaign }
+      : { scope: 'campaign' as const, list: [] };
+
+  const formatMap = new Map<string, number>();
+  for (const item of rawDelivs.list) {
+    if (item && item.format && validFormats.includes(item.format)) {
+      const itemQty = Number(item['soLuong'] ?? item.quantity) || 1;
+      formatMap.set(item.format, (formatMap.get(item.format) || 0) + itemQty);
+    }
+  }
+  const nextDeliverables: BriefDeliverable[] = Array.from(formatMap.entries()).map(([fKey, qNum]) => ({
+    format: fKey as PriceFormatKey,
+    quantity: qNum,
+  }));
+  const nextDeliverableScope: 'campaign' | 'per_kol' = rawDelivs.scope;
+
+  const first = nextDeliverables[0]?.format;
+  const nextFormatKey = first && first in PRICE_FORMAT_LABELS ? (first as PriceFormatKey) : 'video';
+  const nextPartnerType = ['kol', 'community', 'both'].includes(x?.doiTac) ? (x.doiTac as BriefPartnerType) : null;
+  const nextKolTarget = x?.soLuongKol && Number(x.soLuongKol) > 0 ? Number(x.soLuongKol) : null;
+  const nextCommTarget = x?.soLuongCommunity && Number(x.soLuongCommunity) > 0 ? Number(x.soLuongCommunity) : null;
+  const nextKpiTopics = x?.kpiTopics != null && Number(x.kpiTopics) > 0 ? Number(x.kpiTopics) : null;
+  const nextKpiComments = x?.kpiComments != null && Number(x.kpiComments) > 0 ? Number(x.kpiComments) : null;
+  const nextKpiBuzz = x?.kpiBuzz != null && Number(x.kpiBuzz) > 0 ? Number(x.kpiBuzz) : null;
+  const nextPillars =
+    Array.isArray(x?.pillars) && x.pillars.length > 0
+      ? x.pillars.map((p: any) => ({ name: String(p.name ?? '').trim(), percent: Number(p.percent) || 0 }))
+      : [];
+  const rawServices = Array.isArray(x?.services) && x.services.length > 0 ? x.services : (Array.isArray(x?.dichVu) ? x.dichVu : []);
+  const nextServices = rawServices.map((s: any) => ({
+    name: String(s.name ?? s.ten ?? '').trim(),
+    unit: String(s.unit ?? s.donVi ?? 'bài').trim() || 'bài',
+    quantity: Number(s.quantity ?? s['soLuong']) || 1,
+    scope: (s.scope === 'per_partner' || s.phamVi === 'per_partner') ? 'per_partner' : 'phase',
+    ...(s.targetPartner ? { targetPartner: s.targetPartner } : {}),
+  }));
+
+  return {
+    briefText,
+    partnerType: nextPartnerType,
+    kolTargetCount: nextKolTarget,
+    communityTargetCount: nextCommTarget,
+    linhVuc: nextLinhVuc,
+    nenTang: nextNenTang,
+    followerMin: minFolNum,
+    budgetMax: maxBudNum,
+    totalBudget: nextTotalBudget,
+    deliverableScope: nextDeliverableScope,
+    deliverables: nextDeliverables,
+    formatKey: nextFormatKey,
+    kpiTopics: nextKpiTopics,
+    kpiComments: nextKpiComments,
+    kpiBuzz: nextKpiBuzz,
+    pillars: nextPillars,
+    services: nextServices,
+  };
+}
+
+export const blankForm = (): FormValues => ({
+  briefText: '',
+  partnerType: null,
+  kolTargetCount: null,
+  communityTargetCount: null,
+  linhVuc: '',
+  nenTang: 'TatCa',
+  followerMin: '',
+  budgetMax: '',
+  totalBudget: '',
+  deliverableScope: 'campaign',
+  deliverables: [],
+  formatKey: 'video',
+  kpiTopics: null,
+  kpiComments: null,
+  kpiBuzz: null,
+  pillars: [],
+  services: [],
+});
+
+export function formFromPhase(ph: any): FormValues {
+  const b = ph?.brief;
+  const phBudget = typeof ph?.budget === 'number' && ph.budget > 0 ? ph.budget : '';
+  if (!b) {
+    const bf = blankForm();
+    bf.totalBudget = phBudget;
+    return bf;
+  }
+  const delivs: BriefDeliverable[] = Array.isArray(b.deliverables)
+    ? b.deliverables
+        .filter((d: any) => d && d.format in PRICE_FORMAT_LABELS && Number(d.quantity) > 0)
+        .map((d: any) => ({ format: d.format as PriceFormatKey, quantity: Number(d.quantity) || 1 }))
+    : [];
+  const first = delivs[0]?.format ?? b.deliverables?.[0]?.format;
+  const bBudget = typeof b.budget === 'number' && b.budget > 0 ? b.budget : phBudget;
+  const bMaxKol = typeof b.maxBudgetPerKol === 'number' && b.maxBudgetPerKol > 0 ? b.maxBudgetPerKol : '';
+  return {
+    briefText: b.text ?? '',
+    partnerType: (['kol', 'community', 'both'] as const).includes(b.partnerType) ? b.partnerType : null,
+    kolTargetCount: b.kolTargetCount ?? null,
+    communityTargetCount: b.communityTargetCount ?? null,
+    linhVuc: b.category ?? '',
+    nenTang: PLATFORMS.includes(b.platform) ? b.platform : 'TatCa',
+    followerMin: b.minFollowers ? b.minFollowers : '',
+    budgetMax: bMaxKol,
+    totalBudget: bBudget,
+    deliverableScope: b.deliverableScope === 'per_kol' ? 'per_kol' : 'campaign',
+    deliverables: delivs,
+    formatKey: first && first in PRICE_FORMAT_LABELS ? (first as PriceFormatKey) : 'video',
+    kpiTopics: b.kpiTopics ?? null,
+    kpiComments: b.kpiComments ?? null,
+    kpiBuzz: b.kpiBuzz ?? null,
+    pillars: Array.isArray(b.pillars) ? b.pillars.map((p: any) => ({ name: p.name, percent: p.percent })) : [],
+    services: Array.isArray(b.services)
+      ? b.services.map((s: any) => ({
+          name: s.name,
+          unit: s.unit ?? 'bài',
+          quantity: s.quantity ?? 1,
+          scope: s.scope === 'per_partner' ? 'per_partner' : 'phase',
+          ...(s.targetPartner ? { targetPartner: s.targetPartner } : {}),
+        }))
+      : [],
+  };
+}
 
 /** Đề xuất đối tác cho mọi thành viên dự án.
  *  AI-2 đọc brief của phase → tự động hiển thị kết quả theo TỪNG LOẠI đối tác:
@@ -119,26 +256,6 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     parseAbortRef.current?.abort();
   }, []);
 
-  const blankForm = (): FormValues => ({
-    briefText: '',
-    partnerType: null,
-    kolTargetCount: null,
-    communityTargetCount: null,
-    linhVuc: '',
-    nenTang: 'TatCa',
-    followerMin: '',
-    budgetMax: '',
-    totalBudget: '',
-    deliverableScope: 'campaign',
-    deliverables: [],
-    formatKey: 'video',
-    kpiTopics: null,
-    kpiComments: null,
-    kpiBuzz: null,
-    pillars: [],
-    services: [],
-  });
-
   function applyForm(v: FormValues) {
     setBriefText(v.briefText);
     setPartnerType(v.partnerType);
@@ -176,51 +293,6 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     }
   }
 
-  function formFromPhase(ph: any): FormValues {
-    const b = ph?.brief;
-    const phBudget = typeof ph?.budget === 'number' && ph.budget > 0 ? ph.budget : '';
-    if (!b) {
-      const bf = blankForm();
-      bf.totalBudget = phBudget;
-      return bf;
-    }
-    const delivs: BriefDeliverable[] = Array.isArray(b.deliverables)
-      ? b.deliverables
-          .filter((d: any) => d && d.format in PRICE_FORMAT_LABELS && Number(d.quantity) > 0)
-          .map((d: any) => ({ format: d.format as PriceFormatKey, quantity: Number(d.quantity) || 1 }))
-      : [];
-    const first = delivs[0]?.format ?? b.deliverables?.[0]?.format;
-    const bBudget = typeof b.budget === 'number' && b.budget > 0 ? b.budget : phBudget;
-    const bMaxKol = typeof b.maxBudgetPerKol === 'number' && b.maxBudgetPerKol > 0 ? b.maxBudgetPerKol : '';
-    return {
-      briefText: b.text ?? '',
-      partnerType: (['kol', 'community', 'both'] as const).includes(b.partnerType) ? b.partnerType : null,
-      kolTargetCount: b.kolTargetCount ?? null,
-      communityTargetCount: b.communityTargetCount ?? null,
-      linhVuc: b.category ?? '',
-      nenTang: PLATFORMS.includes(b.platform) ? b.platform : 'TatCa',
-      followerMin: b.minFollowers ? b.minFollowers : '',
-      budgetMax: bMaxKol,
-      totalBudget: bBudget,
-      deliverableScope: b.deliverableScope === 'per_kol' ? 'per_kol' : 'campaign',
-      deliverables: delivs,
-      formatKey: first && first in PRICE_FORMAT_LABELS ? (first as PriceFormatKey) : 'video',
-      kpiTopics: b.kpiTopics ?? null,
-      kpiComments: b.kpiComments ?? null,
-      kpiBuzz: b.kpiBuzz ?? null,
-      pillars: Array.isArray(b.pillars) ? b.pillars.map((p: any) => ({ name: p.name, percent: p.percent })) : [],
-      services: Array.isArray(b.services)
-        ? b.services.map((s: any) => ({
-            name: s.name,
-            unit: s.unit ?? 'bài',
-            quantity: s.quantity ?? 1,
-            scope: s.scope === 'per_partner' ? 'per_partner' : 'phase',
-            ...(s.targetPartner ? { targetPartner: s.targetPartner } : {}),
-          }))
-        : [],
-    };
-  }
-
   const currentForm = (): FormValues => ({
     briefText,
     partnerType,
@@ -243,8 +315,11 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
 
   const formDirty = () => formSnapshot !== '' && JSON.stringify(currentForm()) !== formSnapshot;
 
-  function guardSwitch(action: () => void) {
-    if (formDirty() && !window.confirm('Bạn đang có chỉnh sửa ở brief/tiêu chí chưa được dùng để tìm kiếm hoặc lưu. Chuyển dự án/phase sẽ làm mất các chỉnh sửa này. Tiếp tục?')) return;
+  function guardSwitch(action: () => void, onCancel?: () => void) {
+    if (formDirty() && !window.confirm('Bạn đang có chỉnh sửa ở brief/tiêu chí chưa được dùng để tìm kiếm hoặc lưu. Chuyển dự án/phase sẽ làm mất các chỉnh sửa này. Tiếp tục?')) {
+      onCancel?.();
+      return;
+    }
     action();
   }
 
@@ -340,91 +415,24 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
         setParseMsg(friendlyAiMessage(d.message) || 'AI chưa phân tích được brief. Bạn vẫn có thể tự điền tiêu chí bên dưới.');
         return;
       }
-      const x = d.data;
-      const nextLinhVuc = typeof x.linhVuc === 'string' && x.linhVuc.trim() ? x.linhVuc.trim() : '';
-      const nextNenTang = x.nenTang && PLATFORMS.includes(x.nenTang) ? x.nenTang : 'TatCa';
-      const nextFollower = typeof x.followerToiThieu === 'number' && x.followerToiThieu > 0 ? Number(x.followerToiThieu) : '';
-      const nextBudget = typeof x.nganSachMoiKol === 'number' && x.nganSachMoiKol > 0 ? Number(x.nganSachMoiKol) : '';
-      const nextTotalBudget = typeof x.nganSachTong === 'number' && x.nganSachTong > 0 ? Number(x.nganSachTong) : '';
-
-      const validFormats = ['post', 'video', 'shorts', 'livestream', 'thamDuSuKien', 'sdha'];
-      const rawDelivs = (Array.isArray(x.hangMucMoiKol) && x.hangMucMoiKol.length > 0)
-        ? { scope: 'per_kol' as const, list: x.hangMucMoiKol }
-        : (Array.isArray(x.hangMucTongCampaign) && x.hangMucTongCampaign.length > 0)
-          ? { scope: 'campaign' as const, list: x.hangMucTongCampaign }
-          : { scope: 'campaign' as const, list: [] };
-
-      const formatMap = new Map<string, number>();
-      for (const item of rawDelivs.list) {
-        if (item && item.format && validFormats.includes(item.format)) {
-          const itemQty = Number(item.soLuong ?? item.quantity) || 1;
-          formatMap.set(item.format, (formatMap.get(item.format) || 0) + itemQty);
-        }
-      }
-      const nextDeliverables: BriefDeliverable[] = Array.from(formatMap.entries()).map(([fKey, qNum]) => ({
-        format: fKey as PriceFormatKey,
-        quantity: qNum,
-      }));
-      const nextDeliverableScope: 'campaign' | 'per_kol' = rawDelivs.scope;
-
-      const first = nextDeliverables[0]?.format;
-      const nextFormatKey = first && first in PRICE_FORMAT_LABELS ? (first as PriceFormatKey) : 'video';
-      const nextPartnerType = ['kol', 'community', 'both'].includes(x.doiTac) ? (x.doiTac as BriefPartnerType) : null;
-      const nextKolTarget = x.soLuongKol && Number(x.soLuongKol) > 0 ? Number(x.soLuongKol) : null;
-      const nextCommTarget = x.soLuongCommunity && Number(x.soLuongCommunity) > 0 ? Number(x.soLuongCommunity) : null;
-      const nextKpiTopics = x.kpiTopics != null && Number(x.kpiTopics) > 0 ? Number(x.kpiTopics) : null;
-      const nextKpiComments = x.kpiComments != null && Number(x.kpiComments) > 0 ? Number(x.kpiComments) : null;
-      const nextKpiBuzz = x.kpiBuzz != null && Number(x.kpiBuzz) > 0 ? Number(x.kpiBuzz) : null;
-      const nextPillars =
-        Array.isArray(x.pillars) && x.pillars.length > 0
-          ? x.pillars.map((p: any) => ({ name: String(p.name ?? '').trim(), percent: Number(p.percent) || 0 }))
-          : [];
-      const rawServices = Array.isArray(x.services) && x.services.length > 0 ? x.services : (Array.isArray(x.dichVu) ? x.dichVu : []);
-      const nextServices = rawServices.map((s: any) => ({
-        name: String(s.name ?? s.ten ?? '').trim(),
-        unit: String(s.unit ?? s.donVi ?? 'bài').trim() || 'bài',
-        quantity: Number(s.quantity ?? s.soLuong) || 1,
-        scope: (s.scope === 'per_partner' || s.phamVi === 'per_partner') ? 'per_partner' : 'phase',
-        ...(s.targetPartner ? { targetPartner: s.targetPartner } : {}),
-      }));
-
-      setLinhVuc(nextLinhVuc);
-      setNenTang(nextNenTang);
-      setFollowerMin(nextFollower);
-      setBudgetMax(nextBudget);
-      setTotalBudget(nextTotalBudget);
-      setDeliverableScope(nextDeliverableScope);
-      setDeliverables(nextDeliverables);
-      setFormatKey(nextFormatKey);
-      setPartnerType(nextPartnerType);
-      setKolTargetCount(nextKolTarget);
-      setCommunityTargetCount(nextCommTarget);
-      setKpiTopics(nextKpiTopics);
-      setKpiComments(nextKpiComments);
-      setKpiBuzz(nextKpiBuzz);
-      setPillars(nextPillars);
-      setServices(nextServices);
-
-      const updatedForm: FormValues = {
-        briefText,
-        partnerType: nextPartnerType,
-        kolTargetCount: nextKolTarget,
-        communityTargetCount: nextCommTarget,
-        linhVuc: nextLinhVuc,
-        nenTang: nextNenTang,
-        followerMin: nextFollower,
-        budgetMax: nextBudget,
-        totalBudget: nextTotalBudget,
-        deliverableScope: nextDeliverableScope,
-        deliverables: nextDeliverables,
-        formatKey: nextFormatKey,
-        kpiTopics: nextKpiTopics,
-        kpiComments: nextKpiComments,
-        kpiBuzz: nextKpiBuzz,
-        pillars: nextPillars,
-        services: nextServices,
-      };
-      setFormSnapshot(JSON.stringify(updatedForm));
+      const extracted = extractFormFromAiResult(briefText, d.data);
+      setLinhVuc(extracted.linhVuc);
+      setNenTang(extracted.nenTang);
+      setFollowerMin(extracted.followerMin);
+      setBudgetMax(extracted.budgetMax);
+      setTotalBudget(extracted.totalBudget);
+      setDeliverableScope(extracted.deliverableScope);
+      setDeliverables(extracted.deliverables);
+      setFormatKey(extracted.formatKey);
+      setPartnerType(extracted.partnerType);
+      setKolTargetCount(extracted.kolTargetCount);
+      setCommunityTargetCount(extracted.communityTargetCount);
+      setKpiTopics(extracted.kpiTopics);
+      setKpiComments(extracted.kpiComments);
+      setKpiBuzz(extracted.kpiBuzz);
+      setPillars(extracted.pillars);
+      setServices(extracted.services);
+      // formSnapshot đại diện cho dữ liệu đã lưu trên server - KHÔNG cập nhật khi AI phân tích xong
       setParseMsg('AI đã phân tích brief và điền tiêu chí. Kiểm tra lại rồi bấm Tìm đối tác phù hợp.');
     } catch (e) {
       if ((e as Error)?.name === 'AbortError') return;
@@ -630,15 +638,21 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
               className={field}
               value={projectId}
               onChange={e => {
-                const v = e.target.value;
-                guardSwitch(() => {
-                  cancelParse();
-                  setProjectId(v);
-                  setPhaseId('');
-                  setPhases([]);
-                  applyForm(blankForm());
-                  clearWork();
-                });
+                const target = e.target;
+                const v = target.value;
+                guardSwitch(
+                  () => {
+                    cancelParse();
+                    setProjectId(v);
+                    setPhaseId('');
+                    setPhases([]);
+                    applyForm(blankForm());
+                    clearWork();
+                  },
+                  () => {
+                    target.value = projectId;
+                  }
+                );
               }}
             >
               <option value="">Chọn dự án…</option>
@@ -654,12 +668,18 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
               className={field}
               value={phaseId}
               onChange={e => {
-                const v = e.target.value;
-                guardSwitch(() => {
-                  cancelParse();
-                  setPhaseId(v);
-                  clearWork();
-                });
+                const target = e.target;
+                const v = target.value;
+                guardSwitch(
+                  () => {
+                    cancelParse();
+                    setPhaseId(v);
+                    clearWork();
+                  },
+                  () => {
+                    target.value = phaseId;
+                  }
+                );
               }}
               disabled={!phases.length}
             >
