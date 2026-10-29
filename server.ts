@@ -278,7 +278,7 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
    - 'livestream': Buổi phát sóng trực tiếp (livestream bán hàng, livestream sự kiện)
    - 'thamDuSuKien': Tham dự / có mặt tại sự kiện, khai trương, workshop, họp báo
    - 'sdha': Sử dụng hình ảnh (quyền SDHA, quảng cáo Spark Ads, Whitelist, banner)
-6. Nền tảng (nenTang): Chỉ nhận một trong các giá trị: "TikTok", "YouTube", "Facebook", "Instagram", hoặc null nếu không nói rõ hoặc đa nền tảng.
+6. Nền tảng (nenTang/nenTangList): Các nền tảng được nhắc đến trong brief thuộc: "TikTok", "YouTube", "Facebook", "Instagram", "Threads". Nếu brief nhắc nhiều nền tảng (ví dụ: "Facebook và Threads", "TikTok, Instagram"), hãy trả về mảng nenTangList hoặc chuỗi ghi rõ; hoặc null nếu không nói rõ hoặc đa nền tảng.
 7. Lĩnh vực (linhVuc): Tên lĩnh vực chính của brief (ví dụ: "Ẩm thực", "Làm đẹp", "Công nghệ", "Thời trang", "Du lịch", "Mẹ & bé", "Giải trí", "Tài chính", "Sức khỏe & Gym", "Giáo dục", "Lifestyle", "Gaming"), hoặc null.
 8. SỐ LƯỢNG ĐỐI TÁC: soLuongKol = số creator/KOL cần; soLuongCommunity = số fanpage/group cần. Chỉ ghi khi brief nêu rõ số đối tác hoặc suy ra trực tiếp được; không rõ thì để null. Phân biệt rõ với kpiTopics và dichVu.soLuong (đó là số đầu việc, không phải số đối tác).
 9. Bỏ qua yêu cầu ER / tỷ lệ tương tác nếu brief có nhắc; không dùng làm tiêu chí đề xuất.
@@ -309,7 +309,12 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
             },
             nenTang: {
               type: Type.STRING,
-              description: 'TikTok, YouTube, Facebook, Instagram hoặc null',
+              description: 'TikTok, YouTube, Facebook, Instagram, Threads hoặc kết hợp (ví dụ "Facebook và Threads") hoặc null',
+            },
+            nenTangList: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: 'Mảng các nền tảng nếu brief nhắc nhiều nền tảng',
             },
             soLuongKol: {
               type: Type.INTEGER,
@@ -441,10 +446,38 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
         }));
     };
 
+    const extractPlatformsFromAi = (rawNenTang: any, rawList: any): string[] => {
+      const result: string[] = [];
+      if (Array.isArray(rawList)) {
+        for (const item of rawList) {
+          if (typeof item === 'string') {
+            for (const vp of validPlatforms) {
+              if (item.toLowerCase().includes(vp.toLowerCase()) && !result.includes(vp)) {
+                result.push(vp);
+              }
+            }
+          }
+        }
+      }
+      if (typeof rawNenTang === 'string' && rawNenTang.trim()) {
+        for (const vp of validPlatforms) {
+          if (rawNenTang.toLowerCase().includes(vp.toLowerCase()) && !result.includes(vp)) {
+            result.push(vp);
+          }
+        }
+      }
+      return result;
+    };
+    const extractedPlatforms = extractPlatformsFromAi(parsedData.nenTang, parsedData.nenTangList);
+
     const sanitizedResult = {
       tenChienDich: parsedData.tenChienDich ? String(parsedData.tenChienDich).trim() : null,
       linhVuc: parsedData.linhVuc ? String(parsedData.linhVuc).trim() : null,
-      nenTang: validPlatforms.includes(parsedData.nenTang) ? parsedData.nenTang : null,
+      nenTang: extractedPlatforms.length === 1
+        ? extractedPlatforms[0]
+        : (extractedPlatforms.length > 0 ? extractedPlatforms.join(', ') : (validPlatforms.includes(parsedData.nenTang) ? parsedData.nenTang : null)),
+      nenTangList: extractedPlatforms,
+      platforms: extractedPlatforms,
       soLuongKol: parsedData.soLuongKol && Number(parsedData.soLuongKol) > 0 ? Math.round(Number(parsedData.soLuongKol)) : null,
       soLuongCommunity: parsedData.soLuongCommunity && Number(parsedData.soLuongCommunity) > 0 ? Math.round(Number(parsedData.soLuongCommunity)) : null,
       mucTieu: parsedData.mucTieu ? String(parsedData.mucTieu).trim() : null,

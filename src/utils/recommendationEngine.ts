@@ -50,16 +50,21 @@ export function calculateKolRecommendation(
   }
 
   // 1.1 Kiểm tra Nền tảng mong muốn (nếu có chọn)
-  if (filter.nenTang && filter.nenTang !== 'TatCa') {
-    const hasPlatform = kol.nenTang.some(
-      (p) => p.tenNenTang.toLowerCase() === filter.nenTang?.toLowerCase()
+  const reqPlatforms: string[] = (filter.nenTangList && filter.nenTangList.length > 0)
+    ? filter.nenTangList
+    : (filter.nenTang && filter.nenTang !== 'TatCa' ? [filter.nenTang] : []);
+
+  if (reqPlatforms.length > 0) {
+    const matchedChannels = kol.nenTang.filter((p) =>
+      reqPlatforms.some((rp) => rp.toLowerCase() === p.tenNenTang.toLowerCase())
     );
-    if (hasPlatform) {
-      lyDo.push(`Có kênh ${filter.nenTang}`);
+    if (matchedChannels.length > 0) {
+      const matchedNames = matchedChannels.map((c) => c.tenNenTang).join(', ');
+      lyDo.push(`Có kênh ${matchedNames}`);
     } else {
       // Trừ bớt 10 điểm lĩnh vực nếu không có nền tảng mong muốn
       diemLinhVuc = Math.max(0, diemLinhVuc - 10);
-      lyDo.push(`Chưa có kênh ${filter.nenTang}`);
+      lyDo.push(`Chưa có kênh ${reqPlatforms.join(', ')}`);
     }
   }
 
@@ -233,20 +238,32 @@ export function rankKolsForRecommendation(
   filter: RecommendationFilter
 ): RecommendationScore[] {
   let eligibleKols = kols;
+  const reqPlatforms: string[] = (filter.nenTangList && filter.nenTangList.length > 0)
+    ? filter.nenTangList
+    : (filter.nenTang && filter.nenTang !== 'TatCa' ? [filter.nenTang] : []);
 
-  // Lọc theo follower tối thiểu (nếu có yêu cầu)
+  // Lọc theo follower tối thiểu (nếu có yêu cầu) và nền tảng
   if (filter.followerToiThieu && filter.followerToiThieu > 0) {
     const minFol = filter.followerToiThieu;
     eligibleKols = eligibleKols.filter((k) => {
-      if (filter.nenTang && filter.nenTang !== 'TatCa') {
-        const ch = k.nenTang?.find(
-          (p) => p.tenNenTang.toLowerCase() === filter.nenTang?.toLowerCase()
+      if (reqPlatforms.length > 0) {
+        // Phải có ít nhất một nền tảng được chọn đáp ứng ngưỡng follower
+        // Không cộng follower các kênh và không dùng follower của kênh ngoài bộ lọc
+        const matchedChannels = (k.nenTang || []).filter((p) =>
+          reqPlatforms.some((rp) => rp.toLowerCase() === p.tenNenTang.toLowerCase())
         );
-        return (ch?.soFollower || 0) >= minFol;
+        return matchedChannels.some((p) => (p.soFollower || 0) >= minFol);
       }
       const maxFollower = Math.max(0, ...(k.nenTang || []).map((p) => p.soFollower || 0));
       return maxFollower >= minFol;
     });
+  } else if (reqPlatforms.length > 0) {
+    // Có chọn nền tảng: đối tác có ít nhất một nền tảng được chọn (điều kiện HOẶC)
+    eligibleKols = eligibleKols.filter((k) =>
+      (k.nenTang || []).some((p) =>
+        reqPlatforms.some((rp) => rp.toLowerCase() === p.tenNenTang.toLowerCase())
+      )
+    );
   }
 
   const scored = eligibleKols.map((k) => calculateKolRecommendation(k, filter));

@@ -128,6 +128,7 @@ export interface SowQuote {
 export interface RecommendationFilter {
   linhVuc: string;
   nenTang?: PlatformType | 'TatCa';
+  nenTangList?: string[];
   nganSachToiDa?: number;
   formatNganSach?: PriceFormatKey;
   followerToiThieu?: number;

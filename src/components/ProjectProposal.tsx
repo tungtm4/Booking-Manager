@@ -55,6 +55,7 @@ export type FormValues = {
   communityTargetCount: number | null;
   linhVuc: string;
   nenTang: string;
+  platforms: string[];
   followerMin: number | '';
   budgetMax: number | '';
   totalBudget: number | '';
@@ -73,7 +74,21 @@ export const isFormDirty = (current: FormValues, snapshot: string): boolean =>
 
 export function extractFormFromAiResult(briefText: string, x: any): FormValues {
   const nextLinhVuc = typeof x?.linhVuc === 'string' && x.linhVuc.trim() ? x.linhVuc.trim() : '';
-  const nextNenTang = x?.nenTang && PLATFORMS.includes(x.nenTang) ? x.nenTang : 'TatCa';
+
+  // Nền tảng: hỗ trợ mảng nenTangList, platforms hoặc chuỗi nenTang (ví dụ: "Facebook và Threads")
+  const rawList = Array.isArray(x?.nenTangList) ? x.nenTangList : (Array.isArray(x?.platforms) ? x.platforms : []);
+  const rawStr = typeof x?.nenTang === 'string' ? x.nenTang : '';
+  const nextPlatforms: string[] = [];
+  for (const p of PLATFORMS) {
+    const inList = rawList.some((item: any) => String(item).toLowerCase().includes(p.toLowerCase()));
+    const inStr = rawStr.toLowerCase().includes(p.toLowerCase());
+    if (inList || inStr) {
+      nextPlatforms.push(p);
+    }
+  }
+  const nextNenTang = nextPlatforms.length === 1
+    ? nextPlatforms[0]
+    : (nextPlatforms.length === 0 ? 'TatCa' : nextPlatforms.join(', '));
   const minFolNum = typeof x?.followerToiThieu === 'number' && x.followerToiThieu > 0 ? Number(x.followerToiThieu) : '';
   const maxBudNum = typeof x?.nganSachMoiKol === 'number' && x.nganSachMoiKol > 0 ? Number(x.nganSachMoiKol) : '';
   const nextTotalBudget = typeof x?.nganSachTong === 'number' && x.nganSachTong > 0 ? Number(x.nganSachTong) : '';
@@ -126,6 +141,7 @@ export function extractFormFromAiResult(briefText: string, x: any): FormValues {
     communityTargetCount: nextCommTarget,
     linhVuc: nextLinhVuc,
     nenTang: nextNenTang,
+    platforms: nextPlatforms,
     followerMin: minFolNum,
     budgetMax: maxBudNum,
     totalBudget: nextTotalBudget,
@@ -147,6 +163,7 @@ export const blankForm = (): FormValues => ({
   communityTargetCount: null,
   linhVuc: '',
   nenTang: 'TatCa',
+  platforms: [],
   followerMin: '',
   budgetMax: '',
   totalBudget: '',
@@ -176,13 +193,30 @@ export function formFromPhase(ph: any): FormValues {
   const first = delivs[0]?.format ?? b.deliverables?.[0]?.format;
   const bBudget = typeof b.budget === 'number' && b.budget > 0 ? b.budget : phBudget;
   const bMaxKol = typeof b.maxBudgetPerKol === 'number' && b.maxBudgetPerKol > 0 ? b.maxBudgetPerKol : '';
+
+  const rawPlatforms = Array.isArray(b.platforms)
+    ? b.platforms
+    : (typeof b.platform === 'string' && b.platform.trim() && b.platform !== 'TatCa'
+        ? b.platform.split(/[,;&]|\s+v[aà]\s+/i).map((s: string) => s.trim())
+        : []);
+  const matchedPlatforms: string[] = [];
+  for (const p of PLATFORMS) {
+    if (rawPlatforms.some((rp: string) => rp.toLowerCase() === p.toLowerCase())) {
+      matchedPlatforms.push(p);
+    }
+  }
+  const phNenTang = matchedPlatforms.length === 1
+    ? matchedPlatforms[0]
+    : (matchedPlatforms.length === 0 ? 'TatCa' : matchedPlatforms.join(', '));
+
   return {
     briefText: b.text ?? '',
     partnerType: (['kol', 'community', 'both'] as const).includes(b.partnerType) ? b.partnerType : null,
     kolTargetCount: b.kolTargetCount ?? null,
     communityTargetCount: b.communityTargetCount ?? null,
     linhVuc: b.category ?? '',
-    nenTang: PLATFORMS.includes(b.platform) ? b.platform : 'TatCa',
+    nenTang: phNenTang,
+    platforms: matchedPlatforms,
     followerMin: b.minFollowers ? b.minFollowers : '',
     budgetMax: bMaxKol,
     totalBudget: bBudget,
@@ -222,6 +256,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
   const [communityTargetCount, setCommunityTargetCount] = useState<number | null>(null);
   const [linhVuc, setLinhVuc] = useState('');
   const [nenTang, setNenTang] = useState('TatCa');
+  const [platforms, setPlatforms] = useState<string[]>([]);
   const [followerMin, setFollowerMin] = useState<number | ''>('');
   const [budgetMax, setBudgetMax] = useState<number | ''>('');
   const [totalBudget, setTotalBudget] = useState<number | ''>('');
@@ -233,6 +268,14 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
   const [kpiBuzz, setKpiBuzz] = useState<number | null>(null);
   const [pillars, setPillars] = useState<BriefPillar[]>([]);
   const [services, setServices] = useState<BriefService[]>([]);
+
+  function togglePlatform(p: string) {
+    setPlatforms(prev => {
+      const next = prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p];
+      setNenTang(next.length === 1 ? next[0] : (next.length === 0 ? 'TatCa' : next.join(', ')));
+      return next;
+    });
+  }
 
   const [parsing, setParsing] = useState(false);
   const [parseMsg, setParseMsg] = useState('');
@@ -261,15 +304,30 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
 
   const parseGuardRef = useRef(new LatestRequestGuard());
   const parseAbortRef = useRef<AbortController | null>(null);
+  const parseTimeoutRef = useRef<NodeJS.Timeout | number | null>(null);
+
+  function clearParseTimeout() {
+    if (parseTimeoutRef.current != null) {
+      clearTimeout(parseTimeoutRef.current);
+      parseTimeoutRef.current = null;
+    }
+  }
 
   function cancelParse() {
+    clearParseTimeout();
     parseGuardRef.current.invalidate();
     parseAbortRef.current?.abort();
     parseAbortRef.current = null;
     setParsing(false);
   }
 
+  function userCancelParse() {
+    cancelParse();
+    setParseMsg('Đã hủy phân tích brief. Bạn có thể thử lại hoặc chỉnh sửa tiêu chí thủ công.');
+  }
+
   useEffect(() => () => {
+    clearParseTimeout();
     parseGuardRef.current.dispose();
     parseAbortRef.current?.abort();
   }, []);
@@ -281,6 +339,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     setCommunityTargetCount(v.communityTargetCount);
     setLinhVuc(v.linhVuc);
     setNenTang(v.nenTang);
+    setPlatforms(v.platforms ?? []);
     setFollowerMin(v.followerMin);
     setBudgetMax(v.budgetMax);
     setTotalBudget(v.totalBudget);
@@ -319,6 +378,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     communityTargetCount,
     linhVuc,
     nenTang,
+    platforms,
     followerMin,
     budgetMax,
     totalBudget,
@@ -390,6 +450,25 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
 
   const phase = phases.find((p: any) => p.id === phaseId) ?? null;
 
+  const hasSavedBrief = Boolean(
+    phase?.brief &&
+    (
+      (typeof phase.brief.text === 'string' && phase.brief.text.trim().length > 0) ||
+      (typeof phase.brief.category === 'string' && phase.brief.category.trim().length > 0) ||
+      (Array.isArray(phase.brief.platforms) && phase.brief.platforms.length > 0) ||
+      (typeof phase.brief.platform === 'string' && phase.brief.platform.trim().length > 0 && phase.brief.platform !== 'TatCa') ||
+      phase.brief.partnerType ||
+      phase.brief.kolTargetCount != null ||
+      phase.brief.communityTargetCount != null ||
+      phase.brief.minFollowers ||
+      phase.brief.budget ||
+      phase.brief.maxBudgetPerKol ||
+      (Array.isArray(phase.brief.deliverables) && phase.brief.deliverables.length > 0) ||
+      (Array.isArray(phase.brief.pillars) && phase.brief.pillars.length > 0) ||
+      (Array.isArray(phase.brief.services) && phase.brief.services.length > 0)
+    )
+  );
+
   useEffect(() => {
     if (!phase) return;
     cancelParse();
@@ -415,12 +494,26 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       setParseMsg('Hãy nhập brief của phase trước khi phân tích.');
       return;
     }
+    if (hasSavedBrief) {
+      const ok = window.confirm('Kết quả AI sẽ thay thế các tiêu chí đang chỉnh sửa. Dữ liệu đã lưu chỉ thay đổi khi bạn bấm Lưu. Tiếp tục?');
+      if (!ok) return;
+    }
+    clearParseTimeout();
     const token = parseGuardRef.current.begin(`${projectId}::${phaseId}`);
     parseAbortRef.current?.abort();
     const controller = new AbortController();
     parseAbortRef.current = controller;
     setParsing(true);
     setParseMsg('');
+
+    parseTimeoutRef.current = setTimeout(() => {
+      if (parseGuardRef.current.isCurrent(token)) {
+        controller.abort();
+        setParsing(false);
+        setParseMsg('AI phản hồi quá lâu. Bạn có thể thử lại hoặc chỉnh sửa tiêu chí thủ công.');
+      }
+    }, 60000);
+
     try {
       const r = await fetch('/api/ai/parse-brief', {
         method: 'POST',
@@ -437,6 +530,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       const extracted = extractFormFromAiResult(briefText, d.data);
       setLinhVuc(extracted.linhVuc);
       setNenTang(extracted.nenTang);
+      setPlatforms(extracted.platforms);
       setFollowerMin(extracted.followerMin);
       setBudgetMax(extracted.budgetMax);
       setTotalBudget(extracted.totalBudget);
@@ -453,12 +547,13 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       setServices(extracted.services);
       // formSnapshot đại diện cho dữ liệu đã lưu trên server - KHÔNG cập nhật khi AI phân tích xong
       setParseMsg('AI đã phân tích brief và điền tiêu chí. Kiểm tra lại rồi bấm Tìm đối tác phù hợp.');
-    } catch (e) {
-      if ((e as Error)?.name === 'AbortError') return;
+    } catch (e: any) {
       if (!parseGuardRef.current.isCurrent(token)) return;
+      if (e?.name === 'AbortError') return;
       setParseMsg('Không gọi được AI lúc này. Bạn vẫn có thể tự điền tiêu chí bên dưới.');
     } finally {
       if (parseGuardRef.current.isCurrent(token)) {
+        clearParseTimeout();
         setParsing(false);
         if (parseAbortRef.current === controller) parseAbortRef.current = null;
       }
@@ -482,7 +577,8 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       const maxBudNum = budgetMax === '' ? undefined : Number(budgetMax);
       const ranked = rankKolsForRecommendation(pool, {
         linhVuc: linhVuc.trim(),
-        nenTang: nenTang as any,
+        nenTang: (platforms.length === 1 ? platforms[0] : (platforms.length === 0 ? 'TatCa' : nenTang)) as any,
+        nenTangList: platforms,
         followerToiThieu: minFolNum,
         nganSachToiDa: maxBudNum,
         formatNganSach: formatKey,
@@ -504,7 +600,8 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       const minFolForComm = followerMin === '' ? 0 : Number(followerMin);
       const briefForComm = readProjectBrief({
         category: linhVuc.trim(),
-        platform: nenTang === 'TatCa' ? '' : nenTang,
+        platform: platforms.length === 1 ? platforms[0] : (platforms.length === 0 ? '' : 'TatCa'),
+        platforms,
         minFollowers: minFolForComm,
         services: services.map(s => ({
           name: s.name.trim(),
@@ -529,11 +626,15 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
     const minFolSaved = followerMin === '' ? 0 : Number(followerMin);
     const maxBudVal = budgetMax === '' ? null : Number(budgetMax);
     const totalBudgetVal = totalBudget === '' ? null : Number(totalBudget);
+    const singleOrCompatiblePlatform = platforms.length === 1
+      ? platforms[0]
+      : (platforms.length === 0 ? '' : 'TatCa');
     const newBrief = {
       ...existingBrief,
       text: briefText.trim(),
       category: linhVuc.trim(),
-      platform: nenTang === 'TatCa' ? '' : nenTang,
+      platform: singleOrCompatiblePlatform,
+      platforms,
       minFollowers: minFolSaved,
       budget: totalBudgetVal,
       maxBudgetPerKol: maxBudVal,
@@ -746,6 +847,11 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
             </span>
           )}
         </div>
+        {hasSavedBrief && (
+          <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800">
+            Brief của phase đã được lưu. Bạn có thể tìm đối tác ngay hoặc chỉnh sửa tiêu chí bên dưới.
+          </div>
+        )}
         <textarea
           aria-label="Brief của phase để AI phân tích"
           className={field}
@@ -758,8 +864,17 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
         />
         <div className="flex gap-2 flex-wrap items-center">
           <button type="button" className={button} disabled={parsing || !briefText.trim()} onClick={parseBrief}>
-            {parsing ? 'Đang phân tích…' : 'Phân tích brief bằng AI'}
+            {parsing ? 'Đang phân tích…' : (hasSavedBrief ? 'Phân tích lại bằng AI' : 'Phân tích brief bằng AI')}
           </button>
+          {parsing && (
+            <button
+              type="button"
+              className="rounded-lg border border-red-300 text-red-700 bg-red-50 hover:bg-red-100 px-3 py-2 text-sm font-semibold cursor-pointer"
+              onClick={userCancelParse}
+            >
+              Hủy phân tích
+            </button>
+          )}
           {parseMsg && <span className="text-sm text-slate-600">{parseMsg}</span>}
         </div>
 
@@ -1024,15 +1139,52 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
             Lĩnh vực / Chủ đề
             <input className={field} value={linhVuc} disabled={parsing} onChange={e => setLinhVuc(e.target.value)} placeholder="VD: Làm đẹp" />
           </label>
-          <label className="text-sm">
-            Nền tảng
-            <select className={field} value={nenTang} disabled={parsing} onChange={e => setNenTang(e.target.value)}>
-              <option value="TatCa">Tất cả</option>
-              {PLATFORMS.map(p => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-          </label>
+          <div className="text-sm sm:col-span-2 space-y-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-1">
+              <span className="font-medium text-slate-700">Nền tảng</span>
+              <span className="text-xs text-slate-500">
+                {platforms.length === 0
+                  ? 'Chưa chọn nền tảng nào: tìm kiếm trên tất cả nền tảng'
+                  : `Đã chọn ${platforms.length} nền tảng (điều kiện HOẶC)`}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              {PLATFORMS.map(p => {
+                const checked = platforms.includes(p);
+                return (
+                  <label key={p} className="inline-flex items-center gap-1.5 text-sm cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      aria-label={'Nền tảng ' + p}
+                      checked={checked}
+                      disabled={parsing}
+                      onChange={() => togglePlatform(p)}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>{p}</span>
+                  </label>
+                );
+              })}
+              {platforms.length > 0 && (
+                <button
+                  type="button"
+                  disabled={parsing}
+                  onClick={() => {
+                    setPlatforms([]);
+                    setNenTang('TatCa');
+                  }}
+                  className="text-xs text-slate-500 hover:text-slate-800 underline cursor-pointer disabled:opacity-50 ml-1"
+                >
+                  Xoá chọn (tất cả)
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-slate-500">
+              {platforms.length === 0
+                ? 'Không chọn nền tảng nào = tất cả nền tảng. Khi chọn nhiều, đối tác có ít nhất một nền tảng được chọn sẽ phù hợp.'
+                : 'Đối tác có ít nhất một nền tảng được chọn sẽ đáp ứng tiêu chí. Ngưỡng follower/quy mô chỉ tính trên các nền tảng được chọn.'}
+            </p>
+          </div>
           <label className="text-sm">
             Follower / Quy mô tối thiểu
             <input className={field} inputMode="numeric" disabled={parsing} value={formatMoneyInput(followerMin)} onChange={e => setFollowerMin(parseMoneyInput(e.target.value))} />

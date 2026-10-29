@@ -77,15 +77,28 @@ export function assessCommunity(p: CommunityProfile, brief: ProjectBrief) {
     const hay = fold([p.ten, ...(p.linhVuc ?? []), p.ghiChuTep ?? ''].join(' '));
     checks.push({ label: `Hồ sơ chứa từ khóa “${brief.keyword}”`, met: hay.includes(fold(brief.keyword)) });
   }
-  if (brief.platform) {
-    checks.push({ label: `Nền tảng ${brief.platform}`, met: fold(p.nenTang ?? '') === fold(brief.platform) });
+  let selectedPlatforms: string[] = [];
+  if (Array.isArray(brief.platforms) && brief.platforms.length > 0) {
+    selectedPlatforms = brief.platforms;
+    if (brief.platform && brief.platform !== 'TatCa' && !selectedPlatforms.includes(brief.platform) && !selectedPlatforms.join(', ').includes(brief.platform)) {
+      selectedPlatforms = [brief.platform];
+    }
+  } else if (brief.platform && brief.platform !== 'TatCa') {
+    selectedPlatforms = brief.platform.split(/[,;&]|\s+v[aà]\s+/i).map(s => s.trim()).filter(Boolean);
+  }
+
+  if (selectedPlatforms.length > 0) {
+    const pPlatform = fold(p.nenTang ?? '');
+    const met = selectedPlatforms.some(sp => fold(sp) === pPlatform);
+    checks.push({ label: `Nền tảng ${selectedPlatforms.join(', ')}`, met });
   }
   if (brief.minFollowers > 0) {
+    const isPlatformMet = selectedPlatforms.length === 0 || selectedPlatforms.some(sp => fold(sp) === fold(p.nenTang ?? ''));
     checks.push({
       label: p.quyMo != null
         ? `Quy mô ${p.quyMo.toLocaleString('vi-VN')} ${p.loaiChiSo === 'members' ? 'thành viên' : 'người theo dõi'} / yêu cầu tối thiểu ${brief.minFollowers.toLocaleString('vi-VN')}`
         : `Chưa có số quy mô trong hồ sơ / yêu cầu tối thiểu ${brief.minFollowers.toLocaleString('vi-VN')}`,
-      met: p.quyMo != null && p.quyMo >= brief.minFollowers,
+      met: isPlatformMet && p.quyMo != null && p.quyMo >= brief.minFollowers,
     });
   }
 
