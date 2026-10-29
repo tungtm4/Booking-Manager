@@ -10,7 +10,9 @@ const brief=readProjectBrief({category:'ẩm thực',keyword:'bánh kẹo',platf
 test('lý do dựa trên tiêu chí hồ sơ, follower đúng kênh, không đánh giá bằng giá hoặc ER',()=>{
   const assessment=assessProjectKol(profile,brief);assert.equal(assessment.matches,true);assert.equal(assessment.checks.length,4);
   assert.equal(assessProjectKol({...profile,engagementRate:99,bangGia:{}},brief).matches,true);
-  assert.equal(assessProjectKol(profile,{...brief,platform:'YouTube'}).matches,false);
+  // Brief YouTube phải khai nhất quán cả platforms (platforms là nguồn chính) — cách viết cũ
+  // chỉ ghi đè platform tạo trạng thái mâu thuẫn mà hệ thống nay loại bỏ.
+  assert.equal(assessProjectKol(profile,{...brief,platform:'YouTube',platforms:['YouTube']}).matches,false);
   assert.equal(assessProjectKol(profile,{...brief,keyword:'ĐỒ ĂN'}).matches,false);
   assert.equal(assessProjectKol({...profile,reviewSoBo:'ĐỒ ĂN'}, {...brief,keyword:'do an'}).matches,true);
   assert.equal(assessProjectKol(profile,readProjectBrief(null)).hasCriteria,false);

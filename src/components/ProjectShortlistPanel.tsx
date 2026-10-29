@@ -7,7 +7,7 @@ import { PRICE_FORMAT_LABELS } from '../types/kol';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { paginateItems, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../utils/pagination';
 import { PHASE_KIND_LABELS, normalizePhaseDrafts } from '../domain/phases';
-import { assessProjectKol } from '../domain/projectBrief';
+import { assessProjectKol, BRIEF_PLATFORMS, normalizeBriefPlatforms } from '../domain/projectBrief';
 import { assessCommunity, briefKpiOf, communityScaleLabel, pillarPostCounts } from '../domain/community';
 import { COMMUNITY_KIND_LABELS, COMMUNITY_METRIC_LABELS } from '../types/community';
 import { formatVND } from '../utils/formatters';
@@ -333,7 +333,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
 
   const base = `/projects/${projectId}`;
 
-  const blankPhaseBrief = () => ({ text: '', category: '', keyword: '', platform: '', minFollowers: 0, targetCount: null, budget: null, deliverableScope: 'per_kol', deliverables: [], partnerType: null, kpiTopics: null, kpiComments: null, kpiBuzz: null, pillars: [], services: [] });
+  const blankPhaseBrief = () => ({ text: '', category: '', keyword: '', platform: '', platforms: [] as string[], minFollowers: 0, targetCount: null, budget: null, deliverableScope: 'per_kol', deliverables: [], partnerType: null, kpiTopics: null, kpiComments: null, kpiBuzz: null, pillars: [], services: [] });
 
   function syncPhaseForms(ph: any) {
     if (!ph || syncedPhaseRev.current[ph.id] === ph.revision) return;
@@ -424,6 +424,49 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
     setPhaseBrief((b: any) => ({ ...(b ?? blankPhaseBrief()), [k]: v }));
     setPhaseBriefDirty(true);
     setMatchesPage(1);
+  }
+
+  // Nền tảng của brief: platforms LÀ NGUỒN CHÍNH — đổi lựa chọn checkbox thì cập nhật ĐỒNG THỜI
+  // platforms và platform tương thích (suy ra bằng hàm chung), payload không bao giờ mâu thuẫn.
+  function changeBriefPlatforms(next: string[]) {
+    const n = normalizeBriefPlatforms({ platforms: next });
+    setBrief((b: any) => ({ ...b, platforms: n.platforms, platform: n.platform }));
+    setDirty(true);
+    setMatchesPage(1);
+  }
+
+  function changePhasePlatforms(next: string[]) {
+    const n = normalizeBriefPlatforms({ platforms: next });
+    setPhaseBrief((b: any) => ({ ...(b ?? blankPhaseBrief()), platforms: n.platforms, platform: n.platform }));
+    setPhaseBriefDirty(true);
+    setMatchesPage(1);
+  }
+
+  // Khối checkbox nền tảng dùng chung cho brief dự án và brief phase — đồng bộ với màn Đề xuất:
+  // rỗng = tất cả nền tảng, chọn nhiều = điều kiện HOẶC.
+  function platformCheckboxes(briefValue: any, onToggle: (next: string[]) => void) {
+    const selected: string[] = normalizeBriefPlatforms(briefValue ?? {}).platforms;
+    const toggle = (p: string) => onToggle(selected.includes(p) ? selected.filter(x => x !== p) : [...selected, p]);
+    return (
+      <div className="text-sm sm:col-span-2 space-y-1.5">
+        <div className="flex flex-wrap items-center justify-between gap-1">
+          <span className="font-medium text-slate-700">Nền tảng</span>
+          <span className="text-xs text-slate-500">{selected.length === 0 ? 'Chưa chọn nền tảng nào: áp dụng tất cả nền tảng' : `Đã chọn ${selected.length} nền tảng (điều kiện HOẶC)`}</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          {BRIEF_PLATFORMS.map(p => (
+            <label key={p} className="inline-flex items-center gap-1.5 text-sm cursor-pointer select-none">
+              <input type="checkbox" aria-label={'Nền tảng ' + p} checked={selected.includes(p)} onChange={() => toggle(p)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+              <span>{p}</span>
+            </label>
+          ))}
+          {selected.length > 0 && (
+            <button type="button" onClick={() => onToggle([])} className="text-xs text-slate-500 hover:text-slate-800 underline cursor-pointer ml-1">Xoá chọn (tất cả)</button>
+          )}
+        </div>
+        <p className="text-xs text-slate-500">Không chọn nền tảng nào = tất cả nền tảng. Khi chọn nhiều, đối tác có ít nhất một nền tảng được chọn sẽ phù hợp; follower chỉ tính trên các nền tảng được chọn.</p>
+      </div>
+    );
   }
 
   async function runBreakdown() {
@@ -554,13 +597,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
               Từ khóa trong hồ sơ KOL
               <input className={field} placeholder="Để trống để không lọc thêm" value={brief.keyword} onChange={e => change('keyword', e.target.value)} />
             </label>
-            <label className="text-sm">
-              Nền tảng
-              <select className={field} value={brief.platform} onChange={e => change('platform', e.target.value)}>
-                <option value="">Tất cả nền tảng</option>
-                {['TikTok', 'YouTube', 'Facebook', 'Instagram', 'Khác'].map(p => <option key={p}>{p}</option>)}
-              </select>
-            </label>
+            {platformCheckboxes(brief, changeBriefPlatforms)}
             <label className="text-sm">
               Follower tối thiểu
               <input className={field} inputMode="numeric" value={formatMoneyInput(brief.minFollowers || '')} onChange={e => change('minFollowers', parseMoneyInput(e.target.value) || 0)} />
@@ -655,7 +692,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
               <button type="button" className={button} disabled={busy || !aiDrafts.some((d: any) => d.include)} onClick={() => run(async () => {
                 let created = 0;
                 for (const d of aiDrafts.filter((x: any) => x.include)) {
-                  await request(base + '/phases', { name: d.name, kind: d.kind, description: d.description, budget: d.budget === '' || d.budget == null ? null : d.budget, brief: { text: d.description || d.name, category: d.category, keyword: '', platform: d.platform, minFollowers: 0, deliverableScope: d.deliverableScope, deliverables: d.deliverables, targetCount: d.targetCount, kolTargetCount: d.kolTargetCount ?? null, communityTargetCount: d.communityTargetCount ?? null, budget: null, partnerType: d.partnerType ?? (d.kind === 'creator' ? 'kol' : d.kind === 'community' ? 'community' : null), kpiTopics: d.kpiTopics ?? null, kpiComments: d.kpiComments ?? null, kpiBuzz: d.kpiBuzz ?? null, pillars: d.pillars ?? [], services: d.services ?? [] } });
+                  await request(base + '/phases', { name: d.name, kind: d.kind, description: d.description, budget: d.budget === '' || d.budget == null ? null : d.budget, brief: { text: d.description || d.name, category: d.category, keyword: '', platform: d.platform, platforms: normalizeBriefPlatforms({ platform: d.platform }).platforms, minFollowers: 0, deliverableScope: d.deliverableScope, deliverables: d.deliverables, targetCount: d.targetCount, kolTargetCount: d.kolTargetCount ?? null, communityTargetCount: d.communityTargetCount ?? null, budget: null, partnerType: d.partnerType ?? (d.kind === 'creator' ? 'kol' : d.kind === 'community' ? 'community' : null), kpiTopics: d.kpiTopics ?? null, kpiComments: d.kpiComments ?? null, kpiBuzz: d.kpiBuzz ?? null, pillars: d.pillars ?? [], services: d.services ?? [] } });
                   created++;
                 }
                 setAiDrafts(null);
@@ -728,12 +765,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
                 <label className="text-sm">Từ khóa trong hồ sơ KOL
                   <input className={field} placeholder="Để trống để không lọc thêm" value={phaseBrief.keyword} onChange={e => changePhaseBrief('keyword', e.target.value)} />
                 </label>
-                <label className="text-sm">Nền tảng
-                  <select className={field} value={phaseBrief.platform} onChange={e => changePhaseBrief('platform', e.target.value)}>
-                    <option value="">Tất cả nền tảng</option>
-                    {['TikTok', 'YouTube', 'Facebook', 'Instagram', 'Threads', 'Khác'].map(p => <option key={p}>{p}</option>)}
-                  </select>
-                </label>
+                {platformCheckboxes(phaseBrief, changePhasePlatforms)}
                 <label className="text-sm">Follower tối thiểu
                   <input className={field} inputMode="numeric" value={formatMoneyInput(phaseBrief.minFollowers || '')} onChange={e => changePhaseBrief('minFollowers', parseMoneyInput(e.target.value) || 0)} />
                 </label>

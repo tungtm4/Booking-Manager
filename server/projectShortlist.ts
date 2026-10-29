@@ -1,7 +1,7 @@
 import type {Router} from 'express';
 import type {DatabaseSync} from 'node:sqlite';
 import {randomUUID} from 'node:crypto';
-import {emptyProjectBrief,readProjectBrief,assessProjectKol} from '../src/domain/projectBrief';
+import {emptyProjectBrief,readProjectBrief,assessProjectKol,hasBriefPlatformConflict} from '../src/domain/projectBrief';
 import {assessCommunity} from '../src/domain/community';
 import {calculateProjectFinance} from '../src/domain/projectFinance';
 import {PRICE_FORMAT_LABELS} from '../src/types/kol';
@@ -259,6 +259,7 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     if(description!==undefined&&!str(description,2000))return res.status(400).json({message:'Mô tả phase quá dài.'});
     if(budget!==undefined&&budget!==null&&!money(budget))return res.status(400).json({message:'Ngân sách phase không hợp lệ.'});
     if(sortOrder!==undefined&&(!Number.isSafeInteger(sortOrder)||sortOrder<0||sortOrder>1000))return res.status(400).json({message:'Thứ tự phase không hợp lệ.'});
+    if(hasBriefPlatformConflict(brief))return res.status(400).json({message:'Nền tảng trong brief của phase mâu thuẫn: platform và platforms không khớp nhau. Hãy gửi platforms là nguồn chính — platform sẽ được suy ra tự động.'});
     const cleanBrief=cleanPhaseBrief(brief);if(cleanBrief===undefined)return res.status(400).json({message:'Brief của phase không hợp lệ.'});
     const id=randomUUID();const now=new Date().toISOString();
     const order=sortOrder??(((db.prepare('SELECT MAX(sort_order) AS m FROM project_phases WHERE project_id=?').get(pid) as any)?.m??-1)+1);
@@ -277,7 +278,7 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     const sortOrder=req.body.sortOrder!==undefined?req.body.sortOrder:row.sort_order;
     if(!str(name,200)||!name.trim()||!phaseKinds.includes(kind)||!str(description,2000)||(budget!==null&&!money(budget))||!Number.isSafeInteger(sortOrder)||sortOrder<0||sortOrder>1000)return res.status(400).json({message:'Thông tin phase không hợp lệ.'});
     let briefJson=row.brief_json;
-    if('brief' in req.body){const cleanBrief=cleanPhaseBrief(req.body.brief);if(cleanBrief===undefined)return res.status(400).json({message:'Brief của phase không hợp lệ.'});briefJson=cleanBrief?JSON.stringify(cleanBrief):null;}
+    if('brief' in req.body){if(hasBriefPlatformConflict(req.body.brief))return res.status(400).json({message:'Nền tảng trong brief của phase mâu thuẫn: platform và platforms không khớp nhau. Hãy gửi platforms là nguồn chính — platform sẽ được suy ra tự động.'});const cleanBrief=cleanPhaseBrief(req.body.brief);if(cleanBrief===undefined)return res.status(400).json({message:'Brief của phase không hợp lệ.'});briefJson=cleanBrief?JSON.stringify(cleanBrief):null;}
     db.prepare('UPDATE project_phases SET name=?,kind=?,description=?,budget=?,sort_order=?,brief_json=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?').run(name.trim(),kind,description.trim(),budget,sortOrder,briefJson,new Date().toISOString(),row.id,row.revision);
     audit(u.id,'update_phase',row.id);res.json({success:true});
   });
@@ -317,6 +318,7 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
   });
   router.post('/projects/:id/brief',(req,res)=>{
     const u=res.locals.user,pid=req.params.id;if(!access(u,pid,true))return res.status(403).json({message:'Chỉ PM/Admin được duyệt brief chung.'});
+    if(hasBriefPlatformConflict(req.body?.brief))return res.status(400).json({message:'Nền tảng trong brief mâu thuẫn: platform và platforms không khớp nhau. Hãy gửi platforms là nguồn chính — platform sẽ được suy ra tự động.'});
     const b=readProjectBrief(req.body.brief);
     if(!b||!str(b.text,10000)||!str(b.category,100)||!str(b.keyword,200)||!str(b.platform,50)||!Number.isSafeInteger(b.minFollowers)||b.minFollowers<0||!['campaign','per_kol'].includes(b.deliverableScope)||!Array.isArray(b.deliverables)||b.deliverables.length>6||b.deliverables.some((d:any)=>!d||!formats.includes(d.format)||!Number.isSafeInteger(d.quantity)||d.quantity<1||d.quantity>100000)||new Set(b.deliverables.map(d=>d.format)).size!==b.deliverables.length||(b.targetCount!==null&&(!Number.isSafeInteger(b.targetCount)||b.targetCount<1||b.targetCount>100000))||!money(b.budget)||b.pillars.reduce((a:number,p:any)=>a+p.percent,0)>100)return res.status(400).json({message:'Kiểm tra brief, tiêu chí, số lượng mục tiêu và ngân sách. Tổng tỷ lệ pillar không vượt 100%.'});
     const old=db.prepare('SELECT revision FROM project_briefs WHERE project_id=?').get(pid) as any;

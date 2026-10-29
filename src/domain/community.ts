@@ -1,5 +1,5 @@
 import type { CommunityProfile } from '../types/community';
-import type { ProjectBrief } from './projectBrief';
+import { normalizeBriefPlatforms, type ProjectBrief } from './projectBrief';
 import { categoriesMatch } from './categories';
 
 // Domain Community dùng chung client/server/test: định danh theo link đã chuẩn hoá,
@@ -78,15 +78,8 @@ export function assessCommunity(p: CommunityProfile, brief: ProjectBrief) {
     const hay = fold([p.ten, ...(p.linhVuc ?? []), p.ghiChuTep ?? ''].join(' '));
     checks.push({ label: `Hồ sơ chứa từ khóa “${brief.keyword}”`, met: hay.includes(fold(brief.keyword)) });
   }
-  let selectedPlatforms: string[] = [];
-  if (Array.isArray(brief.platforms) && brief.platforms.length > 0) {
-    selectedPlatforms = brief.platforms;
-    if (brief.platform && brief.platform !== 'TatCa' && !selectedPlatforms.includes(brief.platform) && !selectedPlatforms.join(', ').includes(brief.platform)) {
-      selectedPlatforms = [brief.platform];
-    }
-  } else if (brief.platform && brief.platform !== 'TatCa') {
-    selectedPlatforms = brief.platform.split(/[,;&]|\s+v[aà]\s+/i).map(s => s.trim()).filter(Boolean);
-  }
+  // Cùng hàm chuẩn hoá chung với phía KOL: platforms là nguồn chính (rỗng = tất cả).
+  const selectedPlatforms = normalizeBriefPlatforms(brief).platforms;
 
   if (selectedPlatforms.length > 0) {
     const pPlatform = fold(p.nenTang ?? '');
