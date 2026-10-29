@@ -24,6 +24,7 @@ import {
   Link as LinkIcon
 } from 'lucide-react';
 import { CollaborationHistory, KolProfile, PRICE_FORMAT_LABELS, PriceFormatKey } from '../types/kol';
+import { PartnerSigningPanel, confirmDiscardSigningChanges } from './PartnerSigningPanel';
 import { formatDateVN, formatFollowers, formatVND, getCategoryBadgeClass } from '../utils/formatters';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 
@@ -51,6 +52,12 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
   const [showAddCollabModal, setShowAddCollabModal] = useState(false);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [signingDirty, setSigningDirty] = useState(false);
+  // Đóng chi tiết KOL khi khối ký kết còn thay đổi chưa lưu phải hỏi trước (cùng nguyên tắc mọi bề mặt).
+  const guardedClose = () => {
+    if (signingDirty && !confirmDiscardSigningChanges()) return;
+    onClose();
+  };
 
   // Form Thêm lịch sử hợp tác
   const [collabForm, setCollabForm] = useState({
@@ -121,7 +128,8 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
         <div className="relative bg-slate-900 text-white p-6 sm:p-8 shrink-0">
           {/* Close button */}
           <button
-            onClick={onClose}
+            onClick={guardedClose}
+            aria-label="Đóng chi tiết KOL"
             className="absolute right-4 top-4 p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"
           >
             <X className="w-5 h-5" />
@@ -189,6 +197,7 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
             <div className="sm:self-center shrink-0 w-full sm:w-auto mt-2 sm:mt-0">
               <button
                 onClick={() => {
+                  if (signingDirty && !confirmDiscardSigningChanges()) return;
                   onAddToSow(kol);
                   onClose();
                 }}
@@ -478,6 +487,11 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
               </div>
             )}
           </div>
+          {/* Hồ sơ ký kết & ngân hàng dùng chung trong kho đối tác (đợt A1) — dữ liệu server,
+              dùng chung với phía dự án; sửa tại đây không cần thêm KOL vào dự án nào. */}
+          <div className="px-1 pt-4">
+            <PartnerSigningPanel key={kol.id} partnerType="kol" partnerId={kol.id} onDirtyChange={setSigningDirty} />
+          </div>
         </div>
 
         {/* Modal Footer Actions */}
@@ -492,7 +506,10 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => onEdit(kol)}
+              onClick={() => {
+                if (signingDirty && !confirmDiscardSigningChanges()) return;
+                onEdit(kol);
+              }}
               className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors"
             >
               <Edit2 className="w-3.5 h-3.5" />
@@ -500,7 +517,7 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
             </button>
 
             <button
-              onClick={onClose}
+              onClick={guardedClose}
               className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors"
             >
               Đóng

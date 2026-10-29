@@ -54,8 +54,9 @@ function sanitizeSigning(input:any):PartnerSigningProfile|undefined{
     customTaxRate,customTaxMode,note:note!};
 }
 
-// Định dạng ảnh được xác thực bằng kiểm tra cấu trúc/giải mã thật (server/imageValidation.ts),
-// không chỉ nhìn vài byte đầu — file giả gắn magic bytes hoặc bị cắt cụt đều bị từ chối.
+// Định dạng ảnh được xác thực bằng decoder sharp/libvips (server/imageValidation.ts):
+// file phải giải mã được toàn bộ điểm ảnh — file giả gắn magic bytes, khung rỗng
+// hay dữ liệu quét hỏng đều bị từ chối.
 function sanitizeDisplayName(name:unknown):string{
   const raw=typeof name==='string'?name:'';
   const base=raw.split(/[\\/]/).pop()??'';
@@ -113,7 +114,7 @@ export function installPartnerSigning(router:Router,db:DatabaseSync,audit:(a:str
     audit(u.id,'update_partner_signing',`${t.type}:${t.id}`);res.json({revision:row.revision+1,updatedAt:now});
   });
 
-  router.post('/partners/:type/:id/documents',(req,res)=>{
+  router.post('/partners/:type/:id/documents',async (req,res)=>{
     const u=res.locals.user;const t=parseTarget(req);
     if(!t)return res.status(400).json({message:'Loại đối tác không hợp lệ.'});
     if(!partnerExists(u.organization_id,t.type,t.id))return res.status(404).json({message:'Không tìm thấy đối tác trong kho.'});
@@ -122,8 +123,8 @@ export function installPartnerSigning(router:Router,db:DatabaseSync,audit:(a:str
     if(typeof dataBase64!=='string'||!dataBase64||dataBase64.length>Math.ceil(MAX_PARTNER_DOC_BYTES*4/3)+1024||!/^[A-Za-z0-9+/=\s]+$/.test(dataBase64))return res.status(400).json({message:'Dữ liệu file không hợp lệ hoặc vượt dung lượng cho phép.'});
     const buf=Buffer.from(dataBase64,'base64');
     if(!buf.length||buf.length>MAX_PARTNER_DOC_BYTES)return res.status(400).json({message:`Mỗi ảnh giấy tờ tối đa ${MAX_PARTNER_DOC_BYTES/1024/1024}MB.`});
-    const detected=validateImageFile(buf);
-    if(!detected)return res.status(400).json({message:'Chỉ chấp nhận ảnh JPEG, PNG hoặc WebP hợp lệ — file phải kiểm tra cấu trúc và giải mã được.'});
+    const detected=await validateImageFile(buf);
+    if(!detected)return res.status(400).json({message:'Chỉ chấp nhận ảnh JPEG, PNG hoặc WebP hợp lệ — file phải giải mã được toàn bộ.'});
     const sniffed=detected.mime;
     const declared=typeof req.body?.mime==='string'?req.body.mime:'';
     if(declared&&declared!==sniffed)return res.status(400).json({message:'Định dạng khai báo không khớp nội dung file.'});

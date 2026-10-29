@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ProjectKolCard } from './ProjectKolCard';
-import { PartnerSigningPanel } from './PartnerSigningPanel';
+import { PartnerSigningPanel, confirmDiscardSigningChanges } from './PartnerSigningPanel';
 import { readLegacyLocalKols } from '../services/catalogService';
 import { CatalogMigrationModal } from './CatalogMigrationModal';
 import type { KolProfile } from '../types/kol';
@@ -318,7 +318,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
   const [signingDirty, setSigningDirty] = useState(false);
   // Đóng modal hồ sơ ký kết khi còn thay đổi chưa lưu phải hỏi trước — tránh mất dữ liệu đang nhập.
   const closeSigning = () => {
-    if (signingDirty && !window.confirm('Hồ sơ ký kết đang có thay đổi chưa lưu. Đóng sẽ bỏ các thay đổi này. Bạn vẫn muốn đóng?')) return;
+    if (signingDirty && !confirmDiscardSigningChanges()) return;
     setSigningTarget(null);
     setSigningDirty(false);
   };

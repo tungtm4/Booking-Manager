@@ -2,7 +2,26 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import {createHash} from 'node:crypto';
+import {inflateSync,deflateSync} from 'node:zlib';
 import {createWorkspace} from '../server/workspace';
+
+// PNG có byte filter của hàng điểm ảnh bị hỏng (9 = không tồn tại) nhưng CRC/chunk đều đúng:
+// parser cấu trúc đơn thuần sẽ cho qua, decoder thật (libpng) phải báo lỗi.
+function pngWithBrokenFilter(src:Buffer):Buffer{
+  const table=new Int32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xedb88320^(c>>>1):c>>>1;table[n]=c;}
+  const crc=(b:Buffer)=>{let c=0xffffffff;for(let i=0;i<b.length;i++)c=table[(c^b[i])&0xff]^(c>>>8);return(c^0xffffffff)>>>0;};
+  const chunk=(type:string,data:Buffer)=>{const len=Buffer.alloc(4);len.writeUInt32BE(data.length);const body=Buffer.concat([Buffer.from(type,'ascii'),data]);const tail=Buffer.alloc(4);tail.writeUInt32BE(crc(body));return Buffer.concat([len,body,tail]);};
+  let pos=8,ihdr:Buffer|null=null;const idats:Buffer[]=[];
+  while(pos<src.length){const len=src.readUInt32BE(pos);const type=src.toString('ascii',pos+4,pos+8);const data=src.subarray(pos+8,pos+8+len);if(type==='IHDR')ihdr=Buffer.from(data);if(type==='IDAT')idats.push(Buffer.from(data));pos+=12+len;}
+  const raw=inflateSync(Buffer.concat(idats));raw[0]=9;
+  return Buffer.concat([src.subarray(0,8),chunk('IHDR',ihdr!),chunk('IDAT',deflateSync(raw)),chunk('IEND',Buffer.alloc(0))]);
+}
+// JPEG có bảng Huffman bị phá (số lượng mã vượt giới hạn): dữ liệu quét không thể giải mã.
+function jpegWithBrokenHuffman(src:Buffer):Buffer{
+  const b=Buffer.from(src);
+  for(let i=0;i+1<b.length;i++)if(b[i]===0xff&&b[i+1]===0xc4){b[i+4]=0xff;b[i+5]=0xff;break;}
+  return b;
+}
 
 // ===== Đợt A1 — Hồ sơ ký kết & ngân hàng tham chiếu dùng chung KOL + Community =====
 const PNG_1X1='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -109,16 +128,20 @@ test('A1 giấy tờ: upload/kiểm chứng nội dung, xem qua auth, chặn fil
   assert.equal(wup.status,200);assert.equal(wup.body.document.mime,'image/webp');
   const jup=await call(D,{name:'cccd.jpg',mime:'image/jpeg',dataBase64:JPEG_REAL},cookies.booking);
   assert.equal(jup.status,200);assert.equal(jup.body.document.mime,'image/jpeg');
-  // File GIẢ chỉ gắn magic bytes, header cụt, hoặc mất chốt cuối đều bị từ chối.
-  const fakeWebp=Buffer.concat([Buffer.from('RIFF'),Buffer.alloc(4),Buffer.from('WEBP'),Buffer.alloc(16,1)]).toString('base64');
-  assert.equal((await call(D,{name:'fake.webp',mime:'image/webp',dataBase64:fakeWebp},cookies.booking)).status,400);
+  // File GIẢ / không giải mã được đều bị từ chối — kể cả ca từng lọt qua parser tự viết:
+  // WebP 26 byte đúng khung RIFF/VP8L nhưng không có bitstream điểm ảnh (fixture của PM).
+  const fakeWebp=Buffer.alloc(26);fakeWebp.write('RIFF',0);fakeWebp.writeUInt32LE(18,4);fakeWebp.write('WEBP',8);fakeWebp.write('VP8L',12);fakeWebp.writeUInt32LE(5,16);fakeWebp[20]=0x2f;
+  assert.equal((await call(D,{name:'fake26.webp',mime:'image/webp',dataBase64:fakeWebp.toString('base64')},cookies.booking)).status,400);
+  // JPEG container đúng nhưng bảng Huffman hỏng → dữ liệu quét không giải mã được.
+  const jpegBuf=Buffer.from(JPEG_REAL,'base64');
+  assert.equal((await call(D,{name:'huffman.jpg',mime:'image/jpeg',dataBase64:jpegWithBrokenHuffman(jpegBuf).toString('base64')},cookies.booking)).status,400);
+  // PNG chunk/CRC đúng nhưng byte filter của dữ liệu quét hỏng → libpng báo lỗi khi giải mã.
+  assert.equal((await call(D,{name:'filter.png',mime:'image/png',dataBase64:pngWithBrokenFilter(pngBuf).toString('base64')},cookies.booking)).status,400);
   assert.equal((await call(D,{name:'cut.png',mime:'image/png',dataBase64:pngBuf.subarray(0,40).toString('base64')},cookies.booking)).status,400);
   const magicText=Buffer.concat([pngBuf.subarray(0,8),Buffer.from('day chi la chu gia danh anh png chu khong giai ma duoc')]).toString('base64');
   assert.equal((await call(D,{name:'magic.png',mime:'image/png',dataBase64:magicText},cookies.booking)).status,400);
   const headJpeg=Buffer.from([0xff,0xd8,0xff,0xe0,0x00,0x10,0x4a,0x46,0x49,0x46,0x00]).toString('base64');
   assert.equal((await call(D,{name:'head.jpg',mime:'image/jpeg',dataBase64:headJpeg},cookies.booking)).status,400);
-  const jpegBuf=Buffer.from(JPEG_REAL,'base64');
-  assert.equal((await call(D,{name:'noeoi.jpg',mime:'image/jpeg',dataBase64:jpegBuf.subarray(0,jpegBuf.length-2).toString('base64')},cookies.booking)).status,400);
   // Danh sách giấy tờ đi kèm hồ sơ; thành viên thường không xoá được.
   const g=await call(S,undefined,cookies.admin);
   assert.equal(g.body.documents.length,4);

@@ -14,6 +14,14 @@ import { LatestRequestGuard } from '../utils/latestRequestGuard';
 // ghi vào màn hình của đối tác hiện tại. Trạng thái dirty được báo lên component cha qua
 // onDirtyChange để cha xác nhận trước khi đóng modal/bỏ ngữ cảnh.
 
+// Thông điệp + hàm xác nhận DÙNG CHUNG cho mọi bề mặt chứa panel (modal trong dự án,
+// form sửa Community, chi tiết KOL ở kho): đóng/bỏ ngữ cảnh khi còn thay đổi chưa lưu
+// của khối ký kết đều phải hỏi trước theo đúng một nguyên tắc này.
+export const SIGNING_UNSAVED_MESSAGE = 'Hồ sơ ký kết đang có thay đổi chưa lưu. Đóng sẽ bỏ các thay đổi này. Bạn vẫn muốn đóng?';
+export function confirmDiscardSigningChanges(): boolean {
+  return window.confirm(SIGNING_UNSAVED_MESSAGE);
+}
+
 const field = 'w-full rounded-lg border border-slate-300 px-3 py-2 bg-white disabled:bg-slate-50 disabled:text-slate-500';
 const button = 'rounded-lg bg-indigo-600 text-white px-3 py-2 text-sm font-semibold disabled:opacity-50';
 const MAX_DOC_BYTES = 5 * 1024 * 1024;
@@ -113,6 +121,13 @@ export function PartnerSigningPanel({ partnerType, partnerId, onDirtyChange }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partnerType, partnerId]);
 
+  // Tải lại toàn bộ sẽ ghi đè form bằng dữ liệu server — khi đang có draft chưa lưu
+  // phải xác nhận trước, ở mọi bề mặt (nút này nằm ngay trong panel nên áp dụng chung).
+  const reloadAll = () => {
+    if (dirty && !confirmDiscardSigningChanges()) return;
+    void loadAll();
+  };
+
   const set = (k: keyof SigningForm, v: string) => { setForm(f => ({ ...f, [k]: v })); applyDirty(true); };
   const hasProfile = documents.length > 0 || Object.values(form).some(v => v.trim() !== '');
 
@@ -142,6 +157,10 @@ export function PartnerSigningPanel({ partnerType, partnerId, onDirtyChange }: {
   async function uploadFiles(files: FileList | null) {
     if (!files || !files.length) return;
     const list = Array.from(files);
+    // Token theo ngữ cảnh đối tác: nếu panel bị thay ngữ cảnh (đổi đối tác/tải lại toàn bộ)
+    // trong lúc đang tải lên, kết quả trả về muộn KHÔNG được áp vào màn hình hiện tại —
+    // file đã lên server vẫn thuộc đúng đối tác của nó và sẽ hiện khi mở lại hồ sơ đó.
+    const token = guardRef.current.begin(scope);
     setBusy(true); setError(''); setNotice('');
     let uploaded = 0;
     try {
@@ -154,6 +173,7 @@ export function PartnerSigningPanel({ partnerType, partnerId, onDirtyChange }: {
           rd.readAsDataURL(file);
         });
         const r = await request(base + '/documents', { name: file.name, mime: file.type, dataBase64: dataUrl.split(',')[1] ?? '' });
+        if (!guardRef.current.isCurrent(token)) return;
         uploaded++;
         // File nào đã lên server thì hiện ngay file đó — kể cả khi file sau lỗi,
         // danh sách vẫn đúng và draft trong form không bị đụng vào.
@@ -161,6 +181,7 @@ export function PartnerSigningPanel({ partnerType, partnerId, onDirtyChange }: {
       }
       setNotice(`Đã tải ${uploaded} giấy tờ lên.`);
     } catch (e) {
+      if (!guardRef.current.isCurrent(token)) return;
       setError((e instanceof Error ? e.message : 'Không tải được giấy tờ.') + (uploaded ? ` ${uploaded} file trước đó đã được lưu và vẫn hiển thị bên dưới.` : ''));
       if (uploaded) void refreshDocuments();
     } finally {
@@ -185,13 +206,16 @@ export function PartnerSigningPanel({ partnerType, partnerId, onDirtyChange }: {
 
   async function deleteDocument(doc: any) {
     if (!window.confirm('Xoá giấy tờ này khỏi hồ sơ?')) return;
+    const token = guardRef.current.begin(scope);
     setBusy(true); setError(''); setNotice('');
     try {
       await request(`${base}/documents/${doc.id}/delete`, { revision: doc.revision });
+      if (!guardRef.current.isCurrent(token)) return;
       // Chỉ gỡ đúng giấy tờ đó khỏi danh sách — form đang nhập giữ nguyên.
       setDocuments(prev => prev.filter(d => d.id !== doc.id));
       setNotice('Đã xoá giấy tờ.');
     } catch (e) {
+      if (!guardRef.current.isCurrent(token)) return;
       setError(e instanceof Error ? e.message : 'Không xoá được giấy tờ.');
       void refreshDocuments();
     } finally { setBusy(false); }
@@ -208,7 +232,7 @@ export function PartnerSigningPanel({ partnerType, partnerId, onDirtyChange }: {
         </span>
       </div>
       <p className="text-xs text-slate-500">Thông tin dùng chung trong kho đối tác nội bộ để tự điền khi lập hợp đồng. Khi lập hợp đồng, hệ thống sẽ chụp một bản riêng cho hợp đồng đó — sửa tại đây không làm thay đổi hợp đồng đã lập. Mọi trường đều không bắt buộc.</p>
-      {error && <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error} <button type="button" className="underline" onClick={() => void loadAll()}>Tải lại toàn bộ</button></p>}
+      {error && <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error} <button type="button" className="underline" onClick={reloadAll}>Tải lại toàn bộ</button></p>}
       {notice && <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">{notice}</p>}
       <fieldset disabled={!canEdit || busy} className="grid sm:grid-cols-2 gap-3">
         <label className="text-sm">Tên pháp lý<input className={field} value={form.legalName} maxLength={200} onChange={e => set('legalName', e.target.value)} placeholder="Tên cá nhân / HKD / công ty trên giấy tờ" /></label>

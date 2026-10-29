@@ -4,7 +4,7 @@ import { COMMUNITY_KIND_LABELS, COMMUNITY_METRIC_LABELS, COMMUNITY_SERVICE_UNIT_
 import { CommunityService as CommunityApi, type CatalogCommunity } from '../services/communityService';
 import { communityScaleLabel } from '../domain/community';
 import { CommunityImportModal } from './CommunityImportModal';
-import { PartnerSigningPanel } from './PartnerSigningPanel';
+import { PartnerSigningPanel, confirmDiscardSigningChanges } from './PartnerSigningPanel';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { formatDateTimeVN, formatVND } from '../utils/formatters';
 import { paginateItems, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../utils/pagination';
@@ -39,6 +39,13 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [editing, setEditing] = useState<CommunityProfile | null>(null);
   const [isNew, setIsNew] = useState(false);
+  const [signingDirty, setSigningDirty] = useState(false);
+  // Đóng form khi khối ký kết còn thay đổi chưa lưu phải hỏi trước (cùng nguyên tắc mọi bề mặt).
+  const closeEditing = () => {
+    if (signingDirty && !confirmDiscardSigningChanges()) return;
+    setSigningDirty(false);
+    setEditing(null);
+  };
   const [showImport, setShowImport] = useState(false);
 
   async function load() {
@@ -87,6 +94,9 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
         await CommunityApi.update(payload);
         setNotice('Đã lưu Community.');
       }
+      // Lưu Community xong vẫn không được tự đóng nếu khối ký kết còn draft chưa lưu.
+      if (signingDirty && !confirmDiscardSigningChanges()) { await load(); return; }
+      setSigningDirty(false);
       setEditing(null);
       await load();
     } catch (e) {
@@ -202,7 +212,7 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl my-8 p-6 space-y-4">
             <div className="flex items-start justify-between">
               <h3 className="text-lg font-bold">{isNew ? 'Thêm Community' : 'Sửa Community'}</h3>
-              <button type="button" onClick={() => setEditing(null)} aria-label="Đóng">✕</button>
+              <button type="button" onClick={closeEditing} aria-label="Đóng">✕</button>
             </div>
             <div className="grid sm:grid-cols-2 gap-3">
               <label className="text-sm sm:col-span-2">Tên Fanpage/Group *
@@ -285,12 +295,12 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
               </datalist>
             </div>
             <div className="flex gap-2 justify-end">
-              <button type="button" className="border rounded-lg px-3 py-2 text-sm" onClick={() => setEditing(null)}>Huỷ</button>
+              <button type="button" className="border rounded-lg px-3 py-2 text-sm" onClick={closeEditing}>Huỷ</button>
               <button type="button" className={button} disabled={busy || !editing.ten.trim()} onClick={save}>{busy ? 'Đang lưu…' : 'Lưu Community'}</button>
             </div>
             {!isNew && editing.id && (
               <div className="border-t pt-3">
-                <PartnerSigningPanel key={editing.id} partnerType="community" partnerId={editing.id} />
+                <PartnerSigningPanel key={editing.id} partnerType="community" partnerId={editing.id} onDirtyChange={setSigningDirty} />
               </div>
             )}
           </div>
