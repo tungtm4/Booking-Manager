@@ -4,6 +4,7 @@ import {randomUUID,createHash} from 'node:crypto';
 import {mkdirSync,writeFileSync,readFileSync,unlinkSync,mkdtempSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
+import {validateImageFile} from './imageValidation';
 
 // ===== Đợt A1 — Hồ sơ ký kết & ngân hàng THAM CHIẾU dùng chung cho KOL và Community =====
 // Một kho tham chiếu duy nhất trong hệ thống nội bộ (đã đăng nhập): mọi người dùng nội bộ
@@ -53,12 +54,8 @@ function sanitizeSigning(input:any):PartnerSigningProfile|undefined{
     customTaxRate,customTaxMode,note:note!};
 }
 
-function sniffImageMime(buf:Buffer):string|null{
-  if(buf.length>=3&&buf[0]===0xff&&buf[1]===0xd8&&buf[2]===0xff)return 'image/jpeg';
-  if(buf.length>=8&&buf[0]===0x89&&buf[1]===0x50&&buf[2]===0x4e&&buf[3]===0x47&&buf[4]===0x0d&&buf[5]===0x0a&&buf[6]===0x1a&&buf[7]===0x0a)return 'image/png';
-  if(buf.length>=12&&buf.toString('ascii',0,4)==='RIFF'&&buf.toString('ascii',8,12)==='WEBP')return 'image/webp';
-  return null;
-}
+// Định dạng ảnh được xác thực bằng kiểm tra cấu trúc/giải mã thật (server/imageValidation.ts),
+// không chỉ nhìn vài byte đầu — file giả gắn magic bytes hoặc bị cắt cụt đều bị từ chối.
 function sanitizeDisplayName(name:unknown):string{
   const raw=typeof name==='string'?name:'';
   const base=raw.split(/[\\/]/).pop()??'';
@@ -125,8 +122,9 @@ export function installPartnerSigning(router:Router,db:DatabaseSync,audit:(a:str
     if(typeof dataBase64!=='string'||!dataBase64||dataBase64.length>Math.ceil(MAX_PARTNER_DOC_BYTES*4/3)+1024||!/^[A-Za-z0-9+/=\s]+$/.test(dataBase64))return res.status(400).json({message:'Dữ liệu file không hợp lệ hoặc vượt dung lượng cho phép.'});
     const buf=Buffer.from(dataBase64,'base64');
     if(!buf.length||buf.length>MAX_PARTNER_DOC_BYTES)return res.status(400).json({message:`Mỗi ảnh giấy tờ tối đa ${MAX_PARTNER_DOC_BYTES/1024/1024}MB.`});
-    const sniffed=sniffImageMime(buf);
-    if(!sniffed)return res.status(400).json({message:'Chỉ chấp nhận ảnh JPEG, PNG hoặc WebP (đã kiểm tra nội dung file).'});
+    const detected=validateImageFile(buf);
+    if(!detected)return res.status(400).json({message:'Chỉ chấp nhận ảnh JPEG, PNG hoặc WebP hợp lệ — file phải kiểm tra cấu trúc và giải mã được.'});
+    const sniffed=detected.mime;
     const declared=typeof req.body?.mime==='string'?req.body.mime:'';
     if(declared&&declared!==sniffed)return res.status(400).json({message:'Định dạng khai báo không khớp nội dung file.'});
     const orgDir=path.join(filesRoot,u.organization_id);mkdirSync(orgDir,{recursive:true,mode:0o700});

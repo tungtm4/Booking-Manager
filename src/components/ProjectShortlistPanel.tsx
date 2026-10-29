@@ -315,6 +315,13 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
   const [phaseInfo, setPhaseInfo] = useState<any>({ name: '', kind: 'other', description: '', budget: '' }), [phaseInfoDirty, setPhaseInfoDirty] = useState(false);
   const [phaseBrief, setPhaseBrief] = useState<any>(null), [phaseBriefDirty, setPhaseBriefDirty] = useState(false);
   const [signingTarget, setSigningTarget] = useState<{ type: 'kol' | 'community'; id: string; name: string } | null>(null);
+  const [signingDirty, setSigningDirty] = useState(false);
+  // Đóng modal hồ sơ ký kết khi còn thay đổi chưa lưu phải hỏi trước — tránh mất dữ liệu đang nhập.
+  const closeSigning = () => {
+    if (signingDirty && !window.confirm('Hồ sơ ký kết đang có thay đổi chưa lưu. Đóng sẽ bỏ các thay đổi này. Bạn vẫn muốn đóng?')) return;
+    setSigningTarget(null);
+    setSigningDirty(false);
+  };
   const [newPhase, setNewPhase] = useState<any>({ name: '', kind: 'creator', budget: '' });
   const [aiText, setAiText] = useState(''), [aiDrafts, setAiDrafts] = useState<any[] | null>(null), [aiBusy, setAiBusy] = useState(false), [aiMsg, setAiMsg] = useState('');
   const activePhaseIdRef = useRef(''), syncedPhaseRev = useRef<Record<string, number>>({});
@@ -846,15 +853,19 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
                 const keptHere = kept && (!activePhase || kept.phaseId === activePhase.id || (isFirstPhase && !kept.phaseId));
                 const keptBadge = kept ? (keptHere ? 'Đã có trong danh sách sơ bộ' : 'Đã có ở ' + phaseNameOf(kept.phaseId)) : undefined;
                 return (
-                  <CommunityCandidateCard
-                    key={p.id}
-                    profile={p}
-                    brief={activeBrief}
-                    selected={communityIds.includes(p.id)}
-                    disabled={busy || dirty || Boolean(kept)}
-                    onSelect={() => setCommunityIds(toggle(communityIds, p.id))}
-                    badge={keptBadge}
-                  />
+                  <div key={p.id} className="space-y-1" data-signing-entry={'community:' + p.id}>
+                    <CommunityCandidateCard
+                      profile={p}
+                      brief={activeBrief}
+                      selected={communityIds.includes(p.id)}
+                      disabled={busy || dirty || Boolean(kept)}
+                      onSelect={() => setCommunityIds(toggle(communityIds, p.id))}
+                      badge={keptBadge}
+                    />
+                    <div className="flex px-1">
+                      <button type="button" className="text-xs text-indigo-700 underline disabled:opacity-50" disabled={busy} onClick={() => setSigningTarget({ type: 'community', id: p.id, name: p.ten ?? '' })}>Hồ sơ ký kết (kho)</button>
+                    </div>
+                  </div>
                 );
               })}
               {!visibleCommunities.length && (
@@ -911,17 +922,21 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
             const keptHere = kept && (!activePhase || kept.phaseId === activePhase.id || (isFirstPhase && !kept.phaseId));
             const keptBadge = kept ? (keptHere ? 'Đã có trong danh sách sơ bộ' : 'Đã có ở ' + phaseNameOf(kept.phaseId)) : undefined;
             return (
-              <ProjectKolCard
-                key={p.id}
-                profile={p}
-                brief={activeBrief}
-                prices={kept?.prices}
-                selected={catalogIds.includes(p.id) || Boolean(kept)}
-                disabled={busy || dirty || Boolean(kept)}
-                selectionLabel="Giữ KOL vào danh sách sơ bộ"
-                onSelect={() => setCatalogIds(toggle(catalogIds, p.id))}
-                badge={keptBadge}
-              />
+              <div key={p.id} className="space-y-1" data-signing-entry={'kol:' + p.id}>
+                <ProjectKolCard
+                  profile={p}
+                  brief={activeBrief}
+                  prices={kept?.prices}
+                  selected={catalogIds.includes(p.id) || Boolean(kept)}
+                  disabled={busy || dirty || Boolean(kept)}
+                  selectionLabel="Giữ KOL vào danh sách sơ bộ"
+                  onSelect={() => setCatalogIds(toggle(catalogIds, p.id))}
+                  badge={keptBadge}
+                />
+                <div className="flex px-1">
+                  <button type="button" className="text-xs text-indigo-700 underline disabled:opacity-50" disabled={busy} onClick={() => setSigningTarget({ type: 'kol', id: p.id, name: p.ten ?? '' })}>Hồ sơ ký kết (kho)</button>
+                </div>
+              </div>
             );
           })}
           {!visibleMatches.length && (
@@ -1158,13 +1173,13 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal 
         </section>
       )}
       {signingTarget && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto p-4" onClick={() => setSigningTarget(null)}>
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto p-4" onClick={closeSigning}>
           <div className="bg-white rounded-2xl max-w-3xl w-full p-5 space-y-3 my-8" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between gap-2">
               <h4 className="font-semibold">Hồ sơ ký kết — {signingTarget.name}</h4>
-              <button type="button" aria-label="Đóng hồ sơ ký kết" className="text-slate-500 hover:text-slate-800 px-2" onClick={() => setSigningTarget(null)}>✕</button>
+              <button type="button" aria-label="Đóng hồ sơ ký kết" className="text-slate-500 hover:text-slate-800 px-2" onClick={closeSigning}>✕</button>
             </div>
-            <PartnerSigningPanel partnerType={signingTarget.type} partnerId={signingTarget.id} />
+            <PartnerSigningPanel key={signingTarget.type + ':' + signingTarget.id} partnerType={signingTarget.type} partnerId={signingTarget.id} onDirtyChange={setSigningDirty} />
           </div>
         </div>
       )}

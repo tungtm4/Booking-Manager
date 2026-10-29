@@ -1,11 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { formatDateTimeVN } from '../utils/formatters';
+import { LatestRequestGuard } from '../utils/latestRequestGuard';
 
 // ===== Đợt A1 — Hồ sơ ký kết & ngân hàng tham chiếu của đối tác (KOL / Community) =====
 // Dữ liệu dùng chung trong kho đối tác nội bộ: mọi người dùng đã đăng nhập xem được,
 // Admin/PM/Booking cập nhật qua endpoint hẹp. Giấy tờ chỉ mở qua API có xác thực.
 // Panel này chỉ hiển thị trong màn hình chi tiết/sửa hồ sơ — không đưa số tài khoản hay
 // giấy tờ lên thẻ danh sách/đề xuất hàng loạt.
+//
+// Rà soát A1 (bản sửa): tải lên/xoá giấy tờ CHỈ làm mới danh sách giấy tờ, tuyệt đối không
+// chạm vào form đang nhập (draft) hay revision của hồ sơ. Mọi phản hồi bất đồng bộ đều qua
+// LatestRequestGuard theo scope đối tác — request trả chậm của đối tác trước không được
+// ghi vào màn hình của đối tác hiện tại. Trạng thái dirty được báo lên component cha qua
+// onDirtyChange để cha xác nhận trước khi đóng modal/bỏ ngữ cảnh.
 
 const field = 'w-full rounded-lg border border-slate-300 px-3 py-2 bg-white disabled:bg-slate-50 disabled:text-slate-500';
 const button = 'rounded-lg bg-indigo-600 text-white px-3 py-2 text-sm font-semibold disabled:opacity-50';
@@ -38,7 +45,11 @@ async function request(path: string, body?: unknown) {
   return d;
 }
 
-export function PartnerSigningPanel({ partnerType, partnerId }: { partnerType: 'kol' | 'community'; partnerId: string }) {
+export function PartnerSigningPanel({ partnerType, partnerId, onDirtyChange }: {
+  partnerType: 'kol' | 'community';
+  partnerId: string;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const [form, setForm] = useState<SigningForm>(blankForm);
   const [documents, setDocuments] = useState<any[]>([]);
   const [revision, setRevision] = useState(0);
@@ -49,12 +60,22 @@ export function PartnerSigningPanel({ partnerType, partnerId }: { partnerType: '
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const guardRef = useRef(new LatestRequestGuard());
   const base = `/partners/${partnerType}/${partnerId}`;
+  const scope = `${partnerType}:${partnerId}`;
 
-  async function load() {
+  const applyDirty = (v: boolean) => {
+    setDirty(v);
+    onDirtyChange?.(v);
+  };
+
+  // Tải toàn bộ (form + giấy tờ + revision) — chỉ dùng khi mở panel/đổi đối tác.
+  async function loadAll() {
+    const token = guardRef.current.begin(scope);
     setLoading(true); setError('');
     try {
       const d = await request(base + '/signing');
+      if (!guardRef.current.isCurrent(token)) return;
       const p = d.profile ?? {};
       setForm({
         legalName: p.legalName ?? '', signingForm: p.signingForm ?? '', representative: p.representative ?? '',
@@ -66,17 +87,37 @@ export function PartnerSigningPanel({ partnerType, partnerId }: { partnerType: '
       setRevision(p.revision ?? 0);
       setDocuments(d.documents ?? []);
       setCanEdit(Boolean(d.canEdit));
-      setDirty(false);
+      applyDirty(false);
     } catch (e) {
+      if (!guardRef.current.isCurrent(token)) return;
       setError(e instanceof Error ? e.message : 'Không tải được hồ sơ ký kết.');
-    } finally { setLoading(false); }
+    } finally {
+      if (guardRef.current.isCurrent(token)) setLoading(false);
+    }
   }
-  useEffect(() => { void load(); }, [partnerType, partnerId]);
 
-  const set = (k: keyof SigningForm, v: string) => { setForm(f => ({ ...f, [k]: v })); setDirty(true); };
+  // CHỈ làm mới danh sách giấy tờ — không đụng form/revision/dirty.
+  async function refreshDocuments() {
+    const token = guardRef.current.begin(scope);
+    try {
+      const d = await request(base + '/signing');
+      if (!guardRef.current.isCurrent(token)) return;
+      setDocuments(d.documents ?? []);
+      setCanEdit(Boolean(d.canEdit));
+    } catch { /* giữ nguyên danh sách hiện tại; lỗi tải giấy tờ không phá form */ }
+  }
+
+  useEffect(() => {
+    void loadAll();
+    return () => guardRef.current.dispose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [partnerType, partnerId]);
+
+  const set = (k: keyof SigningForm, v: string) => { setForm(f => ({ ...f, [k]: v })); applyDirty(true); };
   const hasProfile = documents.length > 0 || Object.values(form).some(v => v.trim() !== '');
 
   async function save() {
+    const token = guardRef.current.begin(scope);
     setBusy(true); setError(''); setNotice('');
     try {
       const rate = form.customTaxRate.trim() === '' ? null : Number(form.customTaxRate);
@@ -87,18 +128,24 @@ export function PartnerSigningPanel({ partnerType, partnerId }: { partnerType: '
         bankName: form.bankName, bankAccountName: form.bankAccountName, bankAccountNumber: form.bankAccountNumber,
         bankBranch: form.bankBranch, customTaxRate: rate, customTaxMode: form.customTaxMode, note: form.note,
       });
-      setRevision(r.revision); setDirty(false);
+      if (!guardRef.current.isCurrent(token)) return;
+      setRevision(r.revision); applyDirty(false);
       setNotice('Đã lưu hồ sơ ký kết.');
     } catch (e) {
+      if (!guardRef.current.isCurrent(token)) return;
       setError(e instanceof Error ? e.message : 'Không lưu được hồ sơ ký kết.');
-    } finally { setBusy(false); }
+    } finally {
+      if (guardRef.current.isCurrent(token)) setBusy(false);
+    }
   }
 
   async function uploadFiles(files: FileList | null) {
     if (!files || !files.length) return;
+    const list = Array.from(files);
     setBusy(true); setError(''); setNotice('');
+    let uploaded = 0;
     try {
-      for (const file of Array.from(files)) {
+      for (const file of list) {
         if (file.size > MAX_DOC_BYTES) throw new Error(`File "${file.name}" vượt quá 5MB.`);
         const dataUrl: string = await new Promise((resolve, reject) => {
           const rd = new FileReader();
@@ -106,12 +153,16 @@ export function PartnerSigningPanel({ partnerType, partnerId }: { partnerType: '
           rd.onerror = () => reject(new Error('Không đọc được file.'));
           rd.readAsDataURL(file);
         });
-        await request(base + '/documents', { name: file.name, mime: file.type, dataBase64: dataUrl.split(',')[1] ?? '' });
+        const r = await request(base + '/documents', { name: file.name, mime: file.type, dataBase64: dataUrl.split(',')[1] ?? '' });
+        uploaded++;
+        // File nào đã lên server thì hiện ngay file đó — kể cả khi file sau lỗi,
+        // danh sách vẫn đúng và draft trong form không bị đụng vào.
+        if (r?.document) setDocuments(prev => [...prev, r.document]);
       }
-      setNotice('Đã tải giấy tờ lên.');
-      await load();
+      setNotice(`Đã tải ${uploaded} giấy tờ lên.`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không tải được giấy tờ.');
+      setError((e instanceof Error ? e.message : 'Không tải được giấy tờ.') + (uploaded ? ` ${uploaded} file trước đó đã được lưu và vẫn hiển thị bên dưới.` : ''));
+      if (uploaded) void refreshDocuments();
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -137,10 +188,12 @@ export function PartnerSigningPanel({ partnerType, partnerId }: { partnerType: '
     setBusy(true); setError(''); setNotice('');
     try {
       await request(`${base}/documents/${doc.id}/delete`, { revision: doc.revision });
+      // Chỉ gỡ đúng giấy tờ đó khỏi danh sách — form đang nhập giữ nguyên.
+      setDocuments(prev => prev.filter(d => d.id !== doc.id));
       setNotice('Đã xoá giấy tờ.');
-      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không xoá được giấy tờ.');
+      void refreshDocuments();
     } finally { setBusy(false); }
   }
 
@@ -155,7 +208,7 @@ export function PartnerSigningPanel({ partnerType, partnerId }: { partnerType: '
         </span>
       </div>
       <p className="text-xs text-slate-500">Thông tin dùng chung trong kho đối tác nội bộ để tự điền khi lập hợp đồng. Khi lập hợp đồng, hệ thống sẽ chụp một bản riêng cho hợp đồng đó — sửa tại đây không làm thay đổi hợp đồng đã lập. Mọi trường đều không bắt buộc.</p>
-      {error && <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error} <button type="button" className="underline" onClick={() => void load()}>Tải lại</button></p>}
+      {error && <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error} <button type="button" className="underline" onClick={() => void loadAll()}>Tải lại toàn bộ</button></p>}
       {notice && <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">{notice}</p>}
       <fieldset disabled={!canEdit || busy} className="grid sm:grid-cols-2 gap-3">
         <label className="text-sm">Tên pháp lý<input className={field} value={form.legalName} maxLength={200} onChange={e => set('legalName', e.target.value)} placeholder="Tên cá nhân / HKD / công ty trên giấy tờ" /></label>

@@ -290,7 +290,7 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
             </div>
             {!isNew && editing.id && (
               <div className="border-t pt-3">
-                <PartnerSigningPanel partnerType="community" partnerId={editing.id} />
+                <PartnerSigningPanel key={editing.id} partnerType="community" partnerId={editing.id} />
               </div>
             )}
           </div>

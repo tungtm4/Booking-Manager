@@ -7,6 +7,9 @@ import {createWorkspace} from '../server/workspace';
 // ===== Đợt A1 — Hồ sơ ký kết & ngân hàng tham chiếu dùng chung KOL + Community =====
 const PNG_1X1='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const pngBuf=Buffer.from(PNG_1X1,'base64');
+// Ảnh THẬT do encoder của Chrome xuất qua canvas 3x2 (không phải file gắn magic bytes thủ công).
+const JPEG_REAL='/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAACAAMDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAABwj/xAAbEQABBAMAAAAAAAAAAAAAAAAAAQMzcQIEsf/aAAwDAQACEQMRAD8AlQA1ekytSr9WBuk4f//Z';
+const WEBP_REAL='UklGRiwCAABXRUJQVlA4WAoAAAAgAAAAAgAAAQAASUNDUMgBAAAAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADZWUDggPgAAAFACAJ0BKgMAAgAAwBIlqAJ0ugH4AMwAyQAGoAD+9IiH/n/C/HycfboRfpN//nMbLp9L6fV+cxsun0v9OcAA';
 
 async function fixture(work:(f:any)=>Promise<void>){
   const w=createWorkspace('',{memory:true,setupCode:'test-code'});
@@ -101,19 +104,30 @@ test('A1 giấy tờ: upload/kiểm chứng nội dung, xem qua auth, chặn fil
   assert.equal((await call(D,{name:'a.jpg',mime:'image/jpeg',dataBase64:PNG_1X1},cookies.booking)).status,400);
   const big=Buffer.concat([pngBuf,Buffer.alloc(5*1024*1024,7)]).toString('base64');
   assert.equal((await call(D,{name:'big.png',mime:'image/png',dataBase64:big},cookies.booking)).status,400);
-  // WebP hợp lệ theo magic bytes.
-  const webp=Buffer.concat([Buffer.from('RIFF'),Buffer.alloc(4),Buffer.from('WEBP'),Buffer.alloc(16,1)]).toString('base64');
-  const wup=await call(D,{name:'giay-phep.webp',mime:'image/webp',dataBase64:webp},cookies.admin);
+  // WebP và JPEG THẬT (encoder Chrome) được chấp nhận.
+  const wup=await call(D,{name:'giay-phep.webp',mime:'image/webp',dataBase64:WEBP_REAL},cookies.admin);
   assert.equal(wup.status,200);assert.equal(wup.body.document.mime,'image/webp');
+  const jup=await call(D,{name:'cccd.jpg',mime:'image/jpeg',dataBase64:JPEG_REAL},cookies.booking);
+  assert.equal(jup.status,200);assert.equal(jup.body.document.mime,'image/jpeg');
+  // File GIẢ chỉ gắn magic bytes, header cụt, hoặc mất chốt cuối đều bị từ chối.
+  const fakeWebp=Buffer.concat([Buffer.from('RIFF'),Buffer.alloc(4),Buffer.from('WEBP'),Buffer.alloc(16,1)]).toString('base64');
+  assert.equal((await call(D,{name:'fake.webp',mime:'image/webp',dataBase64:fakeWebp},cookies.booking)).status,400);
+  assert.equal((await call(D,{name:'cut.png',mime:'image/png',dataBase64:pngBuf.subarray(0,40).toString('base64')},cookies.booking)).status,400);
+  const magicText=Buffer.concat([pngBuf.subarray(0,8),Buffer.from('day chi la chu gia danh anh png chu khong giai ma duoc')]).toString('base64');
+  assert.equal((await call(D,{name:'magic.png',mime:'image/png',dataBase64:magicText},cookies.booking)).status,400);
+  const headJpeg=Buffer.from([0xff,0xd8,0xff,0xe0,0x00,0x10,0x4a,0x46,0x49,0x46,0x00]).toString('base64');
+  assert.equal((await call(D,{name:'head.jpg',mime:'image/jpeg',dataBase64:headJpeg},cookies.booking)).status,400);
+  const jpegBuf=Buffer.from(JPEG_REAL,'base64');
+  assert.equal((await call(D,{name:'noeoi.jpg',mime:'image/jpeg',dataBase64:jpegBuf.subarray(0,jpegBuf.length-2).toString('base64')},cookies.booking)).status,400);
   // Danh sách giấy tờ đi kèm hồ sơ; thành viên thường không xoá được.
   const g=await call(S,undefined,cookies.admin);
-  assert.equal(g.body.documents.length,3);
+  assert.equal(g.body.documents.length,4);
   assert.equal((await call(`${D}/${doc.id}/delete`,{revision:doc.revision},cookies.member)).status,403);
   assert.equal((await call(`${D}/${doc.id}/delete`,{revision:99},cookies.booking)).status,409);
   assert.equal((await call(`${D}/${doc.id}/delete`,{revision:doc.revision},cookies.booking)).status,200);
   assert.equal((await raw(`${D}/${doc.id}/content`,cookies.admin)).status,404);
   const g2=await call(S,undefined,cookies.admin);
-  assert.equal(g2.body.documents.length,2);
+  assert.equal(g2.body.documents.length,3);
   // Giấy tờ của KOL không lộ sang Community cùng ID.
   const gc=await call('/partners/community/partner-1/signing',undefined,cookies.admin);
   assert.equal(gc.body.documents.length,0);
