@@ -57,6 +57,8 @@ function priceProblems(list:Item[]){
 
 const TAX_MODE_LABEL:Record<string,string>={trong_gia_gop:'Thuế nằm trong giá gộp (trừ trong tổng)',tren_net:'Cộng trên NET',khong_thue:'Không thuế'};
 const SIGNING_FORM_LABEL:Record<string,string>={ca_nhan:'Cá nhân',hkd:'Hộ kinh doanh',cong_ty:'Công ty'};
+const TAX_CATEGORY_LABEL:Record<string,string>={ca_nhan:'Thuế cá nhân (tính vào chi phí)',hkd:'Thuế HKD (tính vào chi phí)',cong_ty_vat:'VAT công ty (tách riêng, không cộng vào K)',khong_thue:'Không thuế',unknown:'Chưa xác định loại thuế'};
+const PRESET_TAX_CATEGORY:Record<string,string>={ca_nhan:'ca_nhan',hkd:'hkd',cong_ty:'cong_ty_vat',rieng_65:'hkd',khong_thue:'khong_thue'};
 // Giai đoạn B (đợt đầu): gắn ĐỔI nguồn chi phí đầu vào cho một dòng KOL/Community.
 // Booking chủ động chọn nguồn và bấm áp dụng — hệ thống không tự ghi đè. Nguồn hợp
 // đồng là phân bổ một PHẦN giá trị hợp đồng, xem trước NET/thuế/tổng chi trước khi
@@ -73,6 +75,8 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
   // Trường hợp thuế của nguồn Tự xác nhận bắt đầu TRỐNG hoàn toàn — không tự chọn
   // HKD 7% hay bất kỳ preset nào. Người dùng chọn preset (hoặc tự chỉnh) mới có thuế.
   const [preset,setPreset]=useState('');
+  const [customCategory,setCustomCategory]=useState('');
+  const [confirmCategory,setConfirmCategory]=useState('');
   const [taxRate,setTaxRate]=useState<number|''>('');
   const [taxMode,setTaxMode]=useState('');
   const [busy,setBusy]=useState(false),[err,setErr]=useState('');
@@ -104,7 +108,7 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
   const canApply=Boolean(preview)&&!overContract&&(
     tab==='contract'?Boolean(selContract&&selContract.applicable):
     tab==='profile'?Boolean(opts?.profile&&opts.profile.taxRate!==null):
-    Boolean(preset&&taxRate!==''&&taxMode));
+    Boolean(preset&&taxRate!==''&&taxMode&&(preset!=='tuy_chinh'?PRESET_TAX_CATEGORY[preset]:customCategory)));
   async function apply(){
     setBusy(true);setErr('');
     try{
@@ -112,10 +116,17 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
       const body:any={revision,itemId:item.id,kind:tab};
       if(tab==='contract'){body.contractId=contractId;body.basis=basis;body.amount=effectiveAmount;}
       if(tab==='profile'){body.basis=basis;body.amount=effectiveAmount;}
-      if(tab==='estimate'){body.basis=basis;body.amount=effectiveAmount;body.taxRate=Number(taxRate);body.taxMode=taxMode;}
+      if(tab==='estimate'){body.basis=basis;body.amount=effectiveAmount;body.taxRate=Number(taxRate);body.taxMode=taxMode;body.taxCategory=preset!=='tuy_chinh'?PRESET_TAX_CATEGORY[preset]:customCategory;}
       await request(`/projects/${projectId}/quotes/${quoteId}/cost-source`,body);
       onApplied();
     }catch(e){setErr(e instanceof Error?e.message:'Không áp dụng được nguồn chi phí.');}
+    finally{setBusy(false);}
+  }
+  async function saveConfirmCategory(){
+    if(!confirmCategory)return;
+    setBusy(true);setErr('');
+    try{await request(`/projects/${projectId}/quotes/${quoteId}/cost-source/tax-category`,{revision,itemId:item.id,taxCategory:confirmCategory});onApplied();}
+    catch(e){setErr(e instanceof Error?e.message:'Không xác nhận được loại thuế.');}
     finally{setBusy(false);}
   }
   async function clearSource(){
@@ -143,6 +154,20 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
           {cur&&<><p>{cur.kind==='contract'?`Đã chốt theo hợp đồng ${cur.contractNumber||''}`:cur.kind==='profile'?'Dự kiến từ hồ sơ kho — Chưa chốt hợp đồng':'Dự kiến tự xác nhận — Chưa chốt hợp đồng'}</p>
           <p className="text-slate-600">NET {money(cur.net)} · Thuế {money(cur.tax)} · Tổng phải chi {money(cur.gross)}</p>
           {cur.kind==='contract'&&<p className="text-slate-600">Tổng phân bổ hợp đồng cho dòng: {money(cur.gross)} — giữ nguyên khi đổi số lượng, không nhân theo số lượng.</p>}
+          <p className="text-slate-600">Loại thuế: {TAX_CATEGORY_LABEL[cur.taxCategory??'unknown']}</p>
+          {(!cur.taxCategory||cur.taxCategory==='unknown')&&<div className="mt-1 space-y-1">
+            <p className="text-amber-800 font-medium">Nguồn này chưa có phân loại thuế (snapshot cũ hoặc chưa xác nhận) — P&L chưa kết luận được cho tới khi xác nhận. Phân loại là quy ước nghiệp vụ nội bộ, không suy từ suất/cách tính.</p>
+            <div className="flex gap-1">
+              <select aria-label="Xác nhận loại thuế cho nguồn hiện tại" className={field+' text-xs'} value={confirmCategory} onChange={e=>setConfirmCategory(e.target.value)}>
+                <option value="">Chọn loại thuế…</option>
+                <option value="ca_nhan">Thuế cá nhân (chi phí)</option>
+                <option value="hkd">Thuế HKD (chi phí)</option>
+                <option value="cong_ty_vat">VAT công ty (tách riêng)</option>
+                <option value="khong_thue">Không thuế</option>
+              </select>
+              <button type="button" className="border rounded-lg px-2 py-1 text-xs bg-white whitespace-nowrap" disabled={busy||!confirmCategory} onClick={saveConfirmCategory}>Xác nhận loại thuế</button>
+            </div>
+          </div>}
           <button type="button" className="border rounded-lg px-2 py-1 text-xs bg-white mt-1" disabled={busy} onClick={clearSource}>Xoá nguồn chi phí</button></>}
         </div>
         <div className="flex gap-2 text-sm">
@@ -184,6 +209,8 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
             <label className="text-sm">Suất thuế (%)<input aria-label="Suất thuế" className={field} inputMode="decimal" disabled={preset!=='tuy_chinh'} value={taxRate} onChange={e=>setTaxRate(e.target.value===''?'':Number(e.target.value))}/></label>
             <label className="text-sm">Cách tính<select aria-label="Cách tính thuế" className={field} disabled={preset!=='tuy_chinh'} value={taxMode} onChange={e=>setTaxMode(e.target.value)}><option value="">Chọn cách tính…</option><option value="trong_gia_gop">Thuế nằm trong giá gộp</option><option value="tren_net">Cộng trên NET</option><option value="khong_thue">Không thuế</option></select></label>
           </div>
+          {preset&&preset!=='tuy_chinh'&&<p className="text-slate-600">Loại thuế theo trường hợp đã chọn: <strong>{TAX_CATEGORY_LABEL[PRESET_TAX_CATEGORY[preset]]}</strong> — phân loại explicit để tính P&L, không suy từ suất thuế.</p>}
+          {preset==='tuy_chinh'&&<label className="text-sm block">Loại thuế (bắt buộc khi tuỳ chỉnh)<select aria-label="Loại thuế tuỳ chỉnh" className={field} value={customCategory} onChange={e=>setCustomCategory(e.target.value)}><option value="">Chọn loại thuế…</option><option value="ca_nhan">Thuế cá nhân (chi phí)</option><option value="hkd">Thuế HKD (chi phí)</option><option value="cong_ty_vat">VAT công ty (tách riêng)</option><option value="khong_thue">Không thuế</option></select></label>}
         </div>}
         {preview&&<div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-sm">
           <p className="font-semibold">Sau khi áp dụng {cur?'(thay nguồn hiện tại)':''}</p>
@@ -201,6 +228,40 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
   </div>;
 }
 
+// Giai đoạn C (đợt đầu): khối P&L theo nguồn chi phí (G/K/L) — chỉ PM/Admin thấy
+// (server cũng chặn Booking ở API). Số liệu lấy từ endpoint tổng hợp, không tự tính
+// lại ở client để tránh lệch nguồn.
+function PnlBlock({title,pnl}:{title:string;pnl:any}){
+  if(!pnl)return null;
+  const rows:[string,number|null][]=[
+    ['Doanh thu trước thuế (sau chiết khấu + agency fee)',pnl.revenueBeforeTax],
+    ['G — Tổng NET KOL/Community',pnl.netG],
+    ['Thuế cá nhân/HKD tính vào chi phí',pnl.costTax],
+    ['Chi phí trực tiếp khác',pnl.otherDirectCosts],
+    ['K — Tổng chi phí trước VAT (= G + thuế chi phí + chi phí khác)',pnl.totalK],
+    ['VAT đầu vào công ty (tách riêng, không cộng K)',pnl.vatInput],
+    ['L — Tổng phải chi (= K + VAT)',pnl.totalPayableL],
+    ['Lợi nhuận (= Doanh thu trước thuế − K)',pnl.profit],
+  ];
+  return <div className="border rounded-xl p-4 bg-white">
+    <div className="flex flex-wrap items-center gap-2 mb-2">
+      <h4 className="font-semibold">{title}</h4>
+      {pnl.complete
+        ? <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{pnl.hasEstimates?'Đầy đủ dữ liệu · có phần DỰ KIẾN':'Đầy đủ dữ liệu · đã chốt'}</span>
+        : <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">Thiếu dữ liệu — chưa kết luận P&L đầy đủ</span>}
+    </div>
+    <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+      {rows.map(([label,value])=><div key={label} className="flex justify-between gap-4"><span>{label}</span><strong>{value===null||value===undefined?'Chưa xác định':money(value)}</strong></div>)}
+      <div className="flex justify-between gap-4"><span>Biên lợi nhuận</span><strong>{pnl.marginPercent===null||pnl.marginPercent===undefined?'Chưa xác định':pnl.marginPercent.toLocaleString('vi-VN',{maximumFractionDigits:2})+'%'}</strong></div>
+      <div className="flex justify-between gap-4"><span>Phần đã chốt theo hợp đồng (NET)</span><strong>{money(pnl.committed.net)}</strong></div>
+      <div className="flex justify-between gap-4"><span>Phần dự kiến từ hồ sơ/tự xác nhận (NET)</span><strong>{money(pnl.estimated.net)}</strong></div>
+    </div>
+    {pnl.unknownTax>0&&<p className="text-xs text-amber-800 mt-2">Có {money(pnl.unknownTax)} tiền thuế chưa phân loại — không cộng vào K hay VAT cho tới khi xác nhận loại thuế.</p>}
+    {!pnl.complete&&pnl.missingLines?.length>0&&<p className="text-xs text-amber-800 mt-2">Dòng thiếu dữ liệu: {pnl.missingLines.map((x:any)=>`${x.creator} (${x.reason==='no_source'?'chưa gắn nguồn chi phí':x.reason==='unknown_tax_category'?'chưa xác định loại thuế':'chưa có giá đầu vào'})`).join('; ')}. Chỉ cộng phần đã biết, không tự coi phần thiếu là 0.</p>}
+    <p className="text-xs text-slate-500 mt-2">Quy ước nghiệp vụ nội bộ: K không gồm VAT đầu vào công ty (tách riêng để dự trù dòng tiền ở L). Lợi nhuận không tính từ tiền đã trả.</p>
+  </div>;
+}
+
 export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{projectId:string;isAdmin:boolean;onProjectChanged:()=>Promise<void>}){
   const [data,setData]=useState<any>(null),[quote,setQuote]=useState<any>(null),[items,setItems]=useState<Item[]>([]);
   const [discount,setDiscount]=useState<any>({mode:'fixed',value:0}),[fee,setFee]=useState<any>({mode:'percent',value:0}),[tax,setTax]=useState(0);
@@ -215,6 +276,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
   const [loadState,setLoadState]=useState<'loading'|'ready'|'error'>('loading'),[loadError,setLoadError]=useState('');
   const [confirmSources,setConfirmSources]=useState<Record<string,string>>({});
   const [costItemId,setCostItemId]=useState<string|null>(null);
+  const [pnlData,setPnlData]=useState<any>(null);
   const loadSeqRef=useRef(0);
   const base=`/projects/${projectId}`;
   function loadQuote(q:any){setQuote(q);setItems(q?.items??[]);setDiscount(q?.discount??{mode:'fixed',value:0});setFee(q?.agencyFee??{mode:'percent',value:0});setTax(q?.taxRate??0);setDirty(false);setCustomer(null);}
@@ -226,6 +288,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
     // Tải phase độc lập: lỗi ở phần phase không làm mất báo giá đã tải.
     request(base+'/phases').then(r=>{setPhases(r.phases??[]);setFromPhaseIds(prev=>prev.length?prev:(r.phases??[]).map((x:any)=>x.id));}).catch(()=>{});
     request(base+'/shortlist').then(r=>setShortlistRows(r.rows??[])).catch(()=>{});
+    if(result.canManage)request(base+'/pnl').then(r=>setPnlData(r)).catch(()=>setPnlData(null));else setPnlData(null);
     const all=result.options.flatMap((o:any)=>o.versions);
     const selected=all.find((q:any)=>q.id===(preferred??quote?.id))??all[0]??null;
     loadQuote(selected);setOptionId(selected?.optionId??'');
@@ -237,6 +300,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
       const d=await request(base+'/options');
       if(seq!==loadSeqRef.current)return;
       setData(d);const first=d.options[0]?.versions[0]??null;loadQuote(first);setOptionId(first?.optionId??'');setLoadState('ready');
+      if(d.canManage)request(base+'/pnl').then(r=>{if(seq===loadSeqRef.current)setPnlData(r);}).catch(()=>{});
     }catch(e){
       if(seq!==loadSeqRef.current)return;
       setLoadError(e instanceof Error?e.message:'Không thể tải dữ liệu.');setLoadState('error');
@@ -244,7 +308,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
     request(base+'/phases').then(r=>{if(seq===loadSeqRef.current){setPhases(r.phases??[]);setFromPhaseIds((r.phases??[]).map((x:any)=>x.id));}}).catch(()=>{});
     request(base+'/shortlist').then(r=>{if(seq===loadSeqRef.current)setShortlistRows(r.rows??[]);}).catch(()=>{});
   }
-  useEffect(()=>{setData(null);loadQuote(null);setError('');setNotice('');loadInitial();},[projectId]);
+  useEffect(()=>{setData(null);setPnlData(null);loadQuote(null);setError('');setNotice('');loadInitial();},[projectId]);
   async function run(work:()=>Promise<void>){setBusy(true);setError('');setNotice('');try{await work();}catch(e){setError(e instanceof Error?e.message:'Không thể xử lý.');}finally{setBusy(false);}}
   if(!data)return loadState==='error'
     ? <div className="py-6 space-y-3"><p role="alert" className="p-3 bg-red-50 text-red-700 rounded-lg">Không tải được phương án và báo giá của dự án này. {loadError}</p><button type="button" className="border rounded-lg px-3 py-2 text-sm" onClick={()=>loadInitial()}>Thử tải lại</button></div>
@@ -267,6 +331,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
         {cs.status==='du_kien'&&<p className="text-xs text-amber-700 font-medium">Chưa chốt hợp đồng</p>}
         <p className="text-xs text-slate-600">NET {money(cs.net)} · Thuế {money(cs.tax)} · Tổng phải chi {money(cs.gross)}</p>
         {cs.kind==='contract'&&<p className="text-xs text-slate-500">Tổng phân bổ hợp đồng cho dòng: {money(cs.gross)} — giữ nguyên khi đổi số lượng, không nhân theo số lượng.</p>}
+        {(!cs.taxCategory||cs.taxCategory==='unknown')&&<p className="text-xs text-amber-700 font-medium">Chưa xác định loại thuế — P&L chưa kết luận được dòng này. Mở “Đổi nguồn chi phí” để xác nhận loại thuế.</p>}
       </>:<p className="text-xs text-slate-500">Chưa gắn nguồn chi phí (NET/thuế/tổng phải chi).</p>}
       {editable&&(dirty?<p className="text-xs text-amber-700">Lưu báo giá trước, rồi gắn nguồn chi phí.</p>:<button type="button" className="border rounded-lg px-2 py-1 text-xs bg-white" disabled={busy} onClick={()=>setCostItemId(i.id)}>{cs?'Đổi nguồn chi phí':'Gắn nguồn chi phí'}</button>)}
     </div>;
@@ -438,6 +503,27 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
         {dirty&&<p className="text-sm text-amber-800">Có chỉnh sửa chưa lưu. Tổng phía dưới là kết quả của bản đã lưu gần nhất.</p>}
         {manage&&quote.finance&&<section className="bg-indigo-50 border border-indigo-100 rounded-xl p-5"><h3 className="font-bold mb-3">P&L dự kiến — {currentOption.name} / V{quote.number}</h3><div className="grid sm:grid-cols-2 gap-2 text-sm">{[['Tổng hạng mục báo khách',quote.finance.knownSellTotal],['Chiết khấu khách hàng',quote.finance.discount],['Cơ sở tính agency fee',quote.finance.feeBase],['Agency fee',quote.finance.agencyFee],['Doanh thu trước thuế',quote.finance.revenueBeforeTax],['Chi phí đầu vào đã biết',quote.finance.knownBuyTotal],['Lợi nhuận dự kiến',quote.finance.profit],['Thuế',quote.finance.tax],['Tổng khách thanh toán',quote.finance.totalWithTax]].map(([label,value])=><div key={label as string} className="flex justify-between gap-4"><span>{label}</span><strong>{money(value as number|null)}</strong></div>)}</div><p className="text-sm mt-3">Biên lợi nhuận: {quote.finance.marginPercent===null?'Chưa đủ dữ liệu':quote.finance.marginPercent.toLocaleString('vi-VN',{maximumFractionDigits:2})+'%'} · Thiếu giá mua: {quote.finance.missingBuy} · Thiếu giá bán: {quote.finance.missingSell} · Giá đầu vào chưa xác nhận: {priceProblems(quote.items??[]).unconfirmedBuy}</p><p className="text-xs text-slate-500 mt-2">P&L từng phương án không cộng dồn. Chi phí thực tế, hợp đồng và thanh toán sẽ được bổ sung ở bước sau.</p></section>}
         {isAdmin&&editable&&<section className="border rounded-xl p-4 space-y-3"><h3 className="font-semibold">Lấy hạng mục từ SOW cũ trên trình duyệt</h3><p className="text-xs text-slate-500">Chỉ sao chép vào phương án đang mở, không xóa bản cũ. Giữ giá SOW cũ là giá báo khách; giá đầu vào để trống chờ xác nhận. Không sao chép chiết khấu/phụ phí cũ tự động.</p><select aria-label="Chọn báo giá cũ" className={field} value={legacyId} onChange={e=>setLegacyId(e.target.value)}><option value="">Chọn báo giá cũ…</option>{legacyQuotes.map(q=><option key={q.id} value={q.id}>{q.tenChienDich} — {q.maBaoGia}</option>)}</select><button className="border rounded-lg px-3 py-2 text-sm" disabled={!legacyId||busy} onClick={()=>{const old=legacyQuotes.find(q=>q.id===legacyId);if(!old)return;setItems(prev=>[...prev,...old.items.map(i=>({id:crypto.randomUUID(),creator:i.kolName,description:i.formatLabel+(i.ghiChu?' · '+i.ghiChu:''),phase:'',kind:'kol',quantity:i.soLuong,buyUnitPrice:null,sellUnitPrice:i.donGia,included:true}))]);setDirty(true);setLegacyId('');setNotice('Đã lấy các dòng vào bản nháp. Kiểm tra rồi bấm Lưu báo giá.');}}>Lấy hạng mục vào phương án này</button></section>}
+        {manage&&pnlData&&quote&&(()=>{const v=pnlData.options.flatMap((o:any)=>o.versions.map((x:any)=>({...x,optionName:o.name}))).find((x:any)=>x.quoteId===quote.id);return v?<section className="space-y-3"><h3 className="font-bold">Dashboard P&L theo nguồn chi phí (Giai đoạn C) — {v.optionName} / V{v.number}</h3><PnlBlock title="P&L của phiên bản đang xem" pnl={v.pnl}/></section>:null;})()}
+        {manage&&pnlData&&<section className="space-y-3">
+          <h3 className="font-bold">Tổng dự án — chỉ tính phương án khách chốt</h3>
+          {pnlData.baseline
+            ? <PnlBlock title={`Phương án chốt: ${pnlData.baseline.optionName} / V${pnlData.baseline.number}`} pnl={pnlData.baseline.pnl}/>
+            : <p className="text-sm bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-lg">Chưa có phương án chốt — tổng dự án chưa kết luận. Chọn một phương án ở trên để xem P&L dự kiến của riêng phương án đó; các phương án song song là lựa chọn thay thế, không cộng dồn.</p>}
+          <div className="border rounded-xl p-4 bg-white">
+            <h4 className="font-semibold mb-2">Tiền theo hợp đồng của dự án (phạm vi riêng — không gộp vào chi phí phương án)</h4>
+            <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+              <div className="flex justify-between gap-4"><span>Tổng giá trị hợp đồng đã ký (tổng phải chi)</span><strong>{money(pnlData.cash.totals.gross)}</strong></div>
+              <div className="flex justify-between gap-4"><span>Đã lên kế hoạch các đợt</span><strong>{money(pnlData.cash.totals.planned)}</strong></div>
+              <div className="flex justify-between gap-4"><span>Đã trả</span><strong>{money(pnlData.cash.totals.paid)}</strong></div>
+              <div className="flex justify-between gap-4"><span>Còn phải trả (theo giá trị hợp đồng − đã trả)</span><strong>{money(pnlData.cash.totals.remaining)}</strong></div>
+              <div className="flex justify-between gap-4"><span>Hợp đồng chưa lên kế hoạch đủ</span><strong>{pnlData.cash.totals.missingPlan.toLocaleString('vi-VN')}</strong></div>
+              <div className="flex justify-between gap-4"><span>Hợp đồng ngoài phương án chốt</span><strong>{pnlData.baseline?pnlData.cash.totals.outsideSelectedCount.toLocaleString('vi-VN')+' ('+money(pnlData.cash.totals.outsideSelectedGross)+')':'Chưa có phương án chốt'}</strong></div>
+              <div className="flex justify-between gap-4"><span>Hợp đồng đã huỷ (tách riêng, không tính)</span><strong>{pnlData.cash.cancelled.length.toLocaleString('vi-VN')}</strong></div>
+              <div className="flex justify-between gap-4"><span>Hợp đồng còn nháp (chưa ký, chưa tính)</span><strong>{pnlData.cash.draftCount.toLocaleString('vi-VN')}</strong></div>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">Mỗi hợp đồng đếm đúng một lần theo dự án, không nhân theo dòng hay phương án. Đã trả chỉ để theo dõi dòng tiền — không dùng để suy ra lợi nhuận thực tế.</p>
+          </div>
+        </section>}
         {customer&&<section className="border rounded-xl p-5 bg-white"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Bản xem trước báo khách</h3><button type="button" className={button} onClick={()=>setShowPrint(true)}>In / Lưu PDF</button></div><p>{customer.client} · {customer.campaign} · V{customer.version}</p><table className="w-full text-sm mt-4"><thead><tr className="border-b"><th className="text-left">Hạng mục</th><th>SL</th><th>Đơn giá</th><th>Thành tiền</th></tr></thead><tbody>{customerGroups.map((g:any)=>{return <React.Fragment key={g.phase||'__'}>{(g.showHeader)&&<tr className="bg-slate-50"><td colSpan={4} className="py-2 font-semibold">{g.phase?('Phase: '+g.phase):'Hạng mục khác'}</td></tr>}{g.items.map((i:any,index:number)=><tr key={index} className="border-b"><td className="py-2">{i.creator} — {i.description}{i.note&&<span className="block text-xs text-slate-500 whitespace-pre-line mt-0.5">{i.note}</span>}{i.commentsIncluded!==undefined&&<span className="block text-xs text-slate-500 mt-0.5">Tổng số comment bao gồm: {i.commentsIncluded!==null?i.commentsIncluded.toLocaleString('vi-VN'):'Chưa xác định'}{i.scopeNote?` · Phạm vi: ${i.scopeNote}`:''}</span>}</td><td className="text-center">{i.quantity}{i.unit?' '+i.unit:''}</td><td className="text-center">{money(i.sellUnitPrice)}</td><td className="text-right">{money(i.total)}</td></tr>)}{(g.showHeader)&&<tr className="border-b"><td colSpan={3} className="py-1 text-right text-xs text-slate-500">Tiểu tổng {g.phase||'nhóm'}:</td><td className="py-1 text-right font-medium">{money(g.subtotal)}</td></tr>}</React.Fragment>})}</tbody></table><div className="mt-4 text-sm text-right"><p>Chiết khấu: {money(customer.discount)}</p><p>Agency fee: {money(customer.agencyFee)}</p><p>Trước thuế: {money(customer.revenueBeforeTax)}</p><p>Thuế: {money(customer.tax)}</p><strong>Tổng thanh toán: {money(customer.totalWithTax)}</strong></div></section>}
         {costItem&&quote&&<CostSourceDialog projectId={projectId} quoteId={quote.id} revision={quote.revision} item={costItem} onClose={()=>setCostItemId(null)} onApplied={async()=>{setCostItemId(null);await refresh(quote.id);setNotice('Đã áp dụng nguồn chi phí cho dòng. Số liệu là snapshot — hồ sơ/hợp đồng đổi sau này không tự đổi dòng đã lưu.');}}/>}
         {showPrint&&customer&&<div className="fixed inset-0 z-50 bg-black/50 overflow-y-auto print:bg-white print:overflow-visible">
