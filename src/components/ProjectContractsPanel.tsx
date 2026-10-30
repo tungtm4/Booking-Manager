@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { formatVND, formatDateVN, formatDateTimeVN } from '../utils/formatters';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
+import { LatestRequestGuard } from '../utils/latestRequestGuard';
 import { computeContractMoney, type ContractTaxMode } from '../domain/contractMoney';
 
 // ===== Giai đoạn A2 — Mục Hợp đồng trong dự án =====
@@ -79,6 +80,9 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
   const [docOptions, setDocOptions] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
   const initialFormRef = useRef('');
+  const [suggestionPending, setSuggestionPending] = useState(false);
+  const suggestionGuardRef = useRef<LatestRequestGuard | null>(null);
+  if (!suggestionGuardRef.current) suggestionGuardRef.current = new LatestRequestGuard();
   const [detail, setDetail] = useState<any | null>(null);
   const [detailError, setDetailError] = useState('');
 
@@ -106,6 +110,7 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
   };
 
   const startCreate = () => {
+    suggestionGuardRef.current?.invalidate(); setSuggestionPending(false);
     setForm({ ...blankForm }); initialFormRef.current = JSON.stringify({ ...blankForm });
     setFormError(''); setSuggestionLabel(''); setDocOptions([]);
   };
@@ -127,7 +132,9 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
         documentIds: (d.documents ?? []).map((x: any) => x.id),
       };
       setForm(f); initialFormRef.current = JSON.stringify(f);
+      const token = suggestionGuardRef.current!.begin('edit:' + d.id);
       const sug = await request(`/contracts/suggestion?projectId=${projectId}&partnerType=${d.partnerType}&partnerId=${encodeURIComponent(d.partnerId)}`);
+      if (!suggestionGuardRef.current!.isCurrent(token)) return;
       setDocOptions(sug.documents ?? []);
       setSuggestionLabel('');
     } catch (e: any) { setDetailError(e.message); }
@@ -135,30 +142,46 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
   const formDirty = form !== null && JSON.stringify(form) !== initialFormRef.current;
   const closeForm = () => {
     if (formDirty && !window.confirm(CONTRACT_UNSAVED_MESSAGE)) return;
+    suggestionGuardRef.current?.invalidate(); setSuggestionPending(false);
     setForm(null); setFormError('');
   };
 
   const applyPartnerSuggestion = async (partnerKey: string) => {
-    setForm(f => f && ({ ...f, partnerKey }));
+    const guard = suggestionGuardRef.current!;
+    const token = guard.begin('suggestion:' + partnerKey);
+    // Đổi đối tác: xoá NGAY mọi dữ liệu phụ thuộc đối tác cũ (snapshot, thuế, giấy tờ đã
+    // chọn, danh sách giấy tờ) — đối tác mới chưa có hồ sơ thì form phải trống, tuyệt đối
+    // không giữ pháp lý/ngân hàng/giấy tờ của đối tác trước để lưu nhầm cho đối tác mới.
+    setForm(f => f && ({
+      ...f, partnerKey,
+      legalName: '', signingForm: '', representative: '', taxCode: '', idNumber: '', address: '', certEmail: '',
+      bankName: '', bankAccountName: '', bankAccountNumber: '', bankBranch: '',
+      taxPreset: 'custom', taxRateText: '', taxMode: '', documentIds: [],
+    }));
+    setDocOptions([]); setSuggestionLabel(''); setFormError('');
     const p = partners.find(x => x.key === partnerKey);
-    if (!p) return;
+    if (!p) { setSuggestionPending(false); return; }
+    setSuggestionPending(true);
     try {
       const sug = await request(`/contracts/suggestion?projectId=${projectId}&partnerType=${p.type}&partnerId=${encodeURIComponent(p.id)}`);
+      // Phản hồi chậm của đối tác trước (hoặc của form đã đóng/mở lại) → bỏ qua hoàn toàn.
+      if (!guard.isCurrent(token)) return;
       setDocOptions(sug.documents ?? []);
       if (sug.suggestion) {
-        const s = sug.suggestion;
+        const sg = sug.suggestion;
         setForm(f => f && ({
           ...f,
-          legalName: s.snapshot.legalName ?? '', signingForm: s.snapshot.signingForm ?? '', representative: s.snapshot.representative ?? '',
-          taxCode: s.snapshot.taxCode ?? '', idNumber: s.snapshot.idNumber ?? '', address: s.snapshot.address ?? '', certEmail: s.snapshot.certEmail ?? '',
-          bankName: s.snapshot.bankName ?? '', bankAccountName: s.snapshot.bankAccountName ?? '', bankAccountNumber: s.snapshot.bankAccountNumber ?? '', bankBranch: s.snapshot.bankBranch ?? '',
-          taxPreset: presetFor(s.taxRate, s.taxMode ?? ''), taxRateText: s.taxRate !== null && s.taxRate !== undefined ? String(s.taxRate) : '', taxMode: s.taxMode ?? '',
+          legalName: sg.snapshot.legalName ?? '', signingForm: sg.snapshot.signingForm ?? '', representative: sg.snapshot.representative ?? '',
+          taxCode: sg.snapshot.taxCode ?? '', idNumber: sg.snapshot.idNumber ?? '', address: sg.snapshot.address ?? '', certEmail: sg.snapshot.certEmail ?? '',
+          bankName: sg.snapshot.bankName ?? '', bankAccountName: sg.snapshot.bankAccountName ?? '', bankAccountNumber: sg.snapshot.bankAccountNumber ?? '', bankBranch: sg.snapshot.bankBranch ?? '',
+          taxPreset: presetFor(sg.taxRate, sg.taxMode ?? ''), taxRateText: sg.taxRate !== null && sg.taxRate !== undefined ? String(sg.taxRate) : '', taxMode: sg.taxMode ?? '',
         }));
-        setSuggestionLabel(`Đã tự điền từ: ${s.sourceLabel}. Đây chỉ là gợi ý — kiểm tra và sửa theo thực tế của dự án này trước khi lưu.`);
+        setSuggestionLabel(`Đã tự điền từ: ${sg.sourceLabel}. Đây chỉ là gợi ý — kiểm tra và sửa theo thực tế của dự án này trước khi lưu.`);
       } else {
         setSuggestionLabel('Đối tác chưa có hồ sơ ký kết trong kho và chưa có lần ký nào trước đây — nhập thông tin theo thực tế.');
       }
-    } catch (e: any) { setFormError(e.message); }
+    } catch (e: any) { if (guard.isCurrent(token)) setFormError(e.message); }
+    finally { if (guard.isCurrent(token)) setSuggestionPending(false); }
   };
 
   const set = (patch: Partial<FormState>) => setForm(f => f && ({ ...f, ...patch }));
@@ -189,6 +212,9 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
 
   const saveForm = async () => {
     if (!form) return;
+    // Đang tải gợi ý của đối tác hiện tại thì chưa được lưu — dữ liệu phụ thuộc đối tác
+    // chưa chốt, lưu lúc này có thể mang nhầm dữ liệu của đối tác trước.
+    if (!form.contractId && suggestionPending) { setFormError('Đang tải gợi ý của đối tác — chờ tải xong rồi mới lưu, tránh lưu nhầm dữ liệu của đối tác khác.'); return; }
     setBusy(true); setFormError('');
     try {
       const amount = parseMoneyInput(form.amountText);
@@ -202,7 +228,10 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
       const body: any = {
         contractNumber: form.contractNumber, contractName: form.contractName, signDate: form.signDate,
         startDate: form.startDate, endDate: form.endDate, fileLink: form.fileLink, note: form.note,
-        snapshot, money, documentIds: form.documentIds,
+        snapshot, money,
+        // Hợp đồng đã ký/hoàn tất: giấy tờ đã ghim là bất biến — không gửi trường này
+        // lên nữa (server cũng chỉ chặn khi tập giấy tờ thực sự thay đổi).
+        ...(form.contractId && form.status !== 'draft' ? {} : { documentIds: form.documentIds }),
       };
       if (form.contractId) {
         const d = await request(`/contracts/${form.contractId}`, { ...body, revision: form.revision });

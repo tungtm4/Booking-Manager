@@ -259,7 +259,13 @@ export function installContracts(router:Router,db:DatabaseSync,projectAccess:(u:
       if(JSON.stringify(moneyIn)!==JSON.stringify(oldMoney))protectedChanged.push('giá/thuế của hợp đồng');
       if(contractNumber!==row.contract_number)protectedChanged.push('số hợp đồng');
       if(signDate!==row.sign_date)protectedChanged.push('ngày ký');
-      if(b.documentIds!==undefined)protectedChanged.push('giấy tờ đã ghim');
+      if(b.documentIds!==undefined){
+        // Gửi lại ĐÚNG tập giấy tờ đã ghim thì không phải là thay đổi — vẫn cho lưu các
+        // trường được phép sửa; chỉ chặn khi tập giấy tờ THỰC SỰ khác đi (bất biến giữ nguyên).
+        const currentIds=new Set((db.prepare('SELECT document_id FROM contract_documents WHERE contract_id=?').all(row.id) as any[]).map(r=>r.document_id));
+        const wanted=Array.isArray(b.documentIds)?b.documentIds:null;
+        if(!wanted||wanted.length!==currentIds.size||wanted.some((d:any)=>typeof d!=='string'||!currentIds.has(d)))protectedChanged.push('giấy tờ đã ghim');
+      }
     }
     if(protectedChanged.length)return res.status(422).json({message:`Hợp đồng đã ký — không sửa được: ${protectedChanged.join(', ')}. Muốn thay đổi các thông tin này, hãy huỷ hợp đồng và tạo hợp đồng mới; lịch sử hợp đồng hiện tại được giữ nguyên.`});
     // Giá mới phải "đỡ" được kế hoạch thanh toán đã lập (áp dụng cả khi payload đồng

@@ -273,3 +273,26 @@ test('A2 fix (PM review): hạ giá dưới tổng đợt/đã trả hoặc xoá
     assert.equal((await call(`/contracts/${c.id}`,{revision:toEighty.body.contract.revision,note:'chỉ sửa ghi chú'},pm)).status,200);
   });
 });
+
+test('A2 fix UI (PM review): sửa hợp đồng đã ký — gửi lại đúng tập giấy tờ thì được, đổi tập thì chặn',async()=>{
+  await fixture(async({call,pidA,cookies,docId})=>{
+    const {pm}=cookies;
+    const created=await call(`/projects/${pidA}/contracts`,{partnerType:'kol',partnerId:'partner-1',snapshot:snapFull,money:{basis:'net',amount:10000000,taxRate:7,taxMode:'trong_gia_gop'},documentIds:[docId]},pm);
+    assert.equal(created.status,200,JSON.stringify(created.body));
+    const c=created.body.contract;
+    const signed=await call(`/contracts/${c.id}`,{revision:c.revision,status:'signed'},pm);
+    assert.equal(signed.status,200);
+    const rev=signed.body.contract.revision;
+    // Client gửi kèm documentIds Y HỆT tập đã ghim + sửa ghi chú → lưu được (trước đây luôn 422).
+    const sameDocs=await call(`/contracts/${c.id}`,{revision:rev,note:'Ghi chú sau ký',documentIds:[docId]},pm);
+    assert.equal(sameDocs.status,200,JSON.stringify(sameDocs.body));
+    assert.equal(sameDocs.body.contract.note,'Ghi chú sau ký');
+    assert.deepEqual(sameDocs.body.contract.documents.map((d:any)=>d.id),[docId]);
+    // Đổi tập giấy tờ (bỏ ghim) → vẫn 422, bất biến giữ nguyên.
+    assert.equal((await call(`/contracts/${c.id}`,{revision:sameDocs.body.contract.revision,documentIds:[]},pm)).status,422);
+    // Không gửi documentIds + sửa ghi chú → được như trước.
+    const noDocs=await call(`/contracts/${c.id}`,{revision:sameDocs.body.contract.revision,note:'Ghi chú khác'},pm);
+    assert.equal(noDocs.status,200);
+    assert.deepEqual(noDocs.body.contract.documents.map((d:any)=>d.id),[docId]);
+  });
+});
