@@ -304,18 +304,41 @@ function CommunityShortlistRow({ row, brief, busy, quoteId, onSavePrice, onToOpt
   );
 }
 
-export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal }: { projectId: string; onOpenQuotes: () => void; onOpenProposal?: (phaseId: string) => void }) {
+export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal, activePhaseIdProp, onPhaseChange, onDirtyChange }: {
+  projectId: string;
+  onOpenQuotes: () => void;
+  onOpenProposal?: (phaseId: string) => void;
+  activePhaseIdProp?: string;
+  onPhaseChange?: (phaseId: string) => void;
+  onDirtyChange?: (isDirty: boolean) => void;
+}) {
   const [data, setData] = useState<any>(null), [brief, setBrief] = useState<any>(null), [options, setOptions] = useState<any[]>([]);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [dirty, setDirty] = useState(false);
   const [catalogIds, setCatalogIds] = useState<string[]>([]), [selected, setSelected] = useState<string[]>([]), [quoteId, setQuoteId] = useState(''), [format, setFormat] = useState('video'), [quantity, setQuantity] = useState(1);
 
   // Đợt 9: phase của dự án
-  const [phases, setPhases] = useState<any[]>([]), [activePhaseId, setActivePhaseId] = useState(''), [pool, setPool] = useState<any[]>([]);
+  const [phases, setPhases] = useState<any[]>([]), [activePhaseId, setActivePhaseIdState] = useState(activePhaseIdProp || ''), [pool, setPool] = useState<any[]>([]);
   const [showMigration, setShowMigration] = useState(false), [migrationProfiles, setMigrationProfiles] = useState<KolProfile[]>([]);
   const [phaseInfo, setPhaseInfo] = useState<any>({ name: '', kind: 'other', description: '', budget: '' }), [phaseInfoDirty, setPhaseInfoDirty] = useState(false);
   const [phaseBrief, setPhaseBrief] = useState<any>(null), [phaseBriefDirty, setPhaseBriefDirty] = useState(false);
   const [signingTarget, setSigningTarget] = useState<{ type: 'kol' | 'community'; id: string; name: string } | null>(null);
   const [signingDirty, setSigningDirty] = useState(false);
+
+  useEffect(() => {
+    if (onDirtyChange) onDirtyChange(dirty || phaseInfoDirty || phaseBriefDirty || signingDirty);
+  }, [dirty, phaseInfoDirty, phaseBriefDirty, signingDirty, onDirtyChange]);
+
+  const setActivePhaseId = (id: string) => {
+    setActivePhaseIdState(id);
+    if (onPhaseChange) onPhaseChange(id);
+  };
+
+  useEffect(() => {
+    if (activePhaseIdProp && activePhaseIdProp !== activePhaseId) {
+      setActivePhaseIdState(activePhaseIdProp);
+      activePhaseIdRef.current = activePhaseIdProp;
+    }
+  }, [activePhaseIdProp]);
   // Đóng modal hồ sơ ký kết khi còn thay đổi chưa lưu phải hỏi trước — tránh mất dữ liệu đang nhập.
   const closeSigning = () => {
     if (signingDirty && !confirmDiscardSigningChanges()) return;
