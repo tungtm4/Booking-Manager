@@ -271,3 +271,70 @@ test('B đợt 1 — Community ước tính từ hồ sơ + bản đã duyệt &
     assert.equal(itemsOf(approvedQ).find((i:any)=>i.kind==='community').costSource.gross,10800000);
   });
 });
+
+test('B đợt 1 (fix PM) — PM save đổi ràng buộc đối tác/kind/type/shortlistId thì HUỶ nguồn cũ; giữ nguyên ràng buộc thì hợp đồng giữ nguyên',async()=>{
+  await fixture(async({call,pidA,cookies,mkQuote,getQuote,itemsOf,payloadOf}:any)=>{
+    const {pm,bookinga}=cookies;
+    const sl=await call(`/projects/${pidA}/shortlist`,undefined,pm);
+    const row1=sl.body.rows.find((r:any)=>r.partnerType==='kol'&&r.catalogId==='partner-1');
+    const row2=sl.body.rows.find((r:any)=>r.partnerType==='kol'&&r.catalogId==='partner-2');
+    const qid=await mkQuote('PA fix binding',[
+      {shortlistId:row1.id,key:'video',quantity:1},
+      {shortlistId:row1.id,key:'shorts',quantity:1},
+    ]);
+    // Hợp đồng đã ký cho KOL-1 + phân bổ 30tr GROSS vào dòng video.
+    const c=await call(`/projects/${pidA}/contracts`,{partnerType:'kol',partnerId:'partner-1',contractNumber:'HD-FIX',contractName:'HĐ fix',signDate:'2026-10-30',snapshot:snap,money:{basis:'net',amount:50000000,taxRate:7,taxMode:'trong_gia_gop'},documentIds:[]},bookinga);
+    assert.equal(c.status,200,JSON.stringify(c.body));
+    const signedC=await call(`/contracts/${c.body.contract.id}`,{revision:c.body.contract.revision,status:'signed'},bookinga);
+    assert.equal(signedC.status,200);
+    const lineOf=async()=>{const q=await getQuote(qid,bookinga);return {q,video:itemsOf(q).find((i:any)=>i.format==='video'),shorts:itemsOf(q).find((i:any)=>i.format==='shorts')};};
+    const applyContract=async()=>{
+      const {q,video}=await lineOf();
+      const r=await call(`/projects/${pidA}/quotes/${qid}/cost-source`,{revision:q.revision,itemId:video.id,kind:'contract',contractId:c.body.contract.id,basis:'gross',amount:30000000},bookinga);
+      assert.equal(r.status,200,JSON.stringify(r.body));
+    };
+    const pmSave=async(mutate:(items:any[])=>any[])=>{
+      const pmQ=await getQuote(qid,pm);
+      const payload={...payloadOf(pmQ),items:mutate(payloadOf(pmQ).items.map((i:any)=>({...i})))};
+      const r=await call(`/projects/${pidA}/quotes/${qid}/save`,{revision:pmQ.revision,payload},pm);
+      assert.equal(r.status,200,JSON.stringify(r.body));
+      return r.body.quote;
+    };
+    await applyContract();
+    // (1) Cùng id nhưng payload đổi shortlistId sang KOL-2 → nguồn hợp đồng bị huỷ,
+    // không copy phân bổ của KOL-1 sang ràng buộc mới.
+    await pmSave(items=>items.map(i=>i.format==='video'?{...i,shortlistId:row2.id}:i));
+    let cur=await lineOf();
+    assert.equal(cur.video.costSource,undefined);
+    // (2) Client tự nhét costSource giả trong payload → server không tin, vẫn trống.
+    await pmSave(items=>items.map(i=>i.format==='video'?{...i,costSource:{kind:'contract',status:'chot',contractId:'gia',contractNumber:'GIA',basis:'gross',amount:999,taxRate:0,taxMode:'khong_thue',net:999,tax:0,gross:999}}:i));
+    cur=await lineOf();
+    assert.equal(cur.video.costSource,undefined);
+    // (3) Gắn lại hợp đồng, PM đổi partnerType của dòng → huỷ nguồn.
+    await applyContract();
+    await pmSave(items=>items.map(i=>i.format==='video'?{...i,partnerType:'community'}:i));
+    cur=await lineOf();
+    assert.equal(cur.video.costSource,undefined);
+    // (4) Gắn lại, PM đổi kind của dòng → huỷ nguồn.
+    await applyContract();
+    await pmSave(items=>items.map(i=>i.format==='video'?{...i,kind:'community'}:i));
+    cur=await lineOf();
+    assert.equal(cur.video.costSource,undefined);
+    // (5) Gắn lại, PM chỉ đổi SỐ LƯỢNG (ràng buộc nguyên) → nguồn hợp đồng GIỮ NGUYÊN
+    // tổng phân bổ 30tr, không nhân theo số lượng mới.
+    await applyContract();
+    const savedQty=await pmSave(items=>items.map(i=>i.format==='video'?{...i,quantity:3}:i));
+    const videoSaved=savedQty.items.find((i:any)=>i.format==='video');
+    assert.equal(videoSaved.quantity,3);
+    assert.equal(videoSaved.costSource.gross,30000000);
+    assert.equal(videoSaved.costSource.kind,'contract');
+    // (6) Nguồn hồ sơ ở dòng shorts cũng bị huỷ khi đổi ràng buộc (partnerType).
+    const qNow=await getQuote(qid,bookinga);
+    const shortsLine=itemsOf(qNow).find((i:any)=>i.format==='shorts');
+    const prof=await call(`/projects/${pidA}/quotes/${qid}/cost-source`,{revision:qNow.revision,itemId:shortsLine.id,kind:'profile',basis:'net',amount:20000000},bookinga);
+    assert.equal(prof.status,200,JSON.stringify(prof.body));
+    await pmSave(items=>items.map(i=>i.format==='shorts'?{...i,partnerType:'community'}:i));
+    cur=await lineOf();
+    assert.equal(cur.shorts.costSource,undefined);
+  });
+});

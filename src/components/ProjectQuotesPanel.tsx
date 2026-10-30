@@ -65,17 +65,23 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
   const [opts,setOpts]=useState<any>(null),[loadErr,setLoadErr]=useState('');
   const [tab,setTab]=useState<'contract'|'profile'|'estimate'>('contract');
   const [contractId,setContractId]=useState('');
-  const [basis,setBasis]=useState<'net'|'gross'>('net');
+  // Basis KHÔNG chọn sẵn: giá cũ chưa rõ NET/GROSS nên người dùng phải chủ động xác
+  // nhận. Chỉ gợi ý thuế (từ hồ sơ/hợp đồng) là chưa đủ để coi số tiền là NET/GROSS.
+  const [basis,setBasis]=useState<'net'|'gross'|null>(null);
   const [amount,setAmount]=useState<number|''>('');
-  const [preset,setPreset]=useState('hkd');
-  const [taxRate,setTaxRate]=useState<number|''>(7);
-  const [taxMode,setTaxMode]=useState('trong_gia_gop');
+  const [useLineTotal,setUseLineTotal]=useState(false);
+  // Trường hợp thuế của nguồn Tự xác nhận bắt đầu TRỐNG hoàn toàn — không tự chọn
+  // HKD 7% hay bất kỳ preset nào. Người dùng chọn preset (hoặc tự chỉnh) mới có thuế.
+  const [preset,setPreset]=useState('');
+  const [taxRate,setTaxRate]=useState<number|''>('');
+  const [taxMode,setTaxMode]=useState('');
   const [busy,setBusy]=useState(false),[err,setErr]=useState('');
   useEffect(()=>{
     request(`/projects/${projectId}/quotes/${quoteId}/cost-options?itemId=${item.id}`).then(d=>{
-      setOpts(d);setAmount(d.lineBuyTotal??'');
-      const first=(d.contracts??[]).find((c:any)=>c.applicable);
-      if(first){setContractId(first.id);setTab('contract');}
+      // Không tự điền số tiền từ thành tiền dòng và không tự chọn hợp đồng: mọi số
+      // liệu đưa vào nguồn chi phí đều phải do người dùng chủ động nhập/xác nhận.
+      setOpts(d);
+      if((d.contracts??[]).some((c:any)=>c.applicable))setTab('contract');
       else if(d.profile&&d.profile.taxRate!==null)setTab('profile');
       else setTab('estimate');
     }).catch(e=>setLoadErr(e instanceof Error?e.message:'Không tải được tuỳ chọn nguồn chi phí.'));
@@ -83,22 +89,30 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
   const cur=item.costSource;
   const selContract=(opts?.contracts??[]).find((c:any)=>c.id===contractId);
   const ownAlloc=cur&&cur.kind==='contract'&&cur.contractId===contractId?cur.gross:0;
+  // Số tiền hiệu lực: số người dùng tự nhập; riêng nguồn hồ sơ được dùng thành tiền
+  // dòng CHỈ khi người dùng tích xác nhận rõ ràng ở dưới. Ô trống không bao giờ
+  // được hiểu là 0.
+  const effectiveAmount=amount!==''?amount:(tab==='profile'&&useLineTotal?opts?.lineBuyTotal:null);
   const preview=(()=>{
-    const amt=typeof amount==='number'?amount:Number(amount);
-    if(!Number.isFinite(amt)||amt===''as any)return null;
-    if(tab==='contract'&&selContract)return computeContractMoney({basis,amount:amt,taxRate:selContract.taxRate,taxMode:selContract.taxMode});
-    if(tab==='profile'&&opts?.profile&&opts.profile.taxRate!==null)return computeContractMoney({basis,amount:amt,taxRate:opts.profile.taxRate,taxMode:opts.profile.taxMode});
-    if(tab==='estimate')return computeContractMoney({basis,amount:amt,taxRate:typeof taxRate==='number'?taxRate:Number(taxRate),taxMode:taxMode as any});
+    if(!basis||typeof effectiveAmount!=='number'||!Number.isFinite(effectiveAmount))return null;
+    if(tab==='contract'&&selContract)return computeContractMoney({basis,amount:effectiveAmount,taxRate:selContract.taxRate,taxMode:selContract.taxMode});
+    if(tab==='profile'&&opts?.profile&&opts.profile.taxRate!==null)return computeContractMoney({basis,amount:effectiveAmount,taxRate:opts.profile.taxRate,taxMode:opts.profile.taxMode});
+    if(tab==='estimate'&&preset&&taxRate!==''&&taxMode)return computeContractMoney({basis,amount:effectiveAmount,taxRate:typeof taxRate==='number'?taxRate:Number(taxRate),taxMode:taxMode as any});
     return null;
   })();
   const overContract=tab==='contract'&&selContract&&preview?preview.gross>(selContract.remaining+ownAlloc):false;
+  const canApply=Boolean(preview)&&!overContract&&(
+    tab==='contract'?Boolean(selContract&&selContract.applicable):
+    tab==='profile'?Boolean(opts?.profile&&opts.profile.taxRate!==null):
+    Boolean(preset&&taxRate!==''&&taxMode));
   async function apply(){
     setBusy(true);setErr('');
     try{
+      if(!basis||typeof effectiveAmount!=='number')return;
       const body:any={revision,itemId:item.id,kind:tab};
-      if(tab==='contract'){body.contractId=contractId;body.basis=basis;body.amount=Number(amount);}
-      if(tab==='profile'){body.basis=basis;if(amount!=='')body.amount=Number(amount);}
-      if(tab==='estimate'){body.basis=basis;body.amount=Number(amount);body.taxRate=Number(taxRate);body.taxMode=taxMode;}
+      if(tab==='contract'){body.contractId=contractId;body.basis=basis;body.amount=effectiveAmount;}
+      if(tab==='profile'){body.basis=basis;body.amount=effectiveAmount;}
+      if(tab==='estimate'){body.basis=basis;body.amount=effectiveAmount;body.taxRate=Number(taxRate);body.taxMode=taxMode;}
       await request(`/projects/${projectId}/quotes/${quoteId}/cost-source`,body);
       onApplied();
     }catch(e){setErr(e instanceof Error?e.message:'Không áp dụng được nguồn chi phí.');}
@@ -114,7 +128,7 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
     <label className="flex items-center gap-1"><input type="radio" name="cs-basis" checked={basis==='net'} onChange={()=>setBasis('net')}/> Số tiền là NET (đối tác thực nhận)</label>
     <label className="flex items-center gap-1"><input type="radio" name="cs-basis" checked={basis==='gross'} onChange={()=>setBasis('gross')}/> Số tiền là GROSS (tổng phải chi, đã gồm thuế)</label>
   </div>;
-  const amountInput=<label className="text-sm block">Số tiền<input aria-label="Số tiền nguồn chi phí" className={field} inputMode="numeric" value={amount===''?'':formatMoneyInput(amount)} onChange={e=>{const n=parseMoneyInput(e.target.value);setAmount(n===''?'':n);}} placeholder="Nhập số tiền"/></label>;
+  const amountInput=<label className="text-sm block">Số tiền<input aria-label="Số tiền nguồn chi phí" className={field} inputMode="numeric" value={amount===''?'':formatMoneyInput(amount)} onChange={e=>{const n=parseMoneyInput(e.target.value);setAmount(n===''?'':n);if(n!=='')setUseLineTotal(false);}} placeholder="Nhập số tiền — để trống là chưa xác nhận"/></label>;
   return <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
     <div className="max-w-2xl mx-auto my-8 bg-white rounded-xl shadow p-5 space-y-4 mx-3 sm:mx-auto">
       <div className="flex items-start justify-between gap-3">
@@ -128,6 +142,7 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
           <p className="font-semibold">Nguồn hiện tại của dòng {cur?'':'— chưa gắn'}</p>
           {cur&&<><p>{cur.kind==='contract'?`Đã chốt theo hợp đồng ${cur.contractNumber||''}`:cur.kind==='profile'?'Dự kiến từ hồ sơ kho — Chưa chốt hợp đồng':'Dự kiến tự xác nhận — Chưa chốt hợp đồng'}</p>
           <p className="text-slate-600">NET {money(cur.net)} · Thuế {money(cur.tax)} · Tổng phải chi {money(cur.gross)}</p>
+          {cur.kind==='contract'&&<p className="text-slate-600">Tổng phân bổ hợp đồng cho dòng: {money(cur.gross)} — giữ nguyên khi đổi số lượng, không nhân theo số lượng.</p>}
           <button type="button" className="border rounded-lg px-2 py-1 text-xs bg-white mt-1" disabled={busy} onClick={clearSource}>Xoá nguồn chi phí</button></>}
         </div>
         <div className="flex gap-2 text-sm">
@@ -155,16 +170,19 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
             <p>{opts.profile.legalName||'—'} · Hình thức ký: {SIGNING_FORM_LABEL[opts.profile.signingForm]??opts.profile.signingForm} · Thuế: {opts.profile.taxRate}% · {TAX_MODE_LABEL[opts.profile.taxMode]??opts.profile.taxMode}{opts.profile.taxSource==='custom'?' (suất riêng trong hồ sơ)':' (theo hình thức ký)'}</p>
             <p className="text-amber-800 font-medium">Kết quả là chi phí DỰ KIẾN — Chưa chốt hợp đồng. Giá cũ chưa rõ NET/GROSS phải xác nhận ở bước dưới, hệ thống không mặc định là NET.</p>
             {basisRadios}{amountInput}
-            <p className="text-xs text-slate-500">Để trống số tiền sẽ lấy theo thành tiền giá đầu vào hiện tại của dòng ({opts.lineBuyTotal===null?'chưa có giá đầu vào':money(opts.lineBuyTotal)}).</p>
+            {opts.lineBuyTotal!==null?<label className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
+              <input type="checkbox" className="mt-0.5" checked={useLineTotal} disabled={amount!==''} onChange={e=>setUseLineTotal(e.target.checked)}/>
+              <span>Hoặc dùng thành tiền dòng hiện tại làm số tiền ước tính: <strong>{money(opts.lineBuyTotal)}</strong>. Hệ thống không tự lấy số này — tích vào đây để xác nhận dùng nó, đồng thời vẫn phải chọn số tiền đó là NET hay GROSS ở trên.</span>
+            </label>:<p className="text-xs text-slate-500">Dòng chưa có giá đầu vào nên không có thành tiền dòng để xác nhận — hãy nhập số tiền trực tiếp.</p>}
           </div>}
         </div>}
         {tab==='estimate'&&<div className="space-y-3 text-sm">
           <p>Khi chưa có hợp đồng và hồ sơ chưa đủ: tự xác nhận bản chất số tiền và thông số thuế. Hệ thống không mặc định giá cũ là NET và không mặc định “không thuế” — chọn đúng trường hợp của bạn.</p>
           {basisRadios}{amountInput}
           <div className="grid sm:grid-cols-3 gap-2">
-            <label className="text-sm">Trường hợp thuế<select aria-label="Trường hợp thuế" className={field} value={preset} onChange={e=>{const v=e.target.value;setPreset(v);if(v==='ca_nhan'){setTaxRate(10);setTaxMode('trong_gia_gop');}else if(v==='hkd'){setTaxRate(7);setTaxMode('trong_gia_gop');}else if(v==='cong_ty'){setTaxRate(8);setTaxMode('tren_net');}else if(v==='rieng_65'){setTaxRate(6.5);setTaxMode('tren_net');}else if(v==='khong_thue'){setTaxRate(0);setTaxMode('khong_thue');}}}><option value="ca_nhan">Cá nhân 10% trong giá gộp</option><option value="hkd">HKD 7% trong giá gộp</option><option value="cong_ty">Công ty VAT 8% trên NET</option><option value="rieng_65">Suất riêng 6,5% trên NET</option><option value="khong_thue">Không thuế</option><option value="tuy_chinh">Tuỳ chỉnh…</option></select></label>
+            <label className="text-sm">Trường hợp thuế<select aria-label="Trường hợp thuế" className={field} value={preset} onChange={e=>{const v=e.target.value;setPreset(v);if(v===''){setTaxRate('');setTaxMode('');}else if(v==='ca_nhan'){setTaxRate(10);setTaxMode('trong_gia_gop');}else if(v==='hkd'){setTaxRate(7);setTaxMode('trong_gia_gop');}else if(v==='cong_ty'){setTaxRate(8);setTaxMode('tren_net');}else if(v==='rieng_65'){setTaxRate(6.5);setTaxMode('tren_net');}else if(v==='khong_thue'){setTaxRate(0);setTaxMode('khong_thue');}}}><option value="">Chọn trường hợp thuế…</option><option value="ca_nhan">Cá nhân 10% trong giá gộp</option><option value="hkd">HKD 7% trong giá gộp</option><option value="cong_ty">Công ty VAT 8% trên NET</option><option value="rieng_65">Suất riêng 6,5% trên NET</option><option value="khong_thue">Không thuế</option><option value="tuy_chinh">Tuỳ chỉnh…</option></select></label>
             <label className="text-sm">Suất thuế (%)<input aria-label="Suất thuế" className={field} inputMode="decimal" disabled={preset!=='tuy_chinh'} value={taxRate} onChange={e=>setTaxRate(e.target.value===''?'':Number(e.target.value))}/></label>
-            <label className="text-sm">Cách tính<select aria-label="Cách tính thuế" className={field} disabled={preset!=='tuy_chinh'} value={taxMode} onChange={e=>setTaxMode(e.target.value)}><option value="trong_gia_gop">Thuế nằm trong giá gộp</option><option value="tren_net">Cộng trên NET</option><option value="khong_thue">Không thuế</option></select></label>
+            <label className="text-sm">Cách tính<select aria-label="Cách tính thuế" className={field} disabled={preset!=='tuy_chinh'} value={taxMode} onChange={e=>setTaxMode(e.target.value)}><option value="">Chọn cách tính…</option><option value="trong_gia_gop">Thuế nằm trong giá gộp</option><option value="tren_net">Cộng trên NET</option><option value="khong_thue">Không thuế</option></select></label>
           </div>
         </div>}
         {preview&&<div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-sm">
@@ -172,10 +190,11 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
           <p>NET {money(preview.net)} · Thuế {money(preview.tax)} · Tổng phải chi {money(preview.gross)} — {tab==='contract'?'trạng thái: ĐÃ CHỐT (theo hợp đồng)':'trạng thái: DỰ KIẾN — Chưa chốt hợp đồng'}</p>
           {cur&&<p className="text-slate-600">Trước đó: NET {money(cur.net)} · Thuế {money(cur.tax)} · Tổng phải chi {money(cur.gross)}</p>}
         </div>}
+        {!preview&&<p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">Chưa đủ xác nhận để áp dụng: hãy chủ động chọn số tiền là NET hay GROSS, nhập số tiền (hoặc tích xác nhận dùng thành tiền dòng ở nguồn hồ sơ){tab==='estimate'?' và chọn trường hợp thuế':''}{tab==='contract'?' và chọn hợp đồng':''}. Hệ thống không tự coi giá cũ là NET và không tự chọn thuế.</p>}
         {err&&<p role="alert" className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">{err}</p>}
         <div className="flex gap-2 justify-end">
           <button type="button" className="border rounded-lg px-3 py-2 text-sm" onClick={onClose}>Huỷ</button>
-          <button type="button" className={button} disabled={busy||!preview||overContract||(tab==='contract'&&!(selContract&&selContract.applicable))||(tab==='profile'&&!(opts.profile&&opts.profile.taxRate!==null))} onClick={apply}>Áp dụng nguồn chi phí</button>
+          <button type="button" className={button} disabled={busy||!canApply} onClick={apply}>Áp dụng nguồn chi phí</button>
         </div>
       </>}
     </div>
@@ -247,6 +266,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
         <p className="text-xs font-semibold">{cs.kind==='contract'?`Chi phí ĐÃ CHỐT · HĐ ${cs.contractNumber||''}`:cs.kind==='profile'?'Chi phí DỰ KIẾN từ hồ sơ kho':'Chi phí DỰ KIẾN · tự xác nhận'}</p>
         {cs.status==='du_kien'&&<p className="text-xs text-amber-700 font-medium">Chưa chốt hợp đồng</p>}
         <p className="text-xs text-slate-600">NET {money(cs.net)} · Thuế {money(cs.tax)} · Tổng phải chi {money(cs.gross)}</p>
+        {cs.kind==='contract'&&<p className="text-xs text-slate-500">Tổng phân bổ hợp đồng cho dòng: {money(cs.gross)} — giữ nguyên khi đổi số lượng, không nhân theo số lượng.</p>}
       </>:<p className="text-xs text-slate-500">Chưa gắn nguồn chi phí (NET/thuế/tổng phải chi).</p>}
       {editable&&(dirty?<p className="text-xs text-amber-700">Lưu báo giá trước, rồi gắn nguồn chi phí.</p>:<button type="button" className="border rounded-lg px-2 py-1 text-xs bg-white" disabled={busy} onClick={()=>setCostItemId(i.id)}>{cs?'Đổi nguồn chi phí':'Gắn nguồn chi phí'}</button>)}
     </div>;

@@ -283,14 +283,38 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
           ...(old.buyConfirmation&&old.buyUnitPrice===i.buyUnitPrice?{buyConfirmation:old.buyConfirmation}:{})};
       });
       // Nguồn chi phí là trường server sở hữu — khôi phục từ bản đã lưu như các trường
-      // sở hữu khác. Nguồn ước tính/hồ sơ được suy từ tổng giá của dòng nên mất hiệu
-      // lực khi số lượng hoặc giá đầu vào thay đổi; nguồn hợp đồng là khoản phân bổ
-      // độc lập với đơn giá/số lượng nên giữ nguyên.
+      // sở hữu khác, TUYỆT ĐỐI không nhận costSource từ payload của client. Việc khôi
+      // phục theo id chỉ an toàn khi RÀNG BUỘC ĐỐI TÁC của dòng không đổi: nếu PM đổi
+      // kind / partnerType / shortlistId / serviceId (trong payload gửi lên hoặc ở
+      // dòng hiệu lực sau khi server gộp các trường sở hữu) thì nguồn cũ bị HUỶ —
+      // không bao giờ copy nguồn (nhất là phân bổ hợp đồng) của đối tác A sang B.
+      // Nguồn ước tính/hồ sơ được suy từ tổng giá của dòng nên cũng mất hiệu lực khi
+      // số lượng hoặc giá đầu vào thay đổi; nguồn hợp đồng là khoản phân bổ độc lập
+      // với đơn giá/số lượng nên giữ nguyên khi ràng buộc không đổi.
       p.items=p.items.map(i=>{
         const old=originalItems.find(o=>o.id===i.id);
         if(!old?.costSource)return i;
-        if(old.costSource.kind!=='contract'&&(old.quantity!==i.quantity||old.buyUnitPrice!==i.buyUnitPrice))return i;
-        return {...i,costSource:old.costSource};
+        const cs=old.costSource;
+        const raw=(req.body.payload.items as any[]).find((x:any)=>x.id===i.id);
+        const norm=(v:any)=>v??'';
+        const submittedBindingChanged=!!raw&&(
+          (raw.kind!==undefined&&norm(raw.kind)!==norm(old.kind))||
+          (raw.partnerType!==undefined&&norm(raw.partnerType)!==norm(old.partnerType))||
+          ('shortlistId' in raw&&norm(raw.shortlistId)!==norm(old.shortlistId))||
+          ('serviceId' in raw&&norm(raw.serviceId)!==norm(old.serviceId)));
+        const effectiveBindingChanged=
+          norm(i.kind)!==norm(old.kind)||norm(i.partnerType)!==norm(old.partnerType)||
+          norm(i.shortlistId)!==norm(old.shortlistId)||norm(i.serviceId)!==norm(old.serviceId);
+        if(submittedBindingChanged||effectiveBindingChanged)return i;
+        // Đối chiếu lại snapshot đối tác trong nguồn với đối tác hiệu lực của dòng
+        // (qua shortlist row): lệch là huỷ nguồn, kể cả khi các trường trên khớp.
+        if(cs.partnerId||cs.partnerType){
+          if(!i.shortlistId)return i;
+          const row=db.prepare('SELECT catalog_id,partner_type FROM project_shortlist WHERE id=? AND project_id=?').get(i.shortlistId,pid) as any;
+          if(!row||cs.partnerId!==row.catalog_id||cs.partnerType!==(row.partner_type??'kol'))return i;
+        }
+        if(cs.kind!=='contract'&&(old.quantity!==i.quantity||old.buyUnitPrice!==i.buyUnitPrice))return i;
+        return {...i,costSource:cs};
       });
     }else{
       if(Object.keys(req.body).some(k=>!['revision','buyPrices'].includes(k))||!Array.isArray(req.body.buyPrices)||req.body.buyPrices.length>500)return res.status(403).json({message:'Booking chỉ được cập nhật giá đầu vào.'});
