@@ -5,6 +5,7 @@ import { CommunityService as CommunityApi, type CatalogCommunity } from '../serv
 import { communityScaleLabel } from '../domain/community';
 import { CommunityImportModal } from './CommunityImportModal';
 import { PartnerSigningPanel, confirmDiscardSigningChanges } from './PartnerSigningPanel';
+import { PartnerContractsList } from './PartnerContractsList';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { formatDateTimeVN, formatVND } from '../utils/formatters';
 import { paginateItems, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../utils/pagination';
@@ -301,6 +302,7 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
             {!isNew && editing.id && (
               <div className="border-t pt-3">
                 <PartnerSigningPanel key={editing.id} partnerType="community" partnerId={editing.id} onDirtyChange={setSigningDirty} />
+                <PartnerContractsList partnerType="community" partnerId={editing.id} />
               </div>
             )}
           </div>

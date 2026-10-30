@@ -3,6 +3,7 @@ import {installProjectShortlist} from './projectShortlist';
 import {installCommunities} from './communities';
 import {installProjectQuotes} from './projectQuotes';
 import {installPartnerSigning} from './partnerSigning';
+import {installContracts} from './contracts';
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from 'node:fs';
@@ -149,6 +150,7 @@ export function createWorkspace(directory: string, options: { memory?: boolean; 
   installProjectQuotes(router,db,projectAccess,audit);
   installProjectShortlist(router,db,projectAccess,audit);
   installPartnerSigning(router,db,audit,options.memory?'':directory);
+  installContracts(router,db,projectAccess,audit,options.memory?'':directory);
   router.get('/users',(_req,res)=>{
     if(!isAdmin(res.locals.user))return res.status(403).json({message:'Chỉ Admin được xem danh sách tài khoản.'});
     res.json({users:db.prepare('SELECT * FROM users WHERE organization_id=? ORDER BY display_name').all(res.locals.user.organization_id).map(safeUser)});

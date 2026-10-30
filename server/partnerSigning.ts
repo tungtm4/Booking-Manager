@@ -64,13 +64,22 @@ function sanitizeDisplayName(name:unknown):string{
   return clean||'giay-to';
 }
 
+// Thư mục file giấy tờ dùng CHUNG cho A1 (hồ sơ tham chiếu) và A2 (tải bản ghim của
+// hợp đồng) để hai module luôn đọc cùng một nơi — kể cả chế độ in-memory khi test.
+let memoryDocsRoot='';
+export function partnerDocumentsRoot(directory:string):string{
+  if(directory)return path.join(directory,'partner-documents');
+  if(!memoryDocsRoot)memoryDocsRoot=mkdtempSync(path.join(tmpdir(),'partner-docs-'));
+  return memoryDocsRoot;
+}
+
 export function installPartnerSigning(router:Router,db:DatabaseSync,audit:(a:string|null,b:string,c:string)=>unknown,directory:string){
   db.exec(`CREATE TABLE IF NOT EXISTS partner_signing_profiles(organization_id TEXT NOT NULL,partner_type TEXT NOT NULL,partner_id TEXT NOT NULL,payload_json TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,updated_at TEXT NOT NULL DEFAULT '',updated_by TEXT NOT NULL DEFAULT '',PRIMARY KEY(organization_id,partner_type,partner_id));
     CREATE TABLE IF NOT EXISTS partner_documents(id TEXT PRIMARY KEY,organization_id TEXT NOT NULL,partner_type TEXT NOT NULL,partner_id TEXT NOT NULL,display_name TEXT NOT NULL,stored_name TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL DEFAULT '');
     CREATE TABLE IF NOT EXISTS partner_document_references(document_id TEXT NOT NULL,ref_type TEXT NOT NULL,ref_id TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT '',PRIMARY KEY(document_id,ref_type,ref_id));`);
   // File giấy tờ: thư mục riêng dưới thư mục dữ liệu của workspace (.local — ngoài Git,
   // không nằm trong public/static). Chế độ in-memory (test) dùng thư mục tạm của hệ thống.
-  const filesRoot=directory?path.join(directory,'partner-documents'):mkdtempSync(path.join(tmpdir(),'partner-docs-'));
+  const filesRoot=partnerDocumentsRoot(directory);
   const partnerExists=(orgId:string,type:string,id:string)=>{
     const table=type==='kol'?'kol_catalog':'community_catalog';
     return Boolean(db.prepare(`SELECT id FROM ${table} WHERE id=? AND organization_id=?`).get(id,orgId));

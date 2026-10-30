@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { CollaborationHistory, KolProfile, PRICE_FORMAT_LABELS, PriceFormatKey } from '../types/kol';
 import { PartnerSigningPanel, confirmDiscardSigningChanges } from './PartnerSigningPanel';
+import { PartnerContractsList } from './PartnerContractsList';
 import { formatDateVN, formatFollowers, formatVND, getCategoryBadgeClass } from '../utils/formatters';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 
@@ -491,6 +492,7 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
               dùng chung với phía dự án; sửa tại đây không cần thêm KOL vào dự án nào. */}
           <div className="px-1 pt-4">
             <PartnerSigningPanel key={kol.id} partnerType="kol" partnerId={kol.id} onDirtyChange={setSigningDirty} />
+            <PartnerContractsList partnerType="kol" partnerId={kol.id} />
           </div>
         </div>
 
