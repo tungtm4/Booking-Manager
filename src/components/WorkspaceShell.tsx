@@ -68,7 +68,6 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { proj
   const contracts = data?.contracts || [];
   const shortlistRows = data?.shortlist?.rows || [];
 
-  // Tính việc cần làm (To-Do) từ DỮ LIỆU THẬT
   const unconfirmedPriceRows = shortlistRows.filter((r: any) => {
     if (!r.prices) return false;
     return Object.values(r.prices).some((p: any) => p && p.status === 'unconfirmed');
@@ -83,7 +82,6 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { proj
 
   return (
     <div className="space-y-6">
-      {/* 1. Thông tin chung & Brief */}
       <div className="grid md:grid-cols-2 gap-6">
         <div className="bg-white p-5 rounded-2xl border border-purple-100 shadow-sm space-y-3">
           <div className="flex items-center justify-between">
@@ -110,35 +108,34 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { proj
           )}
         </div>
 
-        {/* 2. To-Do Tasks từ dữ liệu thật */}
         <div className="bg-white p-5 rounded-2xl border border-amber-200/80 shadow-sm space-y-3">
           <h3 className="font-bold text-slate-900 text-lg flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
-            Việc cần làm
+            Việc cần làm từ dữ liệu thật
           </h3>
           <ul className="space-y-2 text-sm">
             {missingPriceRows.length > 0 && (
               <li className="flex items-center justify-between p-2.5 bg-amber-50/80 rounded-xl text-amber-900 text-xs font-medium border border-amber-200/50">
                 <span>⚠️ {missingPriceRows.length} đối tác trong danh sách sơ bộ chưa có giá đầu vào.</span>
-                <button onClick={() => onSwitchTab('shortlist')} className="text-purple-700 underline font-semibold ml-2">Xử lý ngay</button>
+                <button onClick={() => onSwitchTab('shortlist')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer">Xử lý ngay</button>
               </li>
             )}
             {unconfirmedPriceRows.length > 0 && (
               <li className="flex items-center justify-between p-2.5 bg-amber-50/80 rounded-xl text-amber-900 text-xs font-medium border border-amber-200/50">
                 <span>⚠️ {unconfirmedPriceRows.length} đối tác có giá chưa xác nhận nguồn.</span>
-                <button onClick={() => onSwitchTab('shortlist')} className="text-purple-700 underline font-semibold ml-2">Xác nhận</button>
+                <button onClick={() => onSwitchTab('shortlist')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer">Xác nhận</button>
               </li>
             )}
             {draftQuotes.length > 0 && (
               <li className="flex items-center justify-between p-2.5 bg-blue-50/80 rounded-xl text-blue-900 text-xs font-medium border border-blue-200/50">
                 <span>📄 {draftQuotes.length} bản nháp phương án/báo giá đang chờ hoàn thiện/gửi duyệt.</span>
-                <button onClick={() => onSwitchTab('quotes')} className="text-purple-700 underline font-semibold ml-2">Xem phương án</button>
+                <button onClick={() => onSwitchTab('quotes')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer">Xem phương án</button>
               </li>
             )}
             {pendingContractApprovals.length > 0 && (
               <li className="flex items-center justify-between p-2.5 bg-purple-50/80 rounded-xl text-purple-900 text-xs font-medium border border-purple-200/50">
                 <span>📑 {pendingContractApprovals.length} hợp đồng chưa trình ký hoặc chờ đối tác chốt.</span>
-                <button onClick={() => onSwitchTab('contracts')} className="text-purple-700 underline font-semibold ml-2">Xem hợp đồng</button>
+                <button onClick={() => onSwitchTab('contracts')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer">Xem hợp đồng</button>
               </li>
             )}
             {missingPriceRows.length === 0 && unconfirmedPriceRows.length === 0 && draftQuotes.length === 0 && pendingContractApprovals.length === 0 && (
@@ -148,11 +145,10 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { proj
         </div>
       </div>
 
-      {/* 3. Phases 2 Tầng hợp lệ */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-slate-900 text-lg">Các Phase triển khai ({phases.length})</h3>
-          <button onClick={() => onSwitchTab('shortlist')} className="text-xs text-[#7C3AED] font-semibold hover:underline">Quản lý Phase trong Danh sách</button>
+          <button onClick={() => onSwitchTab('shortlist')} className="text-xs text-[#7C3AED] font-semibold hover:underline cursor-pointer">Quản lý Phase trong Danh sách</button>
         </div>
 
         {phases.length === 0 ? (
@@ -207,7 +203,6 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { proj
         )}
       </div>
 
-      {/* 4. Thành viên dự án */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
         <h3 className="font-bold text-slate-900 text-lg">Thành viên phân công dự án</h3>
         <div className="flex flex-wrap gap-3">
@@ -287,21 +282,21 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
               </strong>
             </div>
             <div>
-              <span className="text-xs text-purple-200 block">Tổng chi phí dự kiến</span>
+              <span className="text-xs text-purple-200 block">K — Chi phí trước VAT</span>
               <strong className="text-xl font-bold text-amber-300">
-                {baseline.pnl?.costGross != null ? formatVND(baseline.pnl.costGross) : 'Chưa có giá đầu vào'}
+                {baseline.pnl?.totalK != null ? formatVND(baseline.pnl.totalK) : 'Chưa có giá đầu vào'}
               </strong>
             </div>
             <div>
-              <span className="text-xs text-purple-200 block">Lợi nhuận gộp</span>
+              <span className="text-xs text-purple-200 block">L — Tổng phải chi</span>
+              <strong className="text-xl font-bold text-amber-100">
+                {baseline.pnl?.totalPayableL != null ? formatVND(baseline.pnl.totalPayableL) : '—'}
+              </strong>
+            </div>
+            <div>
+              <span className="text-xs text-purple-200 block">Lợi nhuận gộp (Margin %)</span>
               <strong className={`text-xl font-bold ${baseline.pnl?.profit >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-                {baseline.pnl?.profit != null ? formatVND(baseline.pnl.profit) : '—'}
-              </strong>
-            </div>
-            <div>
-              <span className="text-xs text-purple-200 block">Tỷ suất lợi nhuận (Margin)</span>
-              <strong className="text-xl font-bold text-purple-200">
-                {baseline.pnl?.marginPercent != null ? `${baseline.pnl.marginPercent.toFixed(1)}%` : '—'}
+                {baseline.pnl?.profit != null ? `${formatVND(baseline.pnl.profit)} (${baseline.pnl?.marginPercent?.toFixed(1) ?? '0'}%)` : '—'}
               </strong>
             </div>
           </div>
@@ -310,7 +305,6 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
         )}
       </div>
 
-      {/* Chi tiết từng phương án */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <h4 className="font-bold text-slate-900 text-base">So sánh P&L giữa các phương án</h4>
         <div className="divide-y border rounded-xl overflow-hidden text-sm">
@@ -323,7 +317,8 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
                     <span className="font-semibold text-slate-700">Phiên bản {ver.number} ({ver.status}) {ver.isBaseline && '★ BASELINE'}</span>
                     <div className="flex gap-4">
                       <span>Doanh thu: {ver.pnl?.revenueBeforeTax != null ? formatVND(ver.pnl.revenueBeforeTax) : '—'}</span>
-                      <span>Chi phí: {ver.pnl?.costGross != null ? formatVND(ver.pnl.costGross) : '—'}</span>
+                      <span>K: {ver.pnl?.totalK != null ? formatVND(ver.pnl.totalK) : '—'}</span>
+                      <span>L: {ver.pnl?.totalPayableL != null ? formatVND(ver.pnl.totalPayableL) : '—'}</span>
                       <strong className={ver.pnl?.profit >= 0 ? 'text-emerald-700' : 'text-red-700'}>
                         LN: {ver.pnl?.profit != null ? formatVND(ver.pnl.profit) : '—'}
                       </strong>
@@ -336,11 +331,10 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
         </div>
       </div>
 
-      {/* Dòng tiền hợp đồng */}
       {cash && (
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
           <h4 className="font-bold text-slate-900 text-base">Tổng quan Thực thu / Thực chi theo Hợp đồng</h4>
-          <div className="grid sm:grid-cols-3 gap-4 text-sm bg-purple-50/30 p-4 rounded-xl border border-purple-100">
+          <div className="grid sm:grid-cols-4 gap-4 text-sm bg-purple-50/30 p-4 rounded-xl border border-purple-100">
             <div>
               <span className="text-xs text-slate-500 block">Tổng giá trị hợp đồng đã ký</span>
               <strong className="text-slate-800 text-base">{formatVND(cash.totals?.gross || 0)}</strong>
@@ -352,6 +346,10 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
             <div>
               <span className="text-xs text-slate-500 block">Còn lại phải thanh toán</span>
               <strong className="text-amber-700 text-base">{formatVND(cash.totals?.remaining || 0)}</strong>
+            </div>
+            <div>
+              <span className="text-xs text-slate-500 block">Đã trả (HĐ Hủy/Nháp)</span>
+              <strong className="text-slate-600 text-base">{formatVND((cash.totals?.paidCancelled || 0) + (cash.totals?.paidDraft || 0))}</strong>
             </div>
           </div>
         </div>
@@ -369,7 +367,7 @@ export default function WorkspaceShell() {
   const [busy, setBusy] = useState(false);
 
   // Shell Menu & Top Navigation State
-  const [topTab, setTopTab] = useState<'projects' | 'partners' | 'admin'>('projects');
+  const [page, setPage] = useState<'projects' | 'proposal' | 'users' | 'legacy' | 'communities'>('projects');
   const [partnerSubTab, setPartnerSubTab] = useState<'community' | 'kol'>('community');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -381,6 +379,11 @@ export default function WorkspaceShell() {
   const [members, setMembers] = useState<any[]>([]);
   const [roles, setRoles] = useState('booking');
   const [proposalTarget, setProposalTarget] = useState<{ projectId: string; phaseId: string } | null>(null);
+
+  // Workspace Shared Context & Dirty State
+  const [activePhaseId, setActivePhaseId] = useState<string>('');
+  const [isDirty, setIsDirty] = useState<boolean>(false);
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
 
   // 5-Tab Project Workspace View
   const [projectView, setProjectView] = useState<'overview' | 'shortlist' | 'quotes' | 'contracts' | 'pnl'>('overview');
@@ -412,7 +415,7 @@ export default function WorkspaceShell() {
       setMembers([]);
       setProjects([]);
       setUsers([]);
-      setTopTab('projects');
+      setPage('projects');
     };
     window.addEventListener('workspace_session_expired', expired);
     return () => window.removeEventListener('workspace_session_expired', expired);
@@ -428,6 +431,19 @@ export default function WorkspaceShell() {
   useEffect(() => {
     if (user && !user.mustChangePassword) refresh().catch((e) => setError(e.message));
   }, [user]);
+
+  function handleNavigateWithGuard(navFn: () => void) {
+    if (isDirty) {
+      if (window.confirm('Bạn có thay đổi chưa lưu. Bạn có chắc muốn chuyển trang và bỏ qua thay đổi dở dang?')) {
+        setIsDirty(false);
+        navFn();
+      } else {
+        return;
+      }
+    } else {
+      navFn();
+    }
+  }
 
   async function run(work: () => Promise<void>) {
     setBusy(true);
@@ -511,7 +527,7 @@ export default function WorkspaceShell() {
       <div className="bg-white p-6 rounded-3xl border border-purple-100 max-w-md w-full shadow-lg space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold text-slate-900">Đổi mật khẩu</h2>
-          <button type="button" onClick={() => setShowPasswordModal(false)} className="text-slate-400 hover:text-slate-700">✕</button>
+          <button type="button" onClick={() => setShowPasswordModal(false)} className="text-slate-400 hover:text-slate-700 cursor-pointer">✕</button>
         </div>
         <p className="text-xs text-slate-500">Sau khi đổi mật khẩu, phiên làm việc hiện tại trên các thiết bị khác sẽ tự động đăng xuất.</p>
         <form
@@ -560,30 +576,48 @@ export default function WorkspaceShell() {
           {!user.mustChangePassword && (
             <nav className="flex items-center gap-1 bg-purple-50/60 p-1 rounded-2xl border border-purple-100/60">
               <button
-                onClick={() => setTopTab('projects')}
+                onClick={() => handleNavigateWithGuard(() => setPage('projects'))}
                 className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                  topTab === 'projects' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
+                  page === 'projects' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
                 }`}
               >
                 Dự án
               </button>
               <button
-                onClick={() => setTopTab('partners')}
+                onClick={() => handleNavigateWithGuard(() => { setProposalTarget(null); setPage('proposal'); })}
                 className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                  topTab === 'partners' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
+                  page === 'proposal' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
                 }`}
               >
-                Kho đối tác (KOL+Community)
+                Đề xuất KOL
+              </button>
+              <button
+                onClick={() => handleNavigateWithGuard(() => setPage('communities'))}
+                className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
+                  page === 'communities' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
+                }`}
+              >
+                Kho Community
               </button>
               {user.role === 'admin' && (
-                <button
-                  onClick={() => setTopTab('admin')}
-                  className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                    topTab === 'admin' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
-                  }`}
-                >
-                  Quản trị (Admin)
-                </button>
+                <>
+                  <button
+                    onClick={() => handleNavigateWithGuard(() => setPage('users'))}
+                    className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
+                      page === 'users' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
+                    }`}
+                  >
+                    Tài khoản
+                  </button>
+                  <button
+                    onClick={() => handleNavigateWithGuard(() => setPage('legacy'))}
+                    className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
+                      page === 'legacy' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
+                    }`}
+                  >
+                    KOL & Báo giá hiện có
+                  </button>
+                </>
               )}
             </nav>
           )}
@@ -654,42 +688,33 @@ export default function WorkspaceShell() {
             <p className="text-sm text-slate-500">Bạn cần đổi mật khẩu được cấp trước khi tiếp tục sử dụng hệ thống.</p>
             {passwordModal}
           </div>
-        ) : topTab === 'partners' ? (
-          <div className="bg-white rounded-3xl border border-purple-100 p-6 shadow-xs space-y-6">
-            <div className="flex items-center justify-between border-b border-purple-100 pb-4">
-              <div>
-                <h1 className="text-xl font-bold text-slate-900">Kho đối tác hệ thống</h1>
-                <p className="text-xs text-slate-500">Thư viện KOL cá nhân và Kho Community (Fanpage/Group) dùng chung toàn hệ thống.</p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setPartnerSubTab('community')}
-                  className={`px-4 py-2 text-xs font-bold rounded-xl cursor-pointer ${
-                    partnerSubTab === 'community' ? 'bg-[#7C3AED] text-white' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
-                  }`}
-                >
-                  Kho Community
-                </button>
-                {user.role === 'admin' && (
-                  <button
-                    onClick={() => setPartnerSubTab('kol')}
-                    className={`px-4 py-2 text-xs font-bold rounded-xl cursor-pointer ${
-                      partnerSubTab === 'kol' ? 'bg-[#7C3AED] text-white' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
-                    }`}
-                  >
-                    Kho KOL Legacy
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {partnerSubTab === 'community' ? (
-              <CommunityManager isAdmin={user.role === 'admin'} />
-            ) : (
-              user.role === 'admin' && <App />
-            )}
+        ) : page === 'proposal' ? (
+          <ProjectProposal
+            key={proposalTarget ? proposalTarget.projectId + ':' + proposalTarget.phaseId : 'free'}
+            initialProjectId={proposalTarget?.projectId}
+            initialPhaseId={proposalTarget?.phaseId}
+            onOpenProject={(pid) =>
+              run(async () => {
+                const pr = projects.find((x: any) => x.id === pid);
+                if (pr) {
+                  setSelected(pr);
+                  setMembers((await api('/projects/' + pid + '/members')).members);
+                  setProjectView('shortlist');
+                  setPage('projects');
+                }
+              })
+            }
+          />
+        ) : page === 'communities' ? (
+          <CommunityManager isAdmin={user.role === 'admin'} />
+        ) : page === 'legacy' && user.role === 'admin' ? (
+          <div className="space-y-4">
+            <p className="px-6 py-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl text-sm font-medium">
+              Dữ liệu KOL và SOW hiện có vẫn lưu trên trình duyệt này, chưa chia sẻ theo dự án. Chỉ Admin được mở module này trong giai đoạn chuyển đổi.
+            </p>
+            <App />
           </div>
-        ) : topTab === 'admin' && user.role === 'admin' ? (
+        ) : page === 'users' && user.role === 'admin' ? (
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-3xl border border-purple-100 shadow-xs space-y-4">
               <h1 className="text-2xl font-bold text-slate-900">Quản lý Tài khoản & Quyền hạn</h1>
@@ -815,12 +840,14 @@ export default function WorkspaceShell() {
                         : 'border-purple-100/80 bg-white hover:border-purple-200 hover:bg-purple-50/30'
                     }`}
                     onClick={() =>
-                      run(async () => {
-                        setMembers([]);
-                        setSelected(p);
-                        setProjectView('overview');
-                        setMembers((await api(`/projects/${p.id}/members`)).members);
-                      })
+                      handleNavigateWithGuard(() =>
+                        run(async () => {
+                          setMembers([]);
+                          setSelected(p);
+                          setProjectView('overview');
+                          setMembers((await api(`/projects/${p.id}/members`)).members);
+                        })
+                      )
                     }
                   >
                     <div className="flex items-center justify-between">
@@ -893,10 +920,10 @@ export default function WorkspaceShell() {
                                 <div key={m.id} className="py-2 flex items-center justify-between text-xs">
                                   <div>
                                     <strong className="block text-slate-800">{m.display_name}</strong>
-                                    <span className="text-[10px] text-slate-500">{m.roles?.join(', ')}</span>
+                                    <span className="text-[10px] text-slate-500">{m.email} · {m.roles?.join(', ')}</span>
                                   </div>
                                   <button
-                                    className="text-red-600 hover:underline"
+                                    className="text-red-600 hover:underline cursor-pointer"
                                     onClick={() =>
                                       run(async () => {
                                         await api(`/projects/${selected.id}/members/${m.id}/remove`, {});
@@ -920,7 +947,7 @@ export default function WorkspaceShell() {
                         className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                           projectView === 'overview' ? 'bg-[#7C3AED] text-white shadow-xs' : 'bg-purple-50/50 text-slate-700 hover:bg-purple-100/60'
                         }`}
-                        onClick={() => setProjectView('overview')}
+                        onClick={() => handleNavigateWithGuard(() => setProjectView('overview'))}
                       >
                         1. Tổng quan
                       </button>
@@ -928,7 +955,7 @@ export default function WorkspaceShell() {
                         className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                           projectView === 'shortlist' ? 'bg-[#7C3AED] text-white shadow-xs' : 'bg-purple-50/50 text-slate-700 hover:bg-purple-100/60'
                         }`}
-                        onClick={() => setProjectView('shortlist')}
+                        onClick={() => handleNavigateWithGuard(() => setProjectView('shortlist'))}
                       >
                         2. Đối tác & Phase
                       </button>
@@ -936,7 +963,7 @@ export default function WorkspaceShell() {
                         className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                           projectView === 'quotes' ? 'bg-[#7C3AED] text-white shadow-xs' : 'bg-purple-50/50 text-slate-700 hover:bg-purple-100/60'
                         }`}
-                        onClick={() => setProjectView('quotes')}
+                        onClick={() => handleNavigateWithGuard(() => setProjectView('quotes'))}
                       >
                         3. Phương án & Báo giá
                       </button>
@@ -944,7 +971,7 @@ export default function WorkspaceShell() {
                         className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                           projectView === 'contracts' ? 'bg-[#7C3AED] text-white shadow-xs' : 'bg-purple-50/50 text-slate-700 hover:bg-purple-100/60'
                         }`}
-                        onClick={() => setProjectView('contracts')}
+                        onClick={() => handleNavigateWithGuard(() => setProjectView('contracts'))}
                       >
                         4. Hợp đồng & Thanh toán
                       </button>
@@ -955,7 +982,7 @@ export default function WorkspaceShell() {
                           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             projectView === 'pnl' ? 'bg-[#7C3AED] text-white shadow-xs' : 'bg-purple-50/50 text-slate-700 hover:bg-purple-100/60'
                           }`}
-                          onClick={() => setProjectView('pnl')}
+                          onClick={() => handleNavigateWithGuard(() => setProjectView('pnl'))}
                         >
                           5. Tài chính & P&L (PM/Admin)
                         </button>
@@ -964,15 +991,19 @@ export default function WorkspaceShell() {
 
                     {/* Tab Views Content */}
                     {projectView === 'overview' && (
-                      <ProjectOverviewPanel project={selected} members={members} isAdmin={user.role === 'admin'} onSwitchTab={(tab) => setProjectView(tab)} />
+                      <ProjectOverviewPanel project={selected} members={members} isAdmin={user.role === 'admin'} onSwitchTab={(tab) => handleNavigateWithGuard(() => setProjectView(tab))} />
                     )}
                     {projectView === 'shortlist' && (
                       <ProjectShortlistPanel
                         key={selected.id}
                         projectId={selected.id}
-                        onOpenQuotes={() => setProjectView('quotes')}
+                        activePhaseIdProp={activePhaseId}
+                        onPhaseChange={setActivePhaseId}
+                        onDirtyChange={setIsDirty}
+                        onOpenQuotes={() => handleNavigateWithGuard(() => setProjectView('quotes'))}
                         onOpenProposal={(phaseId) => {
                           setProposalTarget({ projectId: selected.id, phaseId });
+                          setPage('proposal');
                         }}
                       />
                     )}
