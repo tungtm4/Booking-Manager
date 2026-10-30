@@ -223,3 +223,53 @@ test('A2 installments: % chỉ là cách nhập, chặn vượt giá trị, tr�
     assert.equal((await call(`/contracts/${np.id}/installments`,{name:'Theo tiền',amount:1000000},pm)).status,200);
   });
 });
+
+test('A2 fix (PM review): tiền gần giới hạn an toàn — validate cả đầu ra, tính BigInt không mất chính xác',()=>{
+  // NET rất lớn + suất gross-up 99,99%: thuế/GROSS vượt MAX_SAFE_INTEGER → null (trước
+  // đây chỉ validate đầu vào nên đầu ra tràn số vẫn lọt).
+  assert.equal(computeContractMoney({basis:'net',amount:9000000000000000,taxRate:99.99,taxMode:'trong_gia_gop'}),null);
+  assert.equal(computeContractMoney({basis:'net',amount:Number.MAX_SAFE_INTEGER,taxRate:99.99,taxMode:'trong_gia_gop'}),null);
+  assert.equal(computeContractMoney({basis:'net',amount:Number.MAX_SAFE_INTEGER,taxRate:99.99,taxMode:'tren_net'}),null);
+  // NET 9e15 suất 10% trong giá gộp: GROSS = 1e16 vượt giới hạn → null.
+  assert.equal(computeContractMoney({basis:'net',amount:9000000000000000,taxRate:10,taxMode:'trong_gia_gop'}),null);
+  // Ca lớn nhưng hợp lệ — kỳ vọng đã đối chiếu bằng phép tính BigInt độc lập:
+  assert.deepEqual(computeContractMoney({basis:'net',amount:8000000000000000,taxRate:10,taxMode:'trong_gia_gop'}),{net:8000000000000000,tax:888888888888889,gross:8888888888888889});
+  assert.deepEqual(computeContractMoney({basis:'gross',amount:8000000000000000,taxRate:8,taxMode:'tren_net'}),{net:7407407407407407,tax:592592592592593,gross:8000000000000000});
+  // % đợt thanh toán cùng chuẩn: 100% của MAX_SAFE ra đúng MAX_SAFE; 33,3333% của
+  // 53.763.441 = 17.921.129; % có quá 4 chữ số thập phân → null.
+  assert.equal(installmentAmountFromPercent(Number.MAX_SAFE_INTEGER,100),Number.MAX_SAFE_INTEGER);
+  assert.equal(installmentAmountFromPercent(53763441,33.3333),17921129);
+  assert.equal(installmentAmountFromPercent(53763441,33.33333),null);
+});
+
+test('A2 fix (PM review): hạ giá dưới tổng đợt/đã trả hoặc xoá giá khi có đợt → chặn, dữ liệu nguyên',async()=>{
+  await fixture(async({call,pidA,cookies})=>{
+    const {pm}=cookies;
+    // Nháp giá 100tr (không thuế) + đợt 80tr + đã trả thực tế 30tr.
+    const created=await call(`/projects/${pidA}/contracts`,{partnerType:'kol',partnerId:'partner-1',snapshot:snapFull,money:{basis:'net',amount:100000000,taxRate:0,taxMode:'khong_thue'}},pm);
+    assert.equal(created.status,200,JSON.stringify(created.body));
+    const c=created.body.contract;
+    const withInst=await call(`/contracts/${c.id}/installments`,{name:'Đợt 1',amount:80000000},pm);
+    assert.equal(withInst.status,200);
+    const inst=withInst.body.contract.installments[0];
+    const paid=await call(`/contracts/${c.id}/installments/${inst.id}`,{revision:inst.revision,paidAmount:30000000,paidDate:'2026-11-01'},pm);
+    assert.equal(paid.status,200);
+    const rev=paid.body.contract.revision;
+    // Hạ tổng phải chi xuống 50tr (dưới tổng đợt 80tr) → 422.
+    assert.equal((await call(`/contracts/${c.id}`,{revision:rev,money:{basis:'net',amount:50000000,taxRate:0,taxMode:'khong_thue'}},pm)).status,422);
+    // Hạ giá đồng thời chuyển sang Đã ký → vẫn 422 (không lách qua đường đổi trạng thái).
+    assert.equal((await call(`/contracts/${c.id}`,{revision:rev,money:{basis:'net',amount:50000000,taxRate:0,taxMode:'khong_thue'},status:'signed'},pm)).status,422);
+    // Xoá giá (money = null) khi đang có đợt → 422.
+    assert.equal((await call(`/contracts/${c.id}`,{revision:rev,money:null},pm)).status,422);
+    // Dữ liệu nguyên vẹn sau cả ba lần chặn: giá 100tr, vẫn Nháp, đợt và tiền đã trả nguyên.
+    const after=await call(`/contracts/${c.id}`,undefined,pm);
+    assert.equal(after.body.contract.money.gross,100000000);
+    assert.equal(after.body.contract.status,'draft');
+    assert.equal(after.body.contract.installments[0].amount,80000000);
+    assert.equal(after.body.contract.installments[0].paidAmount,30000000);
+    // Hạ xuống đúng bằng tổng đợt (80tr) → được; sửa ghi chú không kèm tiền → được.
+    const toEighty=await call(`/contracts/${c.id}`,{revision:after.body.contract.revision,money:{basis:'net',amount:80000000,taxRate:0,taxMode:'khong_thue'}},pm);
+    assert.equal(toEighty.status,200,JSON.stringify(toEighty.body));
+    assert.equal((await call(`/contracts/${c.id}`,{revision:toEighty.body.contract.revision,note:'chỉ sửa ghi chú'},pm)).status,200);
+  });
+});

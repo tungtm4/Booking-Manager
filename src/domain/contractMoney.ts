@@ -51,18 +51,39 @@ export function computeContractMoney(input: ContractMoneyInput): ContractMoney |
   if (taxMode === 'khong_thue' || taxRate === 0) {
     return { net: amount, tax: 0, gross: amount };
   }
+  // Tính trung gian bằng BigInt (suất thuế đổi sang phần trăm × 100 để giữ nguyên số
+  // nguyên): phép nhân/chia bằng số thực sẽ mất chính xác khi số tiền gần giới hạn an
+  // toàn, làm sai cả đồng ở phần làm tròn. Chỉ chuyển về Number sau khi đã kiểm tra
+  // cả ba đầu ra nằm trong vùng nguyên an toàn.
+  const amt = BigInt(amount);
+  const rateScaled = BigInt(Math.round(taxRate * 100)); // rate% = rateScaled/100 %
   if (basis === 'net') {
     const tax =
       taxMode === 'trong_gia_gop'
-        ? Math.round((amount * taxRate) / (100 - taxRate))
-        : Math.round((amount * taxRate) / 100);
-    return { net: amount, tax, gross: amount + tax };
+        ? divRound(amt * rateScaled, 10000n - rateScaled)
+        : divRound(amt * rateScaled, 10000n);
+    return moneyOut(amt, tax, amt + tax);
   }
   const net =
     taxMode === 'trong_gia_gop'
-      ? Math.round((amount * (100 - taxRate)) / 100)
-      : Math.round((amount * 100) / (100 + taxRate));
-  return { net, tax: amount - net, gross: amount };
+      ? divRound(amt * (10000n - rateScaled), 10000n)
+      : divRound(amt * 10000n, 10000n + rateScaled);
+  return moneyOut(net, amt - net, amt);
+}
+
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+// Chia BigInt có làm tròn tới số nguyên gần nhất (nửa làm tròn lên; mọi số đều không âm).
+function divRound(num: bigint, den: bigint): bigint {
+  const q = num / den;
+  const rem = num % den;
+  return rem * 2n >= den ? q + 1n : q;
+}
+// Đầu ra tiền chỉ hợp lệ khi CẢ BA số là số nguyên an toàn, không âm — đầu vào hợp lệ
+// chưa đủ: NET lớn với suất gross-up cao có thể đẩy thuế/GROSS vượt MAX_SAFE_INTEGER.
+function moneyOut(net: bigint, tax: bigint, gross: bigint): ContractMoney | null {
+  if (net < 0n || tax < 0n || gross < 0n) return null;
+  if (net > MAX_SAFE || tax > MAX_SAFE || gross > MAX_SAFE) return null;
+  return { net: Number(net), tax: Number(tax), gross: Number(gross) };
 }
 
 // Đợt thanh toán nhập theo %: % CHỈ là cách nhập — số tiền đồng suy ra tại đây là
@@ -71,7 +92,13 @@ export function computeContractMoney(input: ContractMoneyInput): ContractMoney |
 export function installmentAmountFromPercent(gross: number, percent: number): number | null {
   if (!isValidMoneyAmount(gross)) return null;
   if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent > 100) return null;
-  return Math.round((gross * percent) / 100);
+  // % cho phép tối đa 4 chữ số thập phân; tính bằng BigInt như tiền hợp đồng để số
+  // tiền lớn không mất chính xác, và kết quả phải là số nguyên an toàn.
+  const scaled = Math.round(percent * 10000);
+  if (Math.abs(percent * 10000 - scaled) > 1e-6) return null;
+  const amount = divRound(BigInt(gross) * BigInt(scaled), 1000000n);
+  if (amount < 0n || amount > MAX_SAFE) return null;
+  return Number(amount);
 }
 
 // % hiển thị của một đợt so với giá trị hợp đồng (suy ra từ số tiền đã lưu, 2 số lẻ).

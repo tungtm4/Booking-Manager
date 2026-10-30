@@ -262,6 +262,15 @@ export function installContracts(router:Router,db:DatabaseSync,projectAccess:(u:
       if(b.documentIds!==undefined)protectedChanged.push('giấy tờ đã ghim');
     }
     if(protectedChanged.length)return res.status(422).json({message:`Hợp đồng đã ký — không sửa được: ${protectedChanged.join(', ')}. Muốn thay đổi các thông tin này, hãy huỷ hợp đồng và tạo hợp đồng mới; lịch sử hợp đồng hiện tại được giữ nguyên.`});
+    // Giá mới phải "đỡ" được kế hoạch thanh toán đã lập (áp dụng cả khi payload đồng
+    // thời chuyển trạng thái sang Đã ký): không xoá giá khi đang có đợt thanh toán, và
+    // không hạ tổng phải chi xuống dưới tổng các đợt đã lập hay tổng đã trả thực tế.
+    const instAgg=db.prepare('SELECT COALESCE(SUM(amount),0) AS planned,COALESCE(SUM(paid_amount),0) AS paid,COUNT(*) AS n FROM contract_installments WHERE contract_id=?').get(row.id) as any;
+    if(instAgg.n>0){
+      if(moneyIn===null&&b.money!==undefined)return res.status(422).json({message:'Hợp đồng đang có đợt thanh toán — không xoá giá hợp đồng. Hãy xoá các đợt thanh toán trước, hoặc giữ nguyên giá.'});
+      if(computed&&computed.gross<instAgg.planned)return res.status(422).json({message:`Giá trị hợp đồng mới (tổng phải chi ${computed.gross}) nhỏ hơn tổng các đợt thanh toán đã lập (${instAgg.planned}). Hãy giảm số tiền các đợt trước khi hạ giá.`});
+      if(computed&&computed.gross<instAgg.paid)return res.status(422).json({message:`Giá trị hợp đồng mới (tổng phải chi ${computed.gross}) nhỏ hơn tổng số tiền đã trả thực tế (${instAgg.paid}). Không thể hạ giá xuống dưới số đã trả.`});
+    }
     const changedFields:string[]=[];
     const track=(name:string,changed:boolean)=>{if(changed)changedFields.push(name);};
     track('snapshot',JSON.stringify(snapshot)!==JSON.stringify(oldSnapshot));
