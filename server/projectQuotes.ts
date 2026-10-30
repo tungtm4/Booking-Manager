@@ -5,6 +5,8 @@ import {calculateProjectFinance, type Adjustment} from '../src/domain/projectFin
 import {readProjectBrief} from '../src/domain/projectBrief';
 import {buildAllocatedQuoteItems, suggestAllocations, type AllocatedLine} from '../src/domain/phaseQuote';
 import {PRICE_FORMAT_LABELS, type PriceFormatKey} from '../src/types/kol';
+import {computeContractMoney,isValidMoneyAmount} from '../src/domain/contractMoney';
+import {CONTRACT_STATUS_LABELS} from './contracts';
 
 export interface ProjectQuoteItem {
   id:string; creator:string; description:string; phase:string;
@@ -35,6 +37,23 @@ export interface ProjectQuoteItem {
   // Xác nhận giá đầu vào cho dòng nhập tay — CHỈ server ghi qua endpoint xác nhận,
   // client không tự đặt được (bản lưu luôn lấy từ dữ liệu server đã có).
   buyConfirmation?:{value:number; source:string; checkedBy:string; checkedByName:string; checkedAt:string};
+  // Nguồn chi phí đầu vào có thuế (Giai đoạn B đợt đầu) — trường do SERVER sở hữu:
+  // chỉ ghi qua endpoint nguồn chi phí chuyên dụng, bản lưu báo giá luôn khôi phục từ
+  // bản đã lưu. NET/thuế/GROSS do server tính lại bằng hàm thuần dùng chung với hợp
+  // đồng (contractMoney) — client không gửi số đã tính. Nguồn hợp đồng là PHÂN BỔ một
+  // phần giá trị hợp đồng cho dòng này, không phải toàn bộ hợp đồng.
+  costSource?:QuoteCostSource;
+}
+export interface QuoteCostSource {
+  kind:'estimate'|'profile'|'contract';
+  status:'du_kien'|'chot';
+  partnerType?:'kol'|'community'; partnerId?:string;
+  contractId?:string; contractNumber?:string; contractRevision?:number;
+  profileRevision?:number;
+  basis:'net'|'gross'; amount:number;
+  taxRate:number; taxMode:string;
+  net:number; tax:number; gross:number;
+  appliedBy:string; appliedByName:string; appliedAt:string;
 }
 export interface QuotePayload {
   client:string; campaign:string; items:ProjectQuoteItem[];
@@ -186,7 +205,7 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     const common={id:q.id,optionId:q.option_id,number:q.number,status:q.status,revision:q.revision,createdAt:q.created_at};
     if(manage)return {...common,...p,finance:finance(p)};
     // Allowlist: không gửi giá bán, fee, chiết khấu, thuế, tổng doanh thu hay P&L cho Booking.
-    return {...common,client:p.client,campaign:p.campaign,items:p.items.map(i=>({id:i.id,creator:i.creator,description:i.description,phase:i.phase,kind:i.kind,quantity:i.quantity,buyUnitPrice:i.buyUnitPrice,included:i.included,shortlistId:i.shortlistId,format:i.format,priceSnapshot:i.priceSnapshot,buyConfirmation:i.buyConfirmation,partnerType:i.partnerType,serviceId:i.serviceId,serviceName:i.serviceName,unit:i.unit,conditions:i.conditions,note:i.note,needsBuyConfirmation:i.needsBuyConfirmation,commentInfo:i.commentInfo,acceptedQty:i.acceptedQty}))};
+    return {...common,client:p.client,campaign:p.campaign,items:p.items.map(i=>({id:i.id,creator:i.creator,description:i.description,phase:i.phase,kind:i.kind,quantity:i.quantity,buyUnitPrice:i.buyUnitPrice,included:i.included,shortlistId:i.shortlistId,format:i.format,priceSnapshot:i.priceSnapshot,buyConfirmation:i.buyConfirmation,partnerType:i.partnerType,serviceId:i.serviceId,serviceName:i.serviceName,unit:i.unit,conditions:i.conditions,note:i.note,needsBuyConfirmation:i.needsBuyConfirmation,commentInfo:i.commentInfo,acceptedQty:i.acceptedQty,costSource:i.costSource}))};
   };
   router.post('/projects/:id/details',(req,res)=>{
     const u=res.locals.user;if(!access(u,req.params.id,true))return res.status(403).json({message:'Chỉ PM hoặc Admin hệ thống được cập nhật thông tin.'});
@@ -263,6 +282,16 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
           ...(old.partnerType?{partnerType:old.partnerType}:{}),
           ...(old.buyConfirmation&&old.buyUnitPrice===i.buyUnitPrice?{buyConfirmation:old.buyConfirmation}:{})};
       });
+      // Nguồn chi phí là trường server sở hữu — khôi phục từ bản đã lưu như các trường
+      // sở hữu khác. Nguồn ước tính/hồ sơ được suy từ tổng giá của dòng nên mất hiệu
+      // lực khi số lượng hoặc giá đầu vào thay đổi; nguồn hợp đồng là khoản phân bổ
+      // độc lập với đơn giá/số lượng nên giữ nguyên.
+      p.items=p.items.map(i=>{
+        const old=originalItems.find(o=>o.id===i.id);
+        if(!old?.costSource)return i;
+        if(old.costSource.kind!=='contract'&&(old.quantity!==i.quantity||old.buyUnitPrice!==i.buyUnitPrice))return i;
+        return {...i,costSource:old.costSource};
+      });
     }else{
       if(Object.keys(req.body).some(k=>!['revision','buyPrices'].includes(k))||!Array.isArray(req.body.buyPrices)||req.body.buyPrices.length>500)return res.status(403).json({message:'Booking chỉ được cập nhật giá đầu vào.'});
       const updates=req.body.buyPrices;
@@ -270,7 +299,7 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
       if(updates.some((x:any)=>{const i=p.items.find(i=>i.id===x.id)!;return i.shortlistId&&i.buyUnitPrice!==x.buyUnitPrice;}))return res.status(403).json({message:'Giá KOL đã chụp vào phương án không được sửa tại đây. Cập nhật giá tại danh sách chung rồi đề nghị PM lập phiên bản mới.'});
       // null là xóa giá về trạng thái chờ xác nhận, không phải giá miễn phí.
       // Đổi giá đầu vào của dòng KOL nhập tay làm mất xác nhận đã ghi trước đó.
-      for(const update of updates){const it=p.items.find(i=>i.id===update.id)!;if(it.buyUnitPrice!==update.buyUnitPrice&&it.buyConfirmation)delete it.buyConfirmation;it.buyUnitPrice=update.buyUnitPrice;}
+      for(const update of updates){const it=p.items.find(i=>i.id===update.id)!;if(it.buyUnitPrice!==update.buyUnitPrice){if(it.buyConfirmation)delete it.buyConfirmation;if(it.costSource&&it.costSource.kind!=='contract')delete it.costSource;}it.buyUnitPrice=update.buyUnitPrice;}
     }
     try{finance(p);}catch{return res.status(400).json({message:'Chiết khấu hoặc tổng tiền vượt phạm vi hợp lệ.'});}
     const result=db.prepare('UPDATE project_quote_versions SET payload_json=?,revision=revision+1,status=\'draft\' WHERE id=? AND revision=?').run(JSON.stringify(p),q.id,q.revision);
@@ -455,6 +484,136 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     }catch{db.exec('ROLLBACK');return res.status(400).json({message:'Không thể tạo phương án từ phân bổ.'});}
     res.json({optionId:oid,quoteId:qid,itemCount:items.length,missingPrice:built.missingPrice,unconfirmedPrice:built.unconfirmedPrice,reconciliation});
   });
+  // ===== Giai đoạn B (đợt đầu): NGUỒN CHI PHÍ ĐẦU VÀO của dòng KOL/Community =====
+  // Ba nguồn: (1) 'estimate' — Booking tự xác nhận NET/GROSS + thuế (khi chưa có hồ sơ
+  // hoặc giá cũ chưa rõ bản chất; KHÔNG mặc định là NET, KHÔNG mặc định "không thuế");
+  // (2) 'profile' — ước tính theo hồ sơ ký kết chung trong kho (A1), trạng thái Dự
+  // kiến, ghi rõ "Chưa chốt hợp đồng"; (3) 'contract' — Booking CHỦ ĐỘNG phân bổ một
+  // PHẦN giá trị hợp đồng (A2) của đúng đối tác trong đúng dự án vào dòng, trạng thái
+  // Đã chốt. Hợp đồng là tổng của đối tác trong dự án — TUYỆT ĐỐI không tự nhân toàn
+  // bộ giá trị hợp đồng cho từng dòng/phương án; tổng phân bổ trong MỘT phương án
+  // không được vượt giá trị hợp đồng; các phương án song song là lựa chọn thay thế,
+  // không cộng dồn. NET/thuế/GROSS luôn do server tính lại bằng contractMoney dùng
+  // chung; số đã tính của client không bao giờ được tin. Nguồn là SNAPSHOT: hồ sơ
+  // hoặc hợp đồng thay đổi sau đó không âm thầm đổi dòng đã lưu. Đợt này CHƯA đổi
+  // cách tính P&L hiện tại và chưa mở thuế cho chi phí trực tiếp khác (điểm nối C).
+  const FORM_TAX_PRESETS:Record<string,{taxRate:number;taxMode:string}>={ca_nhan:{taxRate:10,taxMode:'trong_gia_gop'},hkd:{taxRate:7,taxMode:'trong_gia_gop'},cong_ty:{taxRate:8,taxMode:'tren_net'}};
+  const resolveLinePartner=(pid:string,item:ProjectQuoteItem)=>{
+    if(!item.shortlistId)return null;
+    const row=db.prepare('SELECT * FROM project_shortlist WHERE id=? AND project_id=?').get(item.shortlistId,pid) as any;
+    if(!row||!row.catalog_id)return null;
+    let name='';try{name=JSON.parse(row.profile_json).ten??'';}catch{}
+    return {type:((row.partner_type??'kol') as 'kol'|'community'),id:row.catalog_id as string,name};
+  };
+  const profileTaxOf=(profile:any)=>{
+    if(!profile)return null;
+    if(typeof profile.customTaxRate==='number'&&profile.customTaxMode)return {taxRate:profile.customTaxRate,taxMode:profile.customTaxMode as string,taxSource:'custom' as const};
+    const preset=profile.signingForm?FORM_TAX_PRESETS[profile.signingForm]:undefined;
+    return preset?{taxRate:preset.taxRate,taxMode:preset.taxMode,taxSource:'form' as const}:null;
+  };
+  const allocatedGrossOf=(payload:QuotePayload,contractId:string,exceptItemId?:string)=>payload.items.reduce((sum,i)=>sum+(i.costSource&&i.costSource.kind==='contract'&&i.costSource.contractId===contractId&&i.id!==exceptItemId?i.costSource.gross:0),0);
+
+  router.get('/projects/:id/quotes/:quoteId/cost-options',(req,res)=>{
+    const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền xem dự án này.'});
+    const q=quote(req.params.quoteId,pid);if(!q)return res.status(404).json({message:'Không tìm thấy báo giá trong dự án.'});
+    const payload=JSON.parse(q.payload_json) as QuotePayload;
+    const item=payload.items.find(i=>i.id===req.query.itemId);
+    if(!item)return res.status(404).json({message:'Không tìm thấy dòng trong báo giá.'});
+    const orgId=(project(pid) as any).organization_id as string;
+    const partner=resolveLinePartner(pid,item);
+    let profileOut:any=null;
+    if(partner){
+      const prow=db.prepare('SELECT * FROM partner_signing_profiles WHERE organization_id=? AND partner_type=? AND partner_id=?').get(orgId,partner.type,partner.id) as any;
+      if(prow){const prof=JSON.parse(prow.payload_json);const ptax=profileTaxOf(prof);
+        profileOut={legalName:prof.legalName??'',signingForm:prof.signingForm??'',revision:prow.revision,taxRate:ptax?.taxRate??null,taxMode:ptax?.taxMode??null,taxSource:ptax?.taxSource??null};}
+    }
+    const contracts=partner?(db.prepare('SELECT * FROM contracts WHERE organization_id=? AND project_id=? AND partner_type=? AND partner_id=? ORDER BY rowid DESC').all(orgId,pid,partner.type,partner.id) as any[]).map(c=>{const allocated=allocatedGrossOf(payload,c.id);return {
+      id:c.id,number:c.contract_number,name:c.contract_name,status:c.status,statusLabel:CONTRACT_STATUS_LABELS[c.status]??c.status,revision:c.revision,
+      taxRate:c.tax_rate,taxMode:c.tax_mode,net:c.net_amount,tax:c.tax_amount,gross:c.gross_amount,
+      applicable:(c.status==='signed'||c.status==='completed')&&c.gross_amount!==null,
+      allocatedInQuote:allocated,remaining:c.gross_amount===null?null:c.gross_amount-allocated,
+    };}):[];
+    // Chỉ thông tin ĐẦU VÀO: không kèm giá bán/doanh thu/P&L trong bất kỳ trường hợp nào.
+    res.json({itemId:item.id,partner,lineBuyTotal:item.buyUnitPrice===null?null:item.buyUnitPrice*item.quantity,current:item.costSource??null,profile:profileOut,contracts});
+  });
+
+  router.post('/projects/:id/quotes/:quoteId/cost-source',(req,res)=>{
+    const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền thao tác trên dự án này.'});
+    const q=quote(req.params.quoteId,pid);if(!q)return res.status(404).json({message:'Không tìm thấy báo giá trong dự án.'});
+    if(!['draft','changes_requested'].includes(q.status))return res.status(409).json({message:'Phiên bản đã gửi duyệt hoặc đã duyệt không sửa được nguồn chi phí — hãy tạo phiên bản mới trong báo giá hiện có (bản đã duyệt giữ nguyên).'});
+    if(!Number.isSafeInteger(req.body?.revision)||req.body.revision!==q.revision)return res.status(409).json({message:'Báo giá đã thay đổi. Tải lại trước khi áp dụng nguồn chi phí.'});
+    const payload=JSON.parse(q.payload_json) as QuotePayload;
+    const item=payload.items.find(i=>i.id===req.body?.itemId);
+    if(!item)return res.status(404).json({message:'Không tìm thấy dòng trong báo giá.'});
+    if(!['kol','community'].includes(item.kind))return res.status(400).json({message:'Nguồn chi phí theo đối tác chỉ áp dụng cho dòng KOL và Community.'});
+    const orgId=(project(pid) as any).organization_id as string;
+    const partner=resolveLinePartner(pid,item);
+    const now=new Date().toISOString();
+    const actor={appliedBy:u.id,appliedByName:typeof u.display_name==='string'?u.display_name:(typeof u.name==='string'?u.name:''),appliedAt:now};
+    const kind=req.body?.kind;
+    let costSource:QuoteCostSource;
+    if(kind==='contract'){
+      if(Object.keys(req.body).some(k=>!['revision','itemId','kind','contractId','basis','amount'].includes(k)))return res.status(400).json({message:'Thông tin lấy chi phí từ hợp đồng không hợp lệ.'});
+      if(!partner)return res.status(400).json({message:'Dòng này chưa gắn đối tác trong kho nên không lấy được chi phí từ hợp đồng. Hãy đưa đối tác vào danh sách của dự án trước.'});
+      const c=db.prepare('SELECT * FROM contracts WHERE id=? AND organization_id=?').get(String(req.body.contractId??''),orgId) as any;
+      if(!c||c.project_id!==pid)return res.status(400).json({message:'Hợp đồng không thuộc dự án này.'});
+      if(c.partner_type!==partner.type||c.partner_id!==partner.id)return res.status(400).json({message:'Hợp đồng thuộc về đối tác khác — không áp dụng được cho dòng này.'});
+      if(c.status!=='signed'&&c.status!=='completed')return res.status(400).json({message:`Hợp đồng đang ở trạng thái "${CONTRACT_STATUS_LABELS[c.status]??c.status}" — chỉ hợp đồng Đã ký hoặc Hoàn tất mới dùng làm nguồn chi phí chốt.`});
+      if(c.gross_amount===null||!c.tax_mode)return res.status(400).json({message:'Hợp đồng chưa có giá trị và cách tính thuế rõ ràng nên chưa dùng làm nguồn chi phí được.'});
+      const basis=req.body.basis;
+      if((basis!=='net'&&basis!=='gross')||!isValidMoneyAmount(req.body.amount))return res.status(400).json({message:'Nhập số tiền phân bổ cho dòng này và chọn số tiền đó là NET hay GROSS. Hệ thống không tự lấy toàn bộ giá trị hợp đồng cho một dòng và không tự chia đều.'});
+      const computed=computeContractMoney({basis,amount:req.body.amount,taxRate:c.tax_rate,taxMode:c.tax_mode});
+      if(!computed)return res.status(400).json({message:'Không tính được chi phí từ số phân bổ và thông số thuế của hợp đồng.'});
+      const others=allocatedGrossOf(payload,c.id,item.id);
+      if(others+computed.gross>c.gross_amount)return res.status(400).json({message:`Phân bổ vượt giá trị hợp đồng: đã phân bổ ${others.toLocaleString('vi-VN')} + dòng này ${computed.gross.toLocaleString('vi-VN')} > tổng phải chi của hợp đồng ${c.gross_amount.toLocaleString('vi-VN')}. Hãy giảm số phân bổ cho dòng này.`});
+      costSource={kind:'contract',status:'chot',partnerType:partner.type,partnerId:partner.id,contractId:c.id,contractNumber:c.contract_number,contractRevision:c.revision,basis,amount:req.body.amount,taxRate:c.tax_rate,taxMode:c.tax_mode,net:computed.net,tax:computed.tax,gross:computed.gross,...actor};
+    }else if(kind==='profile'){
+      if(Object.keys(req.body).some(k=>!['revision','itemId','kind','basis','amount'].includes(k)))return res.status(400).json({message:'Thông tin ước tính từ hồ sơ không hợp lệ.'});
+      if(!partner)return res.status(400).json({message:'Dòng này chưa gắn đối tác trong kho nên chưa có hồ sơ ký kết để ước tính.'});
+      const prow=db.prepare('SELECT * FROM partner_signing_profiles WHERE organization_id=? AND partner_type=? AND partner_id=?').get(orgId,partner.type,partner.id) as any;
+      if(!prow)return res.status(400).json({message:'Đối tác chưa có hồ sơ ký kết trong kho — bổ sung hồ sơ, hoặc dùng nguồn Tự xác nhận.'});
+      const ptax=profileTaxOf(JSON.parse(prow.payload_json));
+      if(!ptax)return res.status(400).json({message:'Hồ sơ ký kết chưa đủ dữ liệu thuế: cần hình thức ký hoặc suất thuế riêng kèm cách tính. Bổ sung hồ sơ, hoặc dùng nguồn Tự xác nhận với thông số bạn nhập.'});
+      const basis=req.body.basis;
+      if(basis!=='net'&&basis!=='gross')return res.status(400).json({message:'Cần xác nhận số tiền ước tính là NET hay GROSS — giá cũ chưa rõ bản chất nên hệ thống không mặc định là NET.'});
+      const amount=req.body.amount===undefined?(item.buyUnitPrice===null?null:item.buyUnitPrice*item.quantity):req.body.amount;
+      if(!isValidMoneyAmount(amount))return res.status(400).json({message:'Chưa có số tiền để ước tính: dòng chưa có giá đầu vào và chưa nhập số tiền trực tiếp.'});
+      const computed=computeContractMoney({basis,amount,taxRate:ptax.taxRate,taxMode:ptax.taxMode as any});
+      if(!computed)return res.status(400).json({message:'Không tính được chi phí ước tính từ hồ sơ.'});
+      costSource={kind:'profile',status:'du_kien',partnerType:partner.type,partnerId:partner.id,profileRevision:prow.revision,basis,amount,taxRate:ptax.taxRate,taxMode:ptax.taxMode,net:computed.net,tax:computed.tax,gross:computed.gross,...actor};
+    }else if(kind==='estimate'){
+      if(Object.keys(req.body).some(k=>!['revision','itemId','kind','basis','amount','taxRate','taxMode'].includes(k)))return res.status(400).json({message:'Thông tin tự xác nhận chi phí không hợp lệ.'});
+      const basis=req.body.basis;
+      if(basis!=='net'&&basis!=='gross')return res.status(400).json({message:'Cần xác nhận số tiền là NET hay GROSS — hệ thống không mặc định giá cũ là NET và không mặc định không thuế.'});
+      const computed=computeContractMoney({basis,amount:req.body.amount,taxRate:req.body.taxRate,taxMode:req.body.taxMode});
+      if(!computed)return res.status(400).json({message:'Số tiền, suất thuế hoặc cách tính chưa hợp lệ (số nguyên không âm; suất từ 0% đến dưới 100% kèm cách tính rõ ràng).'});
+      costSource={kind:'estimate',status:'du_kien',...(partner?{partnerType:partner.type,partnerId:partner.id}:{}),basis,amount:req.body.amount,taxRate:req.body.taxRate,taxMode:req.body.taxMode,net:computed.net,tax:computed.tax,gross:computed.gross,...actor};
+    }else return res.status(400).json({message:'Nguồn chi phí không hợp lệ.'});
+    const previous=item.costSource??null;
+    item.costSource=costSource;
+    const result=db.prepare('UPDATE project_quote_versions SET payload_json=?,revision=revision+1 WHERE id=? AND revision=?').run(JSON.stringify(payload),q.id,q.revision);
+    if(!result.changes)return res.status(409).json({message:'Báo giá đã thay đổi. Vui lòng tải lại.'});
+    audit(u.id,'apply_quote_cost_source',q.id);
+    res.json({quote:serialized(quote(q.id,pid),access(u,pid,true)),previous,costSource});
+  });
+
+  router.post('/projects/:id/quotes/:quoteId/cost-source/clear',(req,res)=>{
+    const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền thao tác trên dự án này.'});
+    const q=quote(req.params.quoteId,pid);if(!q)return res.status(404).json({message:'Không tìm thấy báo giá trong dự án.'});
+    if(!['draft','changes_requested'].includes(q.status))return res.status(409).json({message:'Phiên bản đã gửi duyệt hoặc đã duyệt không sửa được nguồn chi phí.'});
+    if(Object.keys(req.body??{}).some(k=>!['revision','itemId'].includes(k)))return res.status(400).json({message:'Thông tin xoá nguồn chi phí không hợp lệ.'});
+    if(!Number.isSafeInteger(req.body?.revision)||req.body.revision!==q.revision)return res.status(409).json({message:'Báo giá đã thay đổi. Tải lại trước khi thao tác.'});
+    const payload=JSON.parse(q.payload_json) as QuotePayload;
+    const item=payload.items.find(i=>i.id===req.body?.itemId);
+    if(!item)return res.status(404).json({message:'Không tìm thấy dòng trong báo giá.'});
+    const previous=item.costSource??null;
+    delete item.costSource;
+    const result=db.prepare('UPDATE project_quote_versions SET payload_json=?,revision=revision+1 WHERE id=? AND revision=?').run(JSON.stringify(payload),q.id,q.revision);
+    if(!result.changes)return res.status(409).json({message:'Báo giá đã thay đổi. Vui lòng tải lại.'});
+    audit(u.id,'clear_quote_cost_source',q.id);
+    res.json({quote:serialized(quote(q.id,pid),access(u,pid,true)),previous});
+  });
+
   router.get('/projects/:id/quotes/:quoteId/customer',(req,res)=>{
     const u=res.locals.user;const pid=req.params.id;
     if(!access(u,pid,true))return res.status(403).json({message:'Booking không được xem bản giá bán.'});
