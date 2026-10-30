@@ -243,11 +243,39 @@ export function formFromPhase(ph: any): FormValues {
  *  AI-2 đọc brief của phase → tự động hiển thị kết quả theo TỪNG LOẠI đối tác:
  *  Creator/KOL từ thư viện KOL và Community từ kho Community.
  *  Người dùng có thể chỉnh sửa brief mở rộng và lưu trực tiếp vào phase. */
-export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProject }: { initialProjectId?: string; initialPhaseId?: string; onOpenProject?: (projectId: string) => void }) {
-  const [projects, setProjects] = useState<any[]>([]), [projectId, setProjectId] = useState(initialProjectId ?? '');
-  const [phases, setPhases] = useState<any[]>([]), [phaseId, setPhaseId] = useState(initialPhaseId ?? '');
+export function ProjectProposal({
+  initialProjectId,
+  initialPhaseId,
+  projectId: propProjectId,
+  phaseId: propPhaseId,
+  embedded = false,
+  onAdded,
+  onOpenProject,
+}: {
+  initialProjectId?: string;
+  initialPhaseId?: string;
+  projectId?: string;
+  phaseId?: string;
+  embedded?: boolean;
+  onAdded?: () => void;
+  onOpenProject?: (projectId: string) => void;
+}) {
+  const [projects, setProjects] = useState<any[]>([]), [projectId, setProjectId] = useState(propProjectId ?? initialProjectId ?? '');
+  const [phases, setPhases] = useState<any[]>([]), [phaseId, setPhaseId] = useState(propPhaseId ?? initialPhaseId ?? '');
   const [pool, setPool] = useState<any[]>([]);
   const [commPool, setCommPool] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (propProjectId && propProjectId !== projectId) {
+      setProjectId(propProjectId);
+    }
+  }, [propProjectId]);
+
+  useEffect(() => {
+    if (propPhaseId && propPhaseId !== phaseId) {
+      setPhaseId(propPhaseId);
+    }
+  }, [propPhaseId]);
 
   // Các trường form tiêu chuẩn & brief mở rộng
   const [briefText, setBriefText] = useState('');
@@ -726,6 +754,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
       setSelectedIds([]);
       setCommSelected([]);
       resetSelectionAnchors();
+      onAdded?.();
     });
   }
 
@@ -749,16 +778,19 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Đề xuất đối tác cho dự án</h1>
-        <p className="text-slate-500 text-sm mt-1">
-          AI đọc brief của phase và tự động tìm kiếm theo từng loại đối tác — Creator/KOL từ thư viện KOL, Community từ kho Community — rồi add thẳng vào phase của dự án. Giá trong kho chỉ là giá tham khảo — Booking kiểm tra và xác nhận lại trong dự án.
-        </p>
-      </div>
+      {!embedded && !propProjectId && (
+        <div>
+          <h1 className="text-2xl font-bold">Đề xuất đối tác cho dự án</h1>
+          <p className="text-slate-500 text-sm mt-1">
+            AI đọc brief của phase và tự động tìm kiếm theo từng loại đối tác — Creator/KOL từ thư viện KOL, Community từ kho Community — rồi add thẳng vào phase của dự án. Giá trong kho chỉ là giá tham khảo — Booking kiểm tra và xác nhận lại trong dự án.
+          </p>
+        </div>
+      )}
       {error && <p role="alert" className="p-3 bg-red-50 text-red-700 rounded-lg">{error}</p>}
       {notice && <p role="status" className="p-3 bg-emerald-50 text-emerald-800 rounded-lg">{notice}</p>}
 
-      <section className="bg-white border rounded-2xl p-5 space-y-3">
+      {!embedded && !propProjectId && (
+        <section className="bg-white border rounded-2xl p-5 space-y-3">
         <h2 className="font-semibold">1. Chọn dự án & phase đích</h2>
         <div className="grid sm:grid-cols-2 gap-3">
           <label className="text-sm">
@@ -837,17 +869,31 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
           </button>
         )}
       </section>
+      )}
 
       <section className="bg-white border rounded-2xl p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-semibold">2. Brief & tiêu chí của phase</h2>
-          {formDirty() && (
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
-              Có chỉnh sửa chưa lưu
+          <h2 className="font-semibold">
+            {embedded ? `Tiêu chí brief của phase (Chỉ đọc)` : '2. Brief & tiêu chí của phase'}
+          </h2>
+          {embedded ? (
+            <span className="text-xs text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full font-medium">
+              Chỉ đọc từ phase đang chọn
             </span>
+          ) : (
+            formDirty() && (
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                Có chỉnh sửa chưa lưu
+              </span>
+            )
           )}
         </div>
-        {hasSavedBrief && (
+        {embedded && (
+          <div className="rounded-lg bg-purple-50/70 border border-purple-200/60 px-3 py-2 text-xs text-purple-800">
+            Tiêu chí được nạp từ brief của phase (sửa tại mục Các Phase hoặc tab Tổng quan). Đề xuất chỉ đọc brief để xếp hạng đối tác phù hợp.
+          </div>
+        )}
+        {hasSavedBrief && !embedded && (
           <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800">
             Brief của phase đã được lưu. Bạn có thể tìm đối tác ngay hoặc chỉnh sửa tiêu chí bên dưới.
           </div>
@@ -858,25 +904,28 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
           rows={4}
           maxLength={10000}
           value={briefText}
+          readOnly={embedded}
           disabled={parsing}
           onChange={e => setBriefText(e.target.value)}
           placeholder="Brief của phase (tự nạp khi chọn phase, có thể sửa)…"
         />
-        <div className="flex gap-2 flex-wrap items-center">
-          <button type="button" className={button} disabled={parsing || !briefText.trim()} onClick={parseBrief}>
-            {parsing ? 'Đang phân tích…' : (hasSavedBrief ? 'Phân tích lại bằng AI' : 'Phân tích brief bằng AI')}
-          </button>
-          {parsing && (
-            <button
-              type="button"
-              className="rounded-lg border border-red-300 text-red-700 bg-red-50 hover:bg-red-100 px-3 py-2 text-sm font-semibold cursor-pointer"
-              onClick={userCancelParse}
-            >
-              Hủy phân tích
+        {!embedded && (
+          <div className="flex gap-2 flex-wrap items-center">
+            <button type="button" className={button} disabled={parsing || !briefText.trim()} onClick={parseBrief}>
+              {parsing ? 'Đang phân tích…' : (hasSavedBrief ? 'Phân tích lại bằng AI' : 'Phân tích brief bằng AI')}
             </button>
-          )}
-          {parseMsg && <span className="text-sm text-slate-600">{parseMsg}</span>}
-        </div>
+            {parsing && (
+              <button
+                type="button"
+                className="rounded-lg border border-red-300 text-red-700 bg-red-50 hover:bg-red-100 px-3 py-2 text-sm font-semibold cursor-pointer"
+                onClick={userCancelParse}
+              >
+                Hủy phân tích
+              </button>
+            )}
+            {parseMsg && <span className="text-sm text-slate-600">{parseMsg}</span>}
+          </div>
+        )}
 
         {/* Cụm trường Thông tin brief mở rộng */}
         <div className="rounded-xl border border-sky-100 bg-sky-50/40 p-4 space-y-3">
@@ -1222,7 +1271,7 @@ export function ProjectProposal({ initialProjectId, initialPhaseId, onOpenProjec
           >
             Tìm đối tác phù hợp
           </button>
-          {phase && (
+          {!embedded && phase && (
             <button
               type="button"
               className="rounded-lg border border-indigo-600 text-indigo-700 bg-white hover:bg-indigo-50 px-3 py-2 text-sm font-semibold cursor-pointer disabled:opacity-50"

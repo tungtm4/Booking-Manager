@@ -29,7 +29,7 @@ export function ProjectKolCard({
   selected: boolean;
   disabled: boolean;
   selectionLabel: string;
-  onSelect?: () => void;
+  onSelect?: (e?: any) => void;
   badge?: string;
   renderPriceEditor?: (format: PriceFormatKey) => React.ReactNode;
 }) {
@@ -72,7 +72,8 @@ export function ProjectKolCard({
               aria-label={selectionLabel + ' ' + profile.ten}
               checked={selected}
               disabled={disabled}
-              onChange={onSelect}
+              onClick={(e) => onSelect(e)}
+              onChange={() => {}}
               className="w-4 h-4 accent-indigo-600 text-indigo-600 rounded border-slate-300 shrink-0 cursor-pointer disabled:cursor-not-allowed"
             />
           )}

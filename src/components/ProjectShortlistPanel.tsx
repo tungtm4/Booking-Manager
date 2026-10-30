@@ -12,6 +12,8 @@ import { assessProjectKol, BRIEF_PLATFORMS, normalizeBriefPlatforms } from '../d
 import { assessCommunity, briefKpiOf, communityScaleLabel, pillarPostCounts } from '../domain/community';
 import { COMMUNITY_KIND_LABELS, COMMUNITY_METRIC_LABELS } from '../types/community';
 import { formatVND } from '../utils/formatters';
+import { toggleRangeSelection } from '../utils/rangeSelection';
+import { ProjectProposal } from './ProjectProposal';
 
 const formats = Object.entries(PRICE_FORMAT_LABELS);
 const field = 'w-full rounded-lg border border-slate-300 px-3 py-2 bg-white';
@@ -135,7 +137,7 @@ function PaginationBar({
 // Trường brief mở rộng dùng chung cho brief dự án và brief phase: loại đối tác,
 // KPI mục tiêu (topics/comments/buzz), pillar nội dung và dịch vụ nói chung.
 // Brief không nói rõ thì để trống (chưa xác định) — không tự bịa số.
-function BriefExtrasFields({ brief, change, prefix }: { brief: any; change: (k: string, v: any) => void; prefix: string }) {
+export function BriefExtrasFields({ brief, change, prefix }: { brief: any; change: (k: string, v: any) => void; prefix: string }) {
   const kpi = briefKpiOf(brief);
   const pillars: any[] = brief.pillars ?? [];
   const services: any[] = brief.services ?? [];
@@ -205,7 +207,7 @@ function BriefExtrasFields({ brief, change, prefix }: { brief: any; change: (k: 
 }
 
 // Thẻ ứng viên Community (từ kho Community) — hồ sơ + bảng giá dịch vụ riêng + lý do phù hợp.
-function CommunityCandidateCard({ profile, brief, selected, disabled, onSelect, badge }: { profile: any; brief: any; selected?: boolean; disabled?: boolean; onSelect?: () => void; badge?: string }) {
+function CommunityCandidateCard({ profile, brief, selected, disabled, onSelect, badge }: { profile: any; brief: any; selected?: boolean; disabled?: boolean; onSelect?: (e?: any) => void; badge?: string }) {
   const assessment = assessCommunity(profile, brief);
   const requiredServices: string[] = (brief.services ?? []).map((s: any) => s.name);
   return (
@@ -253,7 +255,7 @@ function CommunityCandidateCard({ profile, brief, selected, disabled, onSelect, 
       )}
       {onSelect && (
         <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-          <input type="checkbox" checked={Boolean(selected)} disabled={disabled} onChange={onSelect} />
+          <input type="checkbox" checked={Boolean(selected)} disabled={disabled} onClick={(e) => onSelect(e)} onChange={() => {}} />
           Giữ Community vào danh sách sơ bộ
         </label>
       )}
@@ -304,9 +306,10 @@ function CommunityShortlistRow({ row, brief, busy, quoteId, onSavePrice, onToOpt
   );
 }
 
-export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal, activePhaseIdProp, onPhaseChange, onDirtyChange }: {
+export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview, onOpenProposal, activePhaseIdProp, onPhaseChange, onDirtyChange }: {
   projectId: string;
   onOpenQuotes: () => void;
+  onOpenOverview?: () => void;
   onOpenProposal?: (phaseId: string) => void;
   activePhaseIdProp?: string;
   onPhaseChange?: (phaseId: string) => void;
@@ -315,6 +318,12 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal,
   const [data, setData] = useState<any>(null), [brief, setBrief] = useState<any>(null), [options, setOptions] = useState<any[]>([]);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [dirty, setDirty] = useState(false);
   const [catalogIds, setCatalogIds] = useState<string[]>([]), [selected, setSelected] = useState<string[]>([]), [quoteId, setQuoteId] = useState(''), [format, setFormat] = useState('video'), [quantity, setQuantity] = useState(1);
+
+  // UX-2: searchMode ('proposal' = Đề xuất nhúng, 'catalog' = Bộ lọc kho)
+  const [searchMode, setSearchMode] = useState<'proposal' | 'catalog'>('proposal');
+  const matchAnchorRef = useRef<string | null>(null);
+  const commMatchAnchorRef = useRef<string | null>(null);
+  const shortlistAnchorRef = useRef<string | null>(null);
 
   // Đợt 9: phase của dự án
   const [phases, setPhases] = useState<any[]>([]), [activePhaseId, setActivePhaseIdState] = useState(activePhaseIdProp || ''), [pool, setPool] = useState<any[]>([]);
@@ -365,12 +374,39 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal,
 
   const base = `/projects/${projectId}`;
 
-  const blankPhaseBrief = () => ({ text: '', category: '', keyword: '', platform: '', platforms: [] as string[], minFollowers: 0, targetCount: null, budget: null, deliverableScope: 'per_kol', deliverables: [], partnerType: null, kpiTopics: null, kpiComments: null, kpiBuzz: null, pillars: [], services: [] });
+  const blankPhaseBrief = () => ({
+    text: data?.brief?.text ?? '',
+    category: data?.brief?.category ?? '',
+    keyword: data?.brief?.keyword ?? '',
+    platform: data?.brief?.platform ?? '',
+    platforms: data?.brief?.platforms ?? [],
+    minFollowers: data?.brief?.minFollowers ?? 0,
+    targetCount: data?.brief?.targetCount ?? null,
+    budget: data?.brief?.budget ?? null,
+    deliverableScope: data?.brief?.deliverableScope ?? 'per_kol',
+    deliverables: data?.brief?.deliverables ?? [],
+    partnerType: data?.brief?.partnerType ?? null,
+    kolTargetCount: data?.brief?.kolTargetCount ?? null,
+    communityTargetCount: data?.brief?.communityTargetCount ?? null,
+    kpiTopics: data?.brief?.kpiTopics ?? null,
+    kpiComments: data?.brief?.kpiComments ?? null,
+    kpiBuzz: data?.brief?.kpiBuzz ?? null,
+    pillars: data?.brief?.pillars ?? [],
+    services: data?.brief?.services ?? []
+  });
 
   function syncPhaseForms(ph: any) {
     if (!ph || syncedPhaseRev.current[ph.id] === ph.revision) return;
     syncedPhaseRev.current[ph.id] = ph.revision;
-    setPhaseBrief(ph.brief ?? blankPhaseBrief());
+    const defaultBrief = blankPhaseBrief();
+    const phBrief = ph.brief ? {
+      ...defaultBrief,
+      ...ph.brief,
+      platforms: (ph.brief.platforms && ph.brief.platforms.length > 0) ? ph.brief.platforms : defaultBrief.platforms,
+      platform: ph.brief.platform || defaultBrief.platform,
+      category: ph.brief.category || defaultBrief.category,
+    } : defaultBrief;
+    setPhaseBrief(phBrief);
     setPhaseBriefDirty(false);
     setPhaseInfo({ name: ph.name, kind: ph.kind, description: ph.description ?? '', budget: ph.budget ?? '' });
     setPhaseInfoDirty(false);
@@ -558,6 +594,51 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal,
   const paginatedCommunities = paginateItems(visibleCommunities, commPage, commPageSize);
   const paginatedCommRows = paginateItems(visibleCommRows, commRowsPage, rowsPageSize);
 
+  // Range selection helpers (Shift + Click chọn khoảng)
+  const toggleMatchKol = (id: string, shiftKey = false) => {
+    const ordered = paginatedMatches.pageItems.map((p: any) => p.id);
+    const anchor = matchAnchorRef.current;
+    setCatalogIds(prev => toggleRangeSelection(prev, ordered, id, anchor, shiftKey));
+    if (!shiftKey || !anchor || !ordered.includes(anchor)) matchAnchorRef.current = id;
+  };
+  const toggleMatchCommunity = (id: string, shiftKey = false) => {
+    const ordered = paginatedCommunities.pageItems.map((p: any) => p.id);
+    const anchor = commMatchAnchorRef.current;
+    setCommunityIds(prev => toggleRangeSelection(prev, ordered, id, anchor, shiftKey));
+    if (!shiftKey || !anchor || !ordered.includes(anchor)) commMatchAnchorRef.current = id;
+  };
+  const toggleShortlistRow = (id: string, shiftKey = false) => {
+    const ordered = paginatedRows.pageItems.map((r: any) => r.id);
+    const anchor = shortlistAnchorRef.current;
+    setSelected(prev => toggleRangeSelection(prev, ordered, id, anchor, shiftKey));
+    if (!shiftKey || !anchor || !ordered.includes(anchor)) shortlistAnchorRef.current = id;
+  };
+
+  const selectAllPageMatches = () => {
+    const ids = paginatedMatches.pageItems.map((p: any) => p.id);
+    setCatalogIds(prev => Array.from(new Set([...prev, ...ids])));
+  };
+  const deselectAllPageMatches = () => {
+    const ids = new Set(paginatedMatches.pageItems.map((p: any) => p.id));
+    setCatalogIds(prev => prev.filter(id => !ids.has(id)));
+  };
+  const selectAllPageCommunities = () => {
+    const ids = paginatedCommunities.pageItems.map((p: any) => p.id);
+    setCommunityIds(prev => Array.from(new Set([...prev, ...ids])));
+  };
+  const deselectAllPageCommunities = () => {
+    const ids = new Set(paginatedCommunities.pageItems.map((p: any) => p.id));
+    setCommunityIds(prev => prev.filter(id => !ids.has(id)));
+  };
+  const selectAllPageRows = () => {
+    const ids = paginatedRows.pageItems.map((r: any) => r.id);
+    setSelected(prev => Array.from(new Set([...prev, ...ids])));
+  };
+  const deselectAllPageRows = () => {
+    const ids = new Set(paginatedRows.pageItems.map((r: any) => r.id));
+    setSelected(prev => prev.filter(id => !ids.has(id)));
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -612,92 +693,63 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal,
       {error && <p role="alert" className="p-3 bg-red-50 text-red-700 rounded-lg">{error}</p>}
       {notice && <p role="status" className="p-3 bg-emerald-50 text-emerald-800 rounded-lg">{notice}</p>}
 
-      <details open={!data.brief.text} className="border rounded-xl p-4 space-y-3">
-        <summary className="font-semibold cursor-pointer">1. Brief và tiêu chí đã duyệt</summary>
-        <p className="text-xs text-slate-500">Duyệt tiêu chí và hạng mục trước khi tìm KOL. Số KOL mục tiêu chỉ để đối chiếu khi chọn phương án, không giới hạn kết quả tìm kiếm.</p>
-        <fieldset disabled={!data.canManage || busy} className="space-y-3">
-          <label className="block text-sm">
-            Brief chung
-            <textarea className={field} rows={4} maxLength={10000} value={brief.text} onChange={e => change('text', e.target.value)} />
-          </label>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <label className="text-sm">
-              Lĩnh vực nội dung
-              <input className={field} placeholder="VD: Ẩm thực" value={brief.category} onChange={e => change('category', e.target.value)} />
-            </label>
-            <label className="text-sm">
-              Từ khóa trong hồ sơ KOL
-              <input className={field} placeholder="Để trống để không lọc thêm" value={brief.keyword} onChange={e => change('keyword', e.target.value)} />
-            </label>
-            {platformCheckboxes(brief, changeBriefPlatforms)}
-            <label className="text-sm">
-              Follower tối thiểu
-              <input className={field} inputMode="numeric" value={formatMoneyInput(brief.minFollowers || '')} onChange={e => change('minFollowers', parseMoneyInput(e.target.value) || 0)} />
-            </label>
-            <label className="text-sm">
-              Số KOL mục tiêu — chỉ để đối chiếu
-              <input className={field} type="number" min={1} value={brief.targetCount ?? ''} onChange={e => change('targetCount', e.target.value === '' ? null : Number(e.target.value))} />
-            </label>
-            <label className="text-sm">
-              Ngân sách chiến dịch (VND)
-              <input className={field} inputMode="numeric" value={formatMoneyInput(brief.budget ?? '')} onChange={e => { const v = parseMoneyInput(e.target.value); change('budget', v === '' ? null : v); }} />
-            </label>
+      {/* 1. Brief dự án (Chỉ đọc — Chỉnh sửa tại tab Tổng quan) */}
+      <section className="border rounded-2xl p-4 bg-white space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+          <div>
+            <h4 className="font-semibold text-slate-800 flex items-center gap-2">
+              1. Brief dự án
+              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-normal">Chỉ đọc</span>
+            </h4>
+            <p className="text-xs text-slate-500">Brief tầng dự án chỉ được chỉnh sửa tại tab Tổng quan bởi PM / Admin.</p>
           </div>
-          <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 space-y-3">
-            <label className="block text-sm font-semibold">
-              Phạm vi hạng mục trong brief
-              <select className={field} value={brief.deliverableScope ?? 'campaign'} onChange={e => change('deliverableScope', e.target.value)}>
-                <option value="campaign">Tổng toàn chiến dịch</option>
-                <option value="per_kol">Mỗi KOL thực hiện</option>
-              </select>
-            </label>
-            <p className="text-xs text-slate-500">Nhập 0 hoặc để trống nếu brief không yêu cầu. Tổng chiến dịch không tự chia đều cho từng KOL.</p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {formats.map(([key, label]) => (
-                <label key={key} className="text-xs">
-                  {label}
-                  <input
-                    aria-label={'Số lượng brief ' + label}
-                    className={field}
-                    type="number"
-                    min={0}
-                    max={100000}
-                    step={1}
-                    value={(brief.deliverables ?? []).find((d: any) => d.format === key)?.quantity ?? ''}
-                    onChange={e => {
-                      const quantity = Number(e.target.value);
-                      change('deliverables', [
-                        ...(brief.deliverables ?? []).filter((d: any) => d.format !== key),
-                        ...(quantity > 0 ? [{ format: key, quantity }] : []),
-                      ]);
-                    }}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
-          <BriefExtrasFields brief={brief} change={change} prefix="Brief chung" />
-          {data.canManage && (
+          {onOpenOverview && (
             <button
-              className={button}
-              disabled={!dirty || busy}
-              onClick={() => run(async () => {
-                await request(base + '/brief', { brief, revision: data.briefRevision });
-                await refresh();
-                setNotice('Đã lưu brief chung và cập nhật toàn bộ kết quả phù hợp.');
-              })}
+              type="button"
+              onClick={onOpenOverview}
+              className="text-xs text-purple-700 hover:text-purple-900 font-semibold underline cursor-pointer"
             >
-              Lưu brief & Lọc theo tiêu chí
+              ← Chỉnh sửa brief dự án tại tab Tổng quan
             </button>
           )}
-        </fieldset>
-        {dirty && <p className="text-sm text-amber-700">Tiêu chí chưa lưu. Kết quả phía dưới theo tiêu chí đã lưu trước đó.</p>}
+        </div>
+
+        <div className="text-sm space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
+          <div>
+            <span className="text-xs font-semibold text-slate-500 block uppercase tracking-wider">Nội dung brief chung:</span>
+            <p className="text-slate-800 whitespace-pre-wrap">{data.brief.text || 'Chưa nhập nội dung brief chung.'}</p>
+          </div>
+          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-slate-200/60 text-xs">
+            <div>
+              <span className="text-slate-400 block">Lĩnh vực:</span>
+              <strong className="text-slate-700">{data.brief.category || 'Tất cả'}</strong>
+            </div>
+            <div>
+              <span className="text-slate-400 block">Từ khóa:</span>
+              <strong className="text-slate-700">{data.brief.keyword || 'Không'}</strong>
+            </div>
+            <div>
+              <span className="text-slate-400 block">Nền tảng:</span>
+              <strong className="text-slate-700">
+                {(data.brief.platforms && data.brief.platforms.length > 0)
+                  ? data.brief.platforms.join(', ')
+                  : (data.brief.platform || 'Tất cả')}
+              </strong>
+            </div>
+            <div>
+              <span className="text-slate-400 block">Follower tối thiểu:</span>
+              <strong className="text-slate-700">{formatMoneyInput(data.brief.minFollowers || '') || '0'}</strong>
+            </div>
+          </div>
+        </div>
+
+        {/* Khối Bóc tách phase bằng AI (AI-1) */}
         <div className="border-t pt-3 space-y-3">
           <p className="text-sm font-semibold">Bóc tách phase bằng AI (AI-1)</p>
           <p className="text-xs text-slate-500">AI đọc brief tổng và đề xuất các phase (loại đối tác, số lượng, ngân sách từng phase). Kết quả chỉ là bản nháp — kiểm tra, sửa rồi mới tạo phase ở mục 2.</p>
-          <textarea aria-label="Brief tổng để AI bóc tách phase" className={field} rows={4} maxLength={30000} value={aiText} onChange={e => setAiText(e.target.value)} placeholder="Dán brief tổng của dự án…" />
+          <textarea aria-label="Brief tổng để AI bóc tách phase" className={field} rows={3} maxLength={30000} value={aiText} onChange={e => setAiText(e.target.value)} placeholder="Dán brief tổng của dự án…" />
           <div className="flex gap-2 flex-wrap">
-            <button type="button" className="border rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-slate-50" disabled={aiBusy} onClick={() => setAiText(brief.text || '')}>Dùng nội dung brief chung</button>
+            <button type="button" className="border rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-slate-50" disabled={aiBusy} onClick={() => setAiText(data.brief.text || '')}>Dùng nội dung brief chung</button>
             <button type="button" className={button} disabled={aiBusy || !aiText.trim()} onClick={runBreakdown}>{aiBusy ? 'Đang bóc tách…' : 'Bóc tách thành phase'}</button>
           </div>
           {aiMsg && <p className="text-sm text-slate-600">{aiMsg}</p>}
@@ -734,14 +786,22 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal,
             </div>
           )}
         </div>
-      </details>
+      </section>
 
       <section className="border rounded-xl p-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h4 className="font-semibold">2. Các phase của dự án ({phases.length})</h4>
-          {onOpenProposal && activePhase && (
-            <button type="button" className="border rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-slate-50" disabled={busy} onClick={() => onOpenProposal(activePhase.id)}>
-              Đề xuất KOL bằng AI cho phase này
+          {activePhase && (
+            <button
+              type="button"
+              className="border border-indigo-200 bg-indigo-50/70 text-indigo-700 font-medium rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-indigo-100/70"
+              disabled={busy}
+              onClick={() => {
+                setSearchMode('proposal');
+                onOpenProposal?.(activePhase.id);
+              }}
+            >
+              🎯 Đề xuất thông minh cho phase này
             </button>
           )}
         </div>
@@ -858,180 +918,257 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal,
           <button className={button} disabled={busy || !newPhase.name.trim()}>Thêm phase</button>
         </form>
       </section>
-      <details open={data.rows.length === 0} className="border rounded-xl p-4 space-y-3">
-        <summary className="font-semibold cursor-pointer">
-          3. Tìm từ đúng kho dữ liệu — {candidateSource === 'kol' ? visibleMatches.length.toLocaleString('vi-VN') + ' KOL' : visibleCommunities.length.toLocaleString('vi-VN') + ' Community'} phù hợp{activePhase ? ' cho phase “' + activePhase.name + '”' : ''}
-        </summary>
-        <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-xs text-slate-500">Nguồn ứng viên{activeBrief?.partnerType ? ' (brief gợi ý: ' + (activeBrief.partnerType === 'kol' ? 'Creator/KOL' : activeBrief.partnerType === 'community' ? 'Community' : 'cả hai') + ')' : ''}:</span>
-          <button type="button" className={'rounded-lg border px-3 py-1.5 text-sm ' + (candidateSource === 'kol' ? 'border-indigo-600 bg-indigo-50 font-semibold' : 'bg-white')} onClick={() => setSourceOverride('kol')}>Creator / KOL ({data.catalogCount.toLocaleString('vi-VN')})</button>
-          <button type="button" className={'rounded-lg border px-3 py-1.5 text-sm ' + (candidateSource === 'community' ? 'border-indigo-600 bg-indigo-50 font-semibold' : 'bg-white')} onClick={() => setSourceOverride('community')}>Community ({(data.communityCount ?? communityPool.length).toLocaleString('vi-VN')})</button>
+
+      {/* 3. Tìm & Đề xuất đối tác — Nhúng trực tiếp đề xuất hoặc tìm theo kho */}
+      <section className="border rounded-2xl p-4 bg-white space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+          <div>
+            <h4 className="font-semibold text-slate-800">
+              3. Tìm & Đề xuất đối tác{activePhase ? ' cho phase “' + activePhase.name + '”' : ''}
+            </h4>
+            <p className="text-xs text-slate-500">
+              {searchMode === 'proposal'
+                ? 'Đề xuất thông minh: Chấm điểm đối tác theo brief của phase, thêm thẳng vào danh sách sơ bộ.'
+                : 'Tìm từ kho: Lọc đối tác từ kho Creator/KOL hoặc Community theo tiêu chí đã chọn.'}
+            </p>
+          </div>
+          <div className="flex rounded-xl bg-slate-100 p-1 gap-1">
+            <button
+              type="button"
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg cursor-pointer transition-all ${
+                searchMode === 'proposal' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+              onClick={() => setSearchMode('proposal')}
+            >
+              🎯 Đề xuất thông minh bằng AI
+            </button>
+            <button
+              type="button"
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg cursor-pointer transition-all ${
+                searchMode === 'catalog' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+              onClick={() => setSearchMode('catalog')}
+            >
+              🔍 Tìm từ kho dữ liệu ({candidateSource === 'kol' ? visibleMatches.length : visibleCommunities.length})
+            </button>
+          </div>
         </div>
-        <p className="text-xs text-slate-500">{activePhase ? 'Đang lọc theo brief của phase “' + activePhase.name + '”; đối tác thêm vào sẽ vào thẳng phase này. ' : ''}{candidateSource === 'kol' ? 'KOL được tìm từ kho Creator/KOL; Community được tìm từ kho Community riêng — không thay thế cho nhau.' : 'Community được tìm từ kho Community theo chủ đề, nền tảng, tệp người xem, quy mô và điều kiện dịch vụ có trong hồ sơ.'} Lọc theo nội dung hồ sơ và tiêu chí đã duyệt; chưa dùng AI để đánh giá ngữ nghĩa. Thiếu giá vẫn xuất hiện. Không áp dụng Top N hoặc lọc theo giá; không tự tích đối tác.</p>
-        {candidateSource === 'community' ? (
-          <>
+
+        {searchMode === 'proposal' ? (
+          <div className="pt-1">
+            <ProjectProposal
+              key={`${projectId}:${activePhase?.id ?? 'none'}`}
+              projectId={projectId}
+              phaseId={activePhase?.id}
+              embedded={true}
+              onAdded={refresh}
+            />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-xs text-slate-500">Nguồn ứng viên{activeBrief?.partnerType ? ' (brief gợi ý: ' + (activeBrief.partnerType === 'kol' ? 'Creator/KOL' : activeBrief.partnerType === 'community' ? 'Community' : 'cả hai') + ')' : ''}:</span>
+              <button type="button" className={'rounded-lg border px-3 py-1.5 text-sm cursor-pointer ' + (candidateSource === 'kol' ? 'border-indigo-600 bg-indigo-50 font-semibold text-indigo-900' : 'bg-white')} onClick={() => setSourceOverride('kol')}>Creator / KOL ({data.catalogCount.toLocaleString('vi-VN')})</button>
+              <button type="button" className={'rounded-lg border px-3 py-1.5 text-sm cursor-pointer ' + (candidateSource === 'community' ? 'border-indigo-600 bg-indigo-50 font-semibold text-indigo-900' : 'bg-white')} onClick={() => setSourceOverride('community')}>Community ({(data.communityCount ?? communityPool.length).toLocaleString('vi-VN')})</button>
+            </div>
+            <p className="text-xs text-slate-500">{activePhase ? 'Đang lọc theo brief của phase “' + activePhase.name + '”; đối tác thêm vào sẽ vào thẳng phase này. ' : ''}{candidateSource === 'kol' ? 'KOL được tìm từ kho Creator/KOL; Community được tìm từ kho Community riêng — không thay thế cho nhau.' : 'Community được tìm từ kho Community theo chủ đề, nền tảng, tệp người xem, quy mô và điều kiện dịch vụ có trong hồ sơ.'} Lọc theo nội dung hồ sơ và tiêu chí đã duyệt; chưa dùng AI để đánh giá ngữ nghĩa. Thiếu giá vẫn xuất hiện. Không áp dụng Top N hoặc lọc theo giá; không tự tích đối tác. Giữ Shift + Click để chọn nhiều dòng liên tiếp.</p>
+
+            {candidateSource === 'community' ? (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-slate-50 p-2 rounded-xl border border-slate-100">
+                  <span className="text-slate-600">Đã chọn: <strong>{communityIds.length}</strong> Community</span>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={selectAllPageCommunities} className="text-indigo-600 hover:underline font-semibold cursor-pointer">Chọn tất cả trang này</button>
+                    <span className="text-slate-300">|</span>
+                    <button type="button" onClick={deselectAllPageCommunities} className="text-slate-500 hover:underline cursor-pointer">Bỏ chọn trang này</button>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {paginatedCommunities.pageItems.map((p: any) => {
+                    const kept = data.rows.find((r: any) => r.catalogId === p.id && r.partnerType === 'community');
+                    const keptHere = kept && (!activePhase || kept.phaseId === activePhase.id || (isFirstPhase && !kept.phaseId));
+                    const keptBadge = kept ? (keptHere ? 'Đã có trong danh sách sơ bộ' : 'Đã có ở ' + phaseNameOf(kept.phaseId)) : undefined;
+                    return (
+                      <div key={p.id} className="space-y-1" data-signing-entry={'community:' + p.id}>
+                        <CommunityCandidateCard
+                          profile={p}
+                          brief={activeBrief}
+                          selected={communityIds.includes(p.id)}
+                          disabled={busy || dirty || Boolean(kept)}
+                          onSelect={(e) => toggleMatchCommunity(p.id, Boolean(e?.shiftKey))}
+                          badge={keptBadge}
+                        />
+                        <div className="flex px-1">
+                          <button type="button" className="text-xs text-indigo-700 underline disabled:opacity-50" disabled={busy} onClick={() => setSigningTarget({ type: 'community', id: p.id, name: p.ten ?? '' })}>Hồ sơ ký kết (kho)</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!visibleCommunities.length && (
+                    <p className="py-3 text-sm text-slate-500">Chưa có Community phù hợp. Bổ sung kho Community (mục Kho Community) hoặc điều chỉnh tiêu chí của brief.</p>
+                  )}
+                  <PaginationBar
+                    page={paginatedCommunities.page}
+                    totalPages={paginatedCommunities.totalPages}
+                    totalItems={paginatedCommunities.totalItems}
+                    pageSize={paginatedCommunities.pageSize}
+                    onPageChange={setCommPage}
+                    onPageSizeChange={(sz) => { setCommPageSize(sz); setCommPage(1); }}
+                    itemName="Community"
+                  />
+                </div>
+                <button
+                  className={button}
+                  disabled={busy || dirty || !communityIds.length}
+                  onClick={() => run(async () => {
+                    const r = await request(base + '/shortlist/add', { ids: communityIds, phaseId: activePhase?.id, partnerType: 'community' });
+                    await refresh();
+                    setNotice(`Đã thêm ${r.added} Community vào ${activePhase ? 'phase “' + activePhase.name + '”' : 'danh sách sơ bộ'}.${r.existing?.length ? ` ${r.existing.length} Community đã có trong dự án từ trước nên không thêm trùng.` : ''}`);
+                  })}
+                >
+                  Thêm {communityIds.length} Community vào {activePhase ? 'phase này' : 'danh sách sơ bộ'}
+                </button>
+              </>
+            ) : (
+            <>
+            {data.canImport && (
+              <div className="space-y-1">
+                <button
+                  disabled={busy || dirty}
+                  className="border rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-slate-50"
+                  onClick={() => {
+                    const profiles = (readLegacyLocalKols() ?? []).filter(p => !p.isSample);
+                    if (!profiles.length) {
+                      setNotice('Không có dữ liệu KOL cũ trên trình duyệt này để nhập chuyển đổi. Kho chính thức nằm trên server; có thể thêm KOL mới bên dưới.');
+                      return;
+                    }
+                    setMigrationProfiles(profiles as KolProfile[]);
+                    setShowMigration(true);
+                  }}
+                >
+                  Nhập chuyển đổi dữ liệu KOL cũ trên trình duyệt này lên kho server
+                </button>
+                <p className="text-xs text-slate-500">Nhập chuyển đổi có xem trước: hồ sơ mới được thêm, hồ sơ xung đột do bạn chọn giữ bản server hay dùng bản nhập, hồ sơ chỉ có trên server được giữ nguyên. Dữ liệu cũ trên trình duyệt không bị xoá.</p>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-slate-50 p-2 rounded-xl border border-slate-100">
+              <span className="text-slate-600">Đã chọn: <strong>{catalogIds.length}</strong> KOL</span>
+              <div className="flex gap-2">
+                <button type="button" onClick={selectAllPageMatches} className="text-indigo-600 hover:underline font-semibold cursor-pointer">Chọn tất cả trang này</button>
+                <span className="text-slate-300">|</span>
+                <button type="button" onClick={deselectAllPageMatches} className="text-slate-500 hover:underline cursor-pointer">Bỏ chọn trang này</button>
+              </div>
+            </div>
+
             <div className="space-y-4">
-              {paginatedCommunities.pageItems.map((p: any) => {
-                const kept = data.rows.find((r: any) => r.catalogId === p.id && r.partnerType === 'community');
+              {paginatedMatches.pageItems.map((p: any) => {
+                const kept = data.rows.find((r: any) => r.catalogId === p.id);
                 const keptHere = kept && (!activePhase || kept.phaseId === activePhase.id || (isFirstPhase && !kept.phaseId));
                 const keptBadge = kept ? (keptHere ? 'Đã có trong danh sách sơ bộ' : 'Đã có ở ' + phaseNameOf(kept.phaseId)) : undefined;
                 return (
-                  <div key={p.id} className="space-y-1" data-signing-entry={'community:' + p.id}>
-                    <CommunityCandidateCard
+                  <div key={p.id} className="space-y-1" data-signing-entry={'kol:' + p.id}>
+                    <ProjectKolCard
                       profile={p}
                       brief={activeBrief}
-                      selected={communityIds.includes(p.id)}
+                      prices={kept?.prices}
+                      selected={catalogIds.includes(p.id) || Boolean(kept)}
                       disabled={busy || dirty || Boolean(kept)}
-                      onSelect={() => setCommunityIds(toggle(communityIds, p.id))}
+                      selectionLabel="Giữ KOL vào danh sách sơ bộ"
+                      onSelect={(e) => toggleMatchKol(p.id, Boolean(e?.shiftKey))}
                       badge={keptBadge}
                     />
                     <div className="flex px-1">
-                      <button type="button" className="text-xs text-indigo-700 underline disabled:opacity-50" disabled={busy} onClick={() => setSigningTarget({ type: 'community', id: p.id, name: p.ten ?? '' })}>Hồ sơ ký kết (kho)</button>
+                      <button type="button" className="text-xs text-indigo-700 underline disabled:opacity-50" disabled={busy} onClick={() => setSigningTarget({ type: 'kol', id: p.id, name: p.ten ?? '' })}>Hồ sơ ký kết (kho)</button>
                     </div>
                   </div>
                 );
               })}
-              {!visibleCommunities.length && (
-                <p className="py-3 text-sm text-slate-500">Chưa có Community phù hợp. Bổ sung kho Community (mục Kho Community) hoặc điều chỉnh tiêu chí của brief.</p>
+              {!visibleMatches.length && (
+                <p className="py-3 text-sm text-slate-500">Chưa có kết quả. Bổ sung thư viện hoặc điều chỉnh tiêu chí nội dung.</p>
               )}
+
               <PaginationBar
-                page={paginatedCommunities.page}
-                totalPages={paginatedCommunities.totalPages}
-                totalItems={paginatedCommunities.totalItems}
-                pageSize={paginatedCommunities.pageSize}
-                onPageChange={setCommPage}
-                onPageSizeChange={(sz) => { setCommPageSize(sz); setCommPage(1); }}
-                itemName="Community"
+                page={paginatedMatches.page}
+                totalPages={paginatedMatches.totalPages}
+                totalItems={paginatedMatches.totalItems}
+                pageSize={paginatedMatches.pageSize}
+                onPageChange={setMatchesPage}
+                onPageSizeChange={(sz) => {
+                  setMatchesPageSize(sz);
+                  setMatchesPage(1);
+                }}
               />
             </div>
+
             <button
               className={button}
-              disabled={busy || dirty || !communityIds.length}
+              disabled={busy || dirty || !catalogIds.length}
               onClick={() => run(async () => {
-                const r = await request(base + '/shortlist/add', { ids: communityIds, phaseId: activePhase?.id, partnerType: 'community' });
+                const r = await request(base + '/shortlist/add', { ids: catalogIds, phaseId: activePhase?.id });
                 await refresh();
-                setNotice(`Đã thêm ${r.added} Community vào ${activePhase ? 'phase “' + activePhase.name + '”' : 'danh sách sơ bộ'}.${r.existing?.length ? ` ${r.existing.length} Community đã có trong dự án từ trước nên không thêm trùng.` : ''}`);
+                setNotice(`Đã thêm ${r.added} KOL vào ${activePhase ? 'phase “' + activePhase.name + '”' : 'danh sách sơ bộ'}.${r.existing?.length ? ` ${r.existing.length} KOL đã có trong dự án từ trước nên không thêm trùng.` : ''}`);
               })}
             >
-              Thêm {communityIds.length} Community vào {activePhase ? 'phase này' : 'danh sách sơ bộ'}
+              Thêm {catalogIds.length} KOL vào {activePhase ? 'phase này' : 'danh sách sơ bộ'}
             </button>
-          </>
-        ) : (
-        <>
-        {data.canImport && (
-          <div className="space-y-1">
-            <button
-              disabled={busy || dirty}
-              className="border rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-slate-50"
-              onClick={() => {
-                const profiles = (readLegacyLocalKols() ?? []).filter(p => !p.isSample);
-                if (!profiles.length) {
-                  setNotice('Không có dữ liệu KOL cũ trên trình duyệt này để nhập chuyển đổi. Kho chính thức nằm trên server; có thể thêm KOL mới bên dưới.');
-                  return;
-                }
-                setMigrationProfiles(profiles as KolProfile[]);
-                setShowMigration(true);
-              }}
-            >
-              Nhập chuyển đổi dữ liệu KOL cũ trên trình duyệt này lên kho server
-            </button>
-            <p className="text-xs text-slate-500">Nhập chuyển đổi có xem trước: hồ sơ mới được thêm, hồ sơ xung đột do bạn chọn giữ bản server hay dùng bản nhập, hồ sơ chỉ có trên server được giữ nguyên. Dữ liệu cũ trên trình duyệt không bị xoá.</p>
+
+            <details>
+              <summary className="cursor-pointer text-sm text-indigo-700">Thêm hồ sơ KOL mới vào thư viện chung</summary>
+              <form
+                className="grid sm:grid-cols-2 gap-3 mt-3"
+                onSubmit={e => {
+                  e.preventDefault();
+                  const form = e.currentTarget, f = new FormData(form);
+                  run(async () => {
+                    await request(base + '/catalog/create', {
+                      profile: {
+                        ten: f.get('name'),
+                        linhVuc: String(f.get('category')).split(',').map(s => s.trim()).filter(Boolean),
+                        nenTang: [{ tenNenTang: f.get('platform'), linkProfile: f.get('url'), soFollower: parseMoneyInput(String(f.get('followers'))) || 0 }],
+                        reviewSoBo: f.get('notes'),
+                        bangGia: {},
+                      },
+                    });
+                    form.reset();
+                    await refresh();
+                    setNotice('Đã thêm KOL vào thư viện. Chọn KOL ở kết quả phù hợp để đưa vào dự án.');
+                  });
+                }}
+              >
+                <input aria-label="Tên KOL mới" name="name" required maxLength={200} placeholder="Tên KOL" className={field} />
+                <input aria-label="Lĩnh vực KOL mới" name="category" required placeholder="Lĩnh vực, ngăn bằng dấu phẩy" className={field} />
+                <select aria-label="Nền tảng KOL mới" name="platform" className={field}>
+                  {['TikTok', 'YouTube', 'Facebook', 'Instagram', 'Khác'].map(p => <option key={p}>{p}</option>)}
+                </select>
+                <input aria-label="Link hồ sơ KOL mới" name="url" type="url" placeholder="Link hồ sơ (tùy chọn)" className={field} />
+                <input aria-label="Follower KOL mới" name="followers" placeholder="Follower" inputMode="numeric" className={field} onChange={e => { e.target.value = formatMoneyInput(parseMoneyInput(e.target.value)); }} />
+                <textarea aria-label="Nội dung hồ sơ KOL mới" name="notes" placeholder="Nội dung chuyên môn / phong cách" className={field} />
+                <button className={button} disabled={busy || dirty}>Thêm vào thư viện</button>
+              </form>
+            </details>
+            </>
+            )}
           </div>
         )}
-
-        <div className="space-y-4">
-          {paginatedMatches.pageItems.map((p: any) => {
-            const kept = data.rows.find((r: any) => r.catalogId === p.id);
-            const keptHere = kept && (!activePhase || kept.phaseId === activePhase.id || (isFirstPhase && !kept.phaseId));
-            const keptBadge = kept ? (keptHere ? 'Đã có trong danh sách sơ bộ' : 'Đã có ở ' + phaseNameOf(kept.phaseId)) : undefined;
-            return (
-              <div key={p.id} className="space-y-1" data-signing-entry={'kol:' + p.id}>
-                <ProjectKolCard
-                  profile={p}
-                  brief={activeBrief}
-                  prices={kept?.prices}
-                  selected={catalogIds.includes(p.id) || Boolean(kept)}
-                  disabled={busy || dirty || Boolean(kept)}
-                  selectionLabel="Giữ KOL vào danh sách sơ bộ"
-                  onSelect={() => setCatalogIds(toggle(catalogIds, p.id))}
-                  badge={keptBadge}
-                />
-                <div className="flex px-1">
-                  <button type="button" className="text-xs text-indigo-700 underline disabled:opacity-50" disabled={busy} onClick={() => setSigningTarget({ type: 'kol', id: p.id, name: p.ten ?? '' })}>Hồ sơ ký kết (kho)</button>
-                </div>
-              </div>
-            );
-          })}
-          {!visibleMatches.length && (
-            <p className="py-3 text-sm text-slate-500">Chưa có kết quả. Bổ sung thư viện hoặc điều chỉnh tiêu chí nội dung.</p>
-          )}
-
-          <PaginationBar
-            page={paginatedMatches.page}
-            totalPages={paginatedMatches.totalPages}
-            totalItems={paginatedMatches.totalItems}
-            pageSize={paginatedMatches.pageSize}
-            onPageChange={setMatchesPage}
-            onPageSizeChange={(sz) => {
-              setMatchesPageSize(sz);
-              setMatchesPage(1);
-            }}
-          />
-        </div>
-
-        <button
-          className={button}
-          disabled={busy || dirty || !catalogIds.length}
-          onClick={() => run(async () => {
-            const r = await request(base + '/shortlist/add', { ids: catalogIds, phaseId: activePhase?.id });
-            await refresh();
-            setNotice(`Đã thêm ${r.added} KOL vào ${activePhase ? 'phase “' + activePhase.name + '”' : 'danh sách sơ bộ'}.${r.existing?.length ? ` ${r.existing.length} KOL đã có trong dự án từ trước nên không thêm trùng.` : ''}`);
-          })}
-        >
-          Thêm {catalogIds.length} KOL vào {activePhase ? 'phase này' : 'danh sách sơ bộ'}
-        </button>
-
-        <details>
-          <summary className="cursor-pointer text-sm text-indigo-700">Thêm hồ sơ KOL mới vào thư viện chung</summary>
-          <form
-            className="grid sm:grid-cols-2 gap-3 mt-3"
-            onSubmit={e => {
-              e.preventDefault();
-              const form = e.currentTarget, f = new FormData(form);
-              run(async () => {
-                await request(base + '/catalog/create', {
-                  profile: {
-                    ten: f.get('name'),
-                    linhVuc: String(f.get('category')).split(',').map(s => s.trim()).filter(Boolean),
-                    nenTang: [{ tenNenTang: f.get('platform'), linkProfile: f.get('url'), soFollower: parseMoneyInput(String(f.get('followers'))) || 0 }],
-                    reviewSoBo: f.get('notes'),
-                    bangGia: {},
-                  },
-                });
-                form.reset();
-                await refresh();
-                setNotice('Đã thêm KOL vào thư viện. Chọn KOL ở kết quả phù hợp để đưa vào dự án.');
-              });
-            }}
-          >
-            <input aria-label="Tên KOL mới" name="name" required maxLength={200} placeholder="Tên KOL" className={field} />
-            <input aria-label="Lĩnh vực KOL mới" name="category" required placeholder="Lĩnh vực, ngăn bằng dấu phẩy" className={field} />
-            <select aria-label="Nền tảng KOL mới" name="platform" className={field}>
-              {['TikTok', 'YouTube', 'Facebook', 'Instagram', 'Khác'].map(p => <option key={p}>{p}</option>)}
-            </select>
-            <input aria-label="Link hồ sơ KOL mới" name="url" type="url" placeholder="Link hồ sơ (tùy chọn)" className={field} />
-            <input aria-label="Follower KOL mới" name="followers" placeholder="Follower" inputMode="numeric" className={field} onChange={e => { e.target.value = formatMoneyInput(parseMoneyInput(e.target.value)); }} />
-            <textarea aria-label="Nội dung hồ sơ KOL mới" name="notes" placeholder="Nội dung chuyên môn / phong cách" className={field} />
-            <button className={button} disabled={busy || dirty}>Thêm vào thư viện</button>
-          </form>
-        </details>
-        </>
-        )}
-      </details>
+      </section>
 
       <section className="space-y-3">
         <h4 className="font-semibold">4. Danh sách {activePhase ? 'của phase “' + activePhase.name + '”' : 'sơ bộ'} — Booking kiểm tra giá ({visibleKolRows.length} KOL · {visibleCommRows.length} Community)</h4>
-        <p className="text-xs text-slate-500">Giá có sẵn trong thư viện/kho chưa được coi là đã xác nhận. Kiểm tra từng hạng mục/dịch vụ, ghi nguồn rồi xác nhận. Danh sách này là ỨNG VIÊN — chưa phân bổ công việc, chưa phát sinh chi phí. Việc cập nhật giá không tự thay đổi báo giá đã lập.</p>
+        <p className="text-xs text-slate-500">Giá có sẵn trong thư viện/kho chưa được coi là đã xác nhận. Kiểm tra từng hạng mục/dịch vụ, ghi nguồn rồi xác nhận. Danh sách này là ỨNG VIÊN — chưa phân bổ công việc, chưa phát sinh chi phí. Việc cập nhật giá không tự thay đổi báo giá đã lập. Giữ Shift + Click để chọn nhiều dòng liên tiếp.</p>
+
+        {data.canManage && visibleKolRows.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-slate-50 p-2 rounded-xl border border-slate-100">
+            <span className="text-slate-600">Đã chọn: <strong>{selected.length}</strong> KOL để đưa vào phương án</span>
+            <div className="flex gap-2">
+              <button type="button" onClick={selectAllPageRows} className="text-indigo-600 hover:underline font-semibold cursor-pointer">Chọn tất cả trang này</button>
+              <span className="text-slate-300">|</span>
+              <button type="button" onClick={deselectAllPageRows} className="text-slate-500 hover:underline cursor-pointer">Bỏ chọn trang này</button>
+            </div>
+          </div>
+        )}
+
         <div className="space-y-4">
           {paginatedRows.pageItems.map((row: any) => (
             <div key={row.id} className="space-y-1">
@@ -1042,7 +1179,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenProposal,
                 selected={selected.includes(row.id)}
                 disabled={busy || dirty}
                 selectionLabel="Chọn vào phương án"
-                onSelect={data.canManage ? () => setSelected(toggle(selected, row.id)) : undefined}
+                onSelect={data.canManage ? (e) => toggleShortlistRow(row.id, Boolean(e?.shiftKey)) : undefined}
                 renderPriceEditor={format => (
                   <PriceEditor
                     row={row}

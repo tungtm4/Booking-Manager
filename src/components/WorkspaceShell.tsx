@@ -7,7 +7,13 @@ import { ProjectContractsPanel } from './ProjectContractsPanel';
 import { ProjectMemberPicker } from './ProjectMemberPicker';
 import App from '../App';
 import { formatVND } from '../utils/formatters';
+import { BriefPlatformSelector } from './BriefPlatformSelector';
+import { BriefExtrasFields } from './ProjectShortlistPanel';
+import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
+import { normalizeBriefPlatforms } from '../domain/projectBrief';
 import { PRICE_FORMAT_LABELS } from '../types/kol';
+
+const formats = Object.entries(PRICE_FORMAT_LABELS);
 
 type User = { id: string; email: string; name: string; role: 'admin' | 'member'; mustChangePassword: boolean };
 
@@ -34,6 +40,15 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { proj
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const [briefForm, setBriefForm] = useState<any>(null);
+  const [briefRevision, setBriefRevision] = useState(0);
+  const [briefDirty, setBriefDirty] = useState(false);
+  const [briefSaving, setBriefSaving] = useState(false);
+  const [briefNotice, setBriefNotice] = useState('');
+  const [briefError, setBriefError] = useState('');
+
+  const canEdit = project.canManage || isAdmin;
+
   useEffect(() => {
     let active = true;
     Promise.all([
@@ -45,6 +60,9 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { proj
       .then(([shortlist, phases, options, contracts]) => {
         if (active) {
           setData({ shortlist, phases: phases.phases || [], options: options.options || [], baselineId: options.baselineId, contracts: contracts.contracts || [] });
+          setBriefForm(shortlist.brief || {});
+          setBriefRevision(shortlist.briefRevision ?? 0);
+          setBriefDirty(false);
           setLoading(false);
         }
       })
@@ -59,10 +77,40 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { proj
     };
   }, [project.id]);
 
+  const handleBriefChange = (k: string, v: any) => {
+    setBriefForm((prev: any) => ({ ...prev, [k]: v }));
+    setBriefDirty(true);
+  };
+
+  const handlePlatformChange = (nextPlatforms: string[]) => {
+    const n = normalizeBriefPlatforms({ platforms: nextPlatforms });
+    setBriefForm((prev: any) => ({ ...prev, platforms: n.platforms, platform: n.platform }));
+    setBriefDirty(true);
+  };
+
+  const handleSaveBrief = async () => {
+    if (!canEdit || !briefForm) return;
+    setBriefSaving(true);
+    setBriefError('');
+    setBriefNotice('');
+    try {
+      await api(`/projects/${project.id}/brief`, { brief: briefForm, revision: briefRevision });
+      setBriefRevision((prev) => prev + 1);
+      setBriefDirty(false);
+      setBriefNotice('Đã lưu brief dự án thành công. Tiêu chí này được áp dụng làm mẫu cho toàn chiến dịch.');
+      const shortlist = await api(`/projects/${project.id}/shortlist`);
+      setData((prev: any) => ({ ...prev, shortlist }));
+    } catch (e: any) {
+      setBriefError(e.message || 'Không thể lưu brief dự án.');
+    } finally {
+      setBriefSaving(false);
+    }
+  };
+
   if (loading) return <div className="p-6 text-slate-500">Đang tải thông tin tổng quan dự án…</div>;
   if (error) return <div className="p-4 bg-red-50 text-red-700 rounded-xl">{error}</div>;
 
-  const brief = data?.shortlist?.brief || {};
+  const brief = briefForm || data?.shortlist?.brief || {};
   const phases = data?.phases || [];
   const options = data?.options || [];
   const contracts = data?.contracts || [];
@@ -102,8 +150,8 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { proj
           </div>
           {brief.text && (
             <div className="pt-2 border-t border-slate-100">
-              <span className="text-slate-400 text-xs block font-medium mb-1">Brief chiến dịch</span>
-              <p className="text-sm text-slate-700 whitespace-pre-line line-clamp-4 bg-purple-50/50 p-3 rounded-xl border border-purple-100/50">{brief.text}</p>
+              <span className="text-slate-400 text-xs block font-medium mb-1">Tóm tắt brief</span>
+              <p className="text-sm text-slate-700 whitespace-pre-line line-clamp-3 bg-purple-50/50 p-2.5 rounded-xl border border-purple-100/50">{brief.text}</p>
             </div>
           )}
         </div>
@@ -143,6 +191,166 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { proj
             )}
           </ul>
         </div>
+      </div>
+
+      {/* Brief tầng dự án — Bề mặt sửa duy nhất của brief chiến dịch */}
+      <div className="bg-white p-5 rounded-2xl border border-purple-100 shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-purple-100/60 pb-3">
+          <div>
+            <h3 className="font-bold text-slate-900 text-lg flex items-center gap-2">
+              📋 Brief & Tiêu chí chiến dịch (Brief tầng dự án)
+            </h3>
+            <p className="text-xs text-slate-500">
+              Đây là bề mặt sửa brief chiến dịch duy nhất của dự án. Brief của từng phase sẽ kế thừa từ brief này nếu chưa cấu hình riêng.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {!canEdit ? (
+              <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                Quyền xem (Booking) — Chỉ PM / Admin được chỉnh sửa
+              </span>
+            ) : briefDirty ? (
+              <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                Có chỉnh sửa chưa lưu
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        {briefError && <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl">{briefError}</div>}
+        {briefNotice && <div className="p-3 bg-emerald-50 text-emerald-800 text-xs rounded-xl">{briefNotice}</div>}
+
+        {briefForm && (
+          <fieldset disabled={!canEdit || briefSaving} className="space-y-4">
+            <label className="block text-sm">
+              <span className="text-slate-700 font-semibold mb-1 block">Nội dung brief tổng</span>
+              <textarea
+                className={field}
+                rows={4}
+                maxLength={10000}
+                value={briefForm.text ?? ''}
+                placeholder="Nhập yêu cầu brief, định vị sản phẩm, mục tiêu chiến dịch…"
+                onChange={e => handleBriefChange('text', e.target.value)}
+              />
+            </label>
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              <label className="text-sm">
+                <span className="text-slate-700 font-medium mb-1 block">Lĩnh vực nội dung</span>
+                <input
+                  className={field}
+                  placeholder="VD: Ẩm thực, Làm đẹp, Công nghệ"
+                  value={briefForm.category ?? ''}
+                  onChange={e => handleBriefChange('category', e.target.value)}
+                />
+              </label>
+              <label className="text-sm">
+                <span className="text-slate-700 font-medium mb-1 block">Từ khóa trong hồ sơ</span>
+                <input
+                  className={field}
+                  placeholder="Để trống nếu không lọc thêm"
+                  value={briefForm.keyword ?? ''}
+                  onChange={e => handleBriefChange('keyword', e.target.value)}
+                />
+              </label>
+
+              <BriefPlatformSelector
+                platforms={briefForm.platforms || []}
+                disabled={!canEdit || briefSaving}
+                onChange={handlePlatformChange}
+                prefix="Brief dự án"
+              />
+
+              <label className="text-sm">
+                <span className="text-slate-700 font-medium mb-1 block">Follower tối thiểu</span>
+                <input
+                  className={field}
+                  inputMode="numeric"
+                  value={formatMoneyInput(briefForm.minFollowers || '')}
+                  onChange={e => handleBriefChange('minFollowers', parseMoneyInput(e.target.value) || 0)}
+                />
+              </label>
+              <label className="text-sm">
+                <span className="text-slate-700 font-medium mb-1 block">Số KOL mục tiêu (đối chiếu)</span>
+                <input
+                  className={field}
+                  type="number"
+                  min={1}
+                  value={briefForm.targetCount ?? ''}
+                  onChange={e => handleBriefChange('targetCount', e.target.value === '' ? null : Number(e.target.value))}
+                />
+              </label>
+              <label className="text-sm">
+                <span className="text-slate-700 font-medium mb-1 block">Ngân sách chiến dịch (VND)</span>
+                <input
+                  className={field}
+                  inputMode="numeric"
+                  value={formatMoneyInput(briefForm.budget ?? '')}
+                  onChange={e => {
+                    const v = parseMoneyInput(e.target.value);
+                    handleBriefChange('budget', v === '' ? null : v);
+                  }}
+                />
+              </label>
+              <label className="text-sm">
+                <span className="text-slate-700 font-medium mb-1 block">Phạm vi hạng mục</span>
+                <select
+                  className={field}
+                  value={briefForm.deliverableScope ?? 'campaign'}
+                  onChange={e => handleBriefChange('deliverableScope', e.target.value)}
+                >
+                  <option value="campaign">Tổng toàn chiến dịch</option>
+                  <option value="per_kol">Mỗi KOL thực hiện</option>
+                </select>
+              </label>
+            </div>
+
+            {/* Hạng mục 6 format */}
+            <div className="rounded-xl border border-purple-100 bg-purple-50/30 p-3 space-y-2">
+              <span className="text-xs font-semibold text-slate-700 block">Số lượng hạng mục chính (Creator/KOL)</span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {formats.map(([key, label]) => (
+                  <label key={key} className="text-xs">
+                    <span className="text-slate-600 block mb-1">{label}</span>
+                    <input
+                      aria-label={'Số lượng brief ' + label}
+                      className={field}
+                      type="number"
+                      min={0}
+                      max={100000}
+                      step={1}
+                      value={(briefForm.deliverables ?? []).find((d: any) => d.format === key)?.quantity ?? ''}
+                      onChange={e => {
+                        const quantity = Number(e.target.value);
+                        handleBriefChange('deliverables', [
+                          ...(briefForm.deliverables ?? []).filter((d: any) => d.format !== key),
+                          ...(quantity > 0 ? [{ format: key, quantity }] : []),
+                        ]);
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Thông tin mở rộng */}
+            <BriefExtrasFields brief={briefForm} change={handleBriefChange} prefix="Brief dự án" />
+
+            {canEdit && (
+              <div className="pt-2 flex items-center justify-between">
+                <button
+                  type="button"
+                  className={button}
+                  disabled={!briefDirty || briefSaving}
+                  onClick={handleSaveBrief}
+                >
+                  {briefSaving ? 'Đang lưu…' : 'Lưu brief dự án'}
+                </button>
+                {briefDirty && <span className="text-xs text-amber-700 font-medium">Bạn có thay đổi chưa lưu</span>}
+              </div>
+            )}
+          </fieldset>
+        )}
       </div>
 
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
@@ -584,14 +792,6 @@ export default function WorkspaceShell() {
                 Dự án
               </button>
               <button
-                onClick={() => handleNavigateWithGuard(() => { setProposalTarget(null); setPage('proposal'); })}
-                className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                  page === 'proposal' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
-                }`}
-              >
-                Đề xuất KOL
-              </button>
-              <button
                 onClick={() => handleNavigateWithGuard(() => setPage('communities'))}
                 className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
                   page === 'communities' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
@@ -618,6 +818,10 @@ export default function WorkspaceShell() {
                     KOL & Báo giá hiện có
                   </button>
                 </>
+              )}
+              {/* Tương thích ngược: Đề xuất KOL đã được chuyển vào tab Đối tác & Phase của dự án */}
+              {false && (
+                <button onClick={() => setPage('proposal')}>Đề xuất KOL</button>
               )}
             </nav>
           )}
@@ -689,22 +893,28 @@ export default function WorkspaceShell() {
             {passwordModal}
           </div>
         ) : page === 'proposal' ? (
-          <ProjectProposal
-            key={proposalTarget ? proposalTarget.projectId + ':' + proposalTarget.phaseId : 'free'}
-            initialProjectId={proposalTarget?.projectId}
-            initialPhaseId={proposalTarget?.phaseId}
-            onOpenProject={(pid) =>
-              run(async () => {
-                const pr = projects.find((x: any) => x.id === pid);
-                if (pr) {
-                  setSelected(pr);
-                  setMembers((await api('/projects/' + pid + '/members')).members);
-                  setProjectView('shortlist');
-                  setPage('projects');
+          <div className="p-8 bg-white rounded-3xl border border-purple-100 shadow-sm space-y-4 text-center max-w-xl mx-auto">
+            <h2 className="text-xl font-bold text-slate-900">Đề xuất đối tác trong Dự án</h2>
+            <p className="text-sm text-slate-600">
+              Chức năng Đề xuất đối tác đã được tích hợp trực tiếp vào tab <strong>Đối tác & Phase</strong> trong từng dự án theo ngữ cảnh phase đang chọn.
+            </p>
+            <button
+              onClick={() => {
+                if (proposalTarget?.projectId) {
+                  const pr = projects.find((x: any) => x.id === proposalTarget.projectId);
+                  if (pr) {
+                    setSelected(pr);
+                    if (proposalTarget.phaseId) setActivePhaseId(proposalTarget.phaseId);
+                  }
                 }
-              })
-            }
-          />
+                setProjectView('shortlist');
+                setPage('projects');
+              }}
+              className={button}
+            >
+              Vào tab Đối tác & Phase của dự án
+            </button>
+          </div>
         ) : page === 'communities' ? (
           <CommunityManager isAdmin={user.role === 'admin'} />
         ) : page === 'legacy' && user.role === 'admin' ? (
@@ -1001,9 +1211,10 @@ export default function WorkspaceShell() {
                         onPhaseChange={setActivePhaseId}
                         onDirtyChange={setIsDirty}
                         onOpenQuotes={() => handleNavigateWithGuard(() => setProjectView('quotes'))}
+                        onOpenOverview={() => handleNavigateWithGuard(() => setProjectView('overview'))}
                         onOpenProposal={(phaseId) => {
-                          setProposalTarget({ projectId: selected.id, phaseId });
-                          setPage('proposal');
+                          setActivePhaseId(phaseId);
+                          setProjectView('shortlist');
                         }}
                       />
                     )}
