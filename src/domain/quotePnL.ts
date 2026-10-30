@@ -6,7 +6,12 @@
 //   K = G + thuế cá nhân + thuế HKD (các khoản thuế được phân loại là CHI PHÍ)
 //       + chi phí trực tiếp khác (theo đúng nghĩa hiện có: đơn giá đầu vào x số lượng).
 //   VAT đầu vào của đối tác công ty được TÁCH RIÊNG, không cộng vào K.
-//   L = K + VAT đầu vào = tổng phải chi (dự trù dòng tiền).
+//   L = tổng phải chi ĐÃ BIẾT, tính theo TỔNG DÒNG (GROSS) của các nguồn chi phí
+//   cộng chi phí trực tiếp khác. Khi phân loại thuế đầy đủ, L = K + VAT (cùng một
+//   số). Khi còn thuế CHƯA PHÂN LOẠI, K giữ nguyên phần đã phân loại (lợi nhuận để
+//   trống) nhưng L vẫn tính đủ khoản thuế đó vì nó đã nằm trong GROSS của nguồn —
+//   số thuế chưa phân loại được báo riêng ở unknownTax, không để tổng phải chi bị
+//   thấp giả tạo. Khi còn dòng thiếu nguồn/giá, L mới chỉ gồm phần đã biết.
 //   Lợi nhuận = Doanh thu trước thuế − K; Biên = Lợi nhuận / Doanh thu trước thuế
 //       (doanh thu 0 hoặc chưa đủ dữ liệu → chưa xác định).
 // Phân loại thuế là EXPLICIT (trường taxCategory trên snapshot nguồn chi phí, suy từ
@@ -42,7 +47,7 @@ export function computeQuotePnL(
   items: readonly ProjectQuoteItem[],
   sell: { revenueBeforeTax: number | null; missingSell: number },
 ): QuotePnL {
-  let netG = 0, costTax = 0, vatInput = 0, unknownTax = 0, otherDirectCosts = 0;
+  let netG = 0, costTax = 0, vatInput = 0, unknownTax = 0, otherDirectCosts = 0, sourceGross = 0;
   const committed = { net: 0, tax: 0, gross: 0 };
   const estimated = { net: 0, tax: 0, gross: 0 };
   const missingLines: QuotePnLMissingLine[] = [];
@@ -53,6 +58,7 @@ export function computeQuotePnL(
       const cs = i.costSource;
       if (!cs) { missingLines.push({ id: i.id, creator: i.creator, reason: 'no_source' }); continue; }
       netG += cs.net;
+      sourceGross += cs.gross;
       const bucket = cs.kind === 'contract' ? committed : estimated;
       if (cs.kind !== 'contract') hasEstimates = true;
       bucket.net += cs.net; bucket.tax += cs.tax; bucket.gross += cs.gross;
@@ -71,7 +77,7 @@ export function computeQuotePnL(
     }
   }
   const totalK = netG + costTax + otherDirectCosts;
-  const totalPayableL = totalK + vatInput;
+  const totalPayableL = sourceGross + otherDirectCosts;
   const complete = missingLines.length === 0 && sell.missingSell === 0 && sell.revenueBeforeTax !== null;
   const profit = complete && sell.revenueBeforeTax !== null ? sell.revenueBeforeTax - totalK : null;
   const marginPercent = profit !== null && sell.revenueBeforeTax !== null && sell.revenueBeforeTax > 0 ? profit / sell.revenueBeforeTax * 100 : null;

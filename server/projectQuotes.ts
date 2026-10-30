@@ -700,16 +700,21 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     // hoạch đợt chưa đủ; phần chưa lên kế hoạch được ghi rõ. Đã trả không dùng để
     // tính lợi nhuận thực tế — lợi nhuận chỉ tính theo kế hoạch ở trên.
     const baseContractIds=new Set<string>();
-    if(baseRow){const bp=JSON.parse((quote(baseRow.quoteId,pid) as any).payload_json) as QuotePayload;for(const i of bp.items)if(i.costSource?.contractId)baseContractIds.add(i.costSource.contractId);}
+    if(baseRow){const bp=JSON.parse((quote(baseRow.quoteId,pid) as any).payload_json) as QuotePayload;for(const i of bp.items)if(i.included&&i.costSource?.contractId)baseContractIds.add(i.costSource.contractId);}
     const contractRows=db.prepare('SELECT * FROM contracts WHERE organization_id=? AND project_id=? ORDER BY rowid').all(orgId,pid) as any[];
-    const cashContracts:any[]=[];const cancelled:any[]=[];let draftCount=0;
-    const totals={gross:0,planned:0,paid:0,remaining:0,missingPlan:0,missingPrice:0,outsideSelectedGross:0,outsideSelectedCount:0};
+    const cashContracts:any[]=[];const cancelled:any[]=[];const drafts:any[]=[];
+    // Tiền ĐÃ TRẢ không biến mất theo trạng thái hợp đồng: hợp đồng huỷ/nháp vẫn có
+    // thể đã trả tiền thật (A2 cho trả khi nháp; huỷ sau khi đã trả). Paid của từng
+    // nhóm được tính và hiện RIÊNG; gross của hợp đồng huỷ KHÔNG vào remaining của
+    // nhóm đang hiệu lực, và không tự giả định đã hoàn tiền hay khấu trừ.
+    const totals={gross:0,planned:0,paid:0,remaining:0,missingPlan:0,missingPrice:0,outsideSelectedGross:0,outsideSelectedCount:0,paidCancelled:0,paidDraft:0,paidAll:0};
     for(const c of contractRows){
-      if(c.status==='cancelled'){cancelled.push({id:c.id,number:c.contract_number,name:c.contract_name,gross:c.gross_amount});continue;}
-      if(c.status==='draft'){draftCount++;continue;}
       const insts=db.prepare('SELECT amount,paid_amount FROM contract_installments WHERE contract_id=?').all(c.id) as any[];
       const planned=insts.reduce((a,x)=>a+x.amount,0);
       const paid=insts.reduce((a,x)=>a+x.paid_amount,0);
+      totals.paidAll+=paid;
+      if(c.status==='cancelled'){cancelled.push({id:c.id,number:c.contract_number,name:c.contract_name,gross:c.gross_amount,planned,paid});totals.paidCancelled+=paid;continue;}
+      if(c.status==='draft'){drafts.push({id:c.id,number:c.contract_number,name:c.contract_name,gross:c.gross_amount,planned,paid});totals.paidDraft+=paid;continue;}
       const gross=c.gross_amount as number|null;
       const planComplete=gross!==null&&planned>=gross;
       const referenced=baseRow?baseContractIds.has(c.id):false;
@@ -724,7 +729,7 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     res.json({
       baseline:baseRow,
       options:opts,
-      cash:{contracts:cashContracts,cancelled,draftCount,totals},
+      cash:{contracts:cashContracts,cancelled,drafts,draftCount:drafts.length,totals},
     });
   });
 

@@ -308,3 +308,87 @@ test('C đợt 1 — tổng dự án chỉ theo bản chốt; tiền hợp đồ
     assert.equal(projB.body.baseline,null);
   });
 });
+
+test('C fix PM — paid của HĐ huỷ/nháp không biến mất; HĐ chỉ có trên dòng bỏ chọn không tính thuộc bản chốt; thuế unknown vẫn nằm trong tổng phải chi đã biết',async()=>{
+  await fixture(async({call,pidA,cookies,rows,mkQuote,getQuote,itemsOf,payloadOf,applyProfile,pmSetSell,pnlOf,profBase}:any)=>{
+    const {pm,bookinga}=cookies;
+    const mkContract=async(partnerId:string,form:string,number:string,money:any,sign:boolean)=>{
+      const c=await call(`/projects/${pidA}/contracts`,{partnerType:'kol',partnerId,contractNumber:number,contractName:'HĐ '+number,signDate:'2026-10-30',snapshot:snapFor(form),money,documentIds:[]},bookinga);
+      assert.equal(c.status,200,JSON.stringify(c.body));
+      if(sign){const s=await call(`/contracts/${c.body.contract.id}`,{revision:c.body.contract.revision,status:'signed'},bookinga);assert.equal(s.status,200,JSON.stringify(s.body));return s.body.contract;}
+      return c.body.contract;
+    };
+    const pay=async(cid:string,amount:number)=>{
+      const r=await call(`/contracts/${cid}/installments`,{name:'Đợt 1',milestone:'Theo HĐ',expectedDate:'2026-11-01',amount},bookinga);
+      assert.equal(r.status,200,JSON.stringify(r.body));
+      const inst=r.body.contract.installments[0];
+      const u=await call(`/contracts/${cid}/installments/${inst.id}`,{revision:inst.revision,paidAmount:amount,paidDate:'2026-11-02'},bookinga);
+      assert.equal(u.status,200,JSON.stringify(u.body));
+    };
+    // HĐ CE (công ty, gross 10,8tr) — sẽ chỉ xuất hiện trên dòng BỎ CHỌN của bản chốt.
+    const cE=await mkContract('p-congty','cong_ty','HD-FIX-E',{basis:'net',amount:10000000,taxRate:8,taxMode:'tren_net'},true);
+    // Bản chốt QB: dòng HKD được tính (hồ sơ), dòng công ty BỎ CHỌN nhưng gắn nguồn HĐ CE.
+    const qid=await mkQuote('PA chốt fix',[
+      {shortlistId:rows['p-hkd'],key:'video',quantity:1},
+      {shortlistId:rows['p-congty'],key:'video',quantity:1},
+    ]);
+    let q=await getQuote(qid,bookinga);
+    const ctLine=itemsOf(q).find((i:any)=>i.shortlistId===rows['p-congty']);
+    const alloc=await call(`/projects/${pidA}/quotes/${qid}/cost-source`,{revision:q.revision,itemId:ctLine.id,kind:'contract',contractId:cE.id,basis:'gross',amount:5000000},bookinga);
+    assert.equal(alloc.status,200,JSON.stringify(alloc.body));
+    q=await getQuote(qid,bookinga);
+    const hkdLine=itemsOf(q).find((i:any)=>i.shortlistId===rows['p-hkd']);
+    await applyProfile(qid,hkdLine.id,{});
+    // PM bỏ chọn dòng công ty + nhập giá bán dòng HKD, rồi duyệt + chốt.
+    const pmQ=await getQuote(qid,pm);
+    const payload={...payloadOf(pmQ),items:payloadOf(pmQ).items.map((i:any)=>i.shortlistId===rows['p-congty']?{...i,included:false}:{...i,sellUnitPrice:100000000})};
+    const saved=await call(`/projects/${pidA}/quotes/${qid}/save`,{revision:pmQ.revision,payload},pm);
+    assert.equal(saved.status,200,JSON.stringify(saved.body));
+    assert.equal((await call(`/projects/${pidA}/quotes/${qid}/status`,{revision:saved.body.quote.revision,status:'submitted'},pm)).status,200);
+    assert.equal((await call(`/projects/${pidA}/quotes/${qid}/status`,{revision:saved.body.quote.revision+1,status:'approved'},pm)).status,200);
+    assert.equal((await call(`/projects/${pidA}/quotes/${qid}/select`,{},pm)).status,200);
+    const pnlBefore=await pnlOf(qid);
+    assert.equal(pnlBefore.netG,50000000);
+    assert.equal(pnlBefore.totalK,53763441);
+    // Fix 2: CE chỉ nằm trên dòng bỏ chọn → KHÔNG referencedBySelected, tính ngoài phạm vi.
+    let proj=(await call(`/projects/${pidA}/pnl`,undefined,pm)).body;
+    const ceCash=proj.cash.contracts.find((c:any)=>c.id===cE.id);
+    assert.equal(ceCash.referencedBySelected,false);
+    assert.equal(proj.cash.totals.outsideSelectedCount,1);
+    assert.equal(proj.cash.totals.outsideSelectedGross,10800000);
+    // Fix 1: HĐ CS gross 100tr ký + trả 30tr rồi HUỶ; HĐ CD còn NHÁP đã trả 10tr.
+    const cS=await mkContract('p-ca-nhan','ca_nhan','HD-FIX-S',{basis:'gross',amount:100000000,taxRate:10,taxMode:'trong_gia_gop'},true);
+    await pay(cS.id,30000000);
+    const cD=await mkContract('p-congty','cong_ty','HD-FIX-D',{basis:'net',amount:10000000,taxRate:8,taxMode:'tren_net'},false);
+    await pay(cD.id,10000000);
+    const cSNow=await call(`/contracts/${cS.id}`,undefined,bookinga);
+    assert.equal((await call(`/contracts/${cS.id}`,{revision:cSNow.body.contract.revision,status:'cancelled'},bookinga)).status,200);
+    proj=(await call(`/projects/${pidA}/pnl`,undefined,pm)).body;
+    const cancelledS=proj.cash.cancelled.find((c:any)=>c.id===cS.id);
+    assert.equal(cancelledS.paid,30000000);
+    assert.equal(cancelledS.gross,100000000);
+    assert.equal(proj.cash.totals.paidCancelled,30000000);
+    assert.equal(proj.cash.totals.paidDraft,10000000);
+    assert.equal(proj.cash.totals.paidAll,40000000);
+    assert.equal(proj.cash.drafts[0].paid,10000000);
+    // Gross/remaining chỉ của nhóm hiệu lực (CE 10,8tr, chưa trả) — gross HĐ huỷ không vào remaining.
+    assert.equal(proj.cash.totals.gross,10800000);
+    assert.equal(proj.cash.totals.remaining,10800000);
+    // Tiền hợp đồng đổi không làm đổi P&L của bản chốt.
+    assert.equal(proj.baseline.pnl.netG,pnlBefore.netG);
+    assert.equal(proj.baseline.pnl.totalK,pnlBefore.totalK);
+    // Fix 3: estimate NET 10tr, thuế 1.111.111 CHƯA phân loại → K partial, profit null,
+    // nhưng tổng phải chi đã biết = GROSS 11.111.111 (không mất khoản thuế 1.111.111).
+    const qE=await mkQuote('PA thuế unknown',[{shortlistId:rows['p-ca-nhan'],key:'video',quantity:1}]);
+    const qe=await getQuote(qE,bookinga);
+    const est=await call(`/projects/${pidA}/quotes/${qE}/cost-source`,{revision:qe.revision,itemId:itemsOf(qe)[0].id,kind:'estimate',basis:'net',amount:10000000,taxRate:10,taxMode:'trong_gia_gop'},bookinga);
+    assert.equal(est.status,200,JSON.stringify(est.body));
+    await pmSetSell(qE,()=>50000000);
+    const pnlE=await pnlOf(qE);
+    assert.equal(pnlE.complete,false);
+    assert.equal(pnlE.profit,null);
+    assert.equal(pnlE.unknownTax,1111111);
+    assert.equal(pnlE.totalK,10000000);
+    assert.equal(pnlE.totalPayableL,11111111);
+  });
+});

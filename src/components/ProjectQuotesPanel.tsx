@@ -240,7 +240,7 @@ function PnlBlock({title,pnl}:{title:string;pnl:any}){
     ['Chi phí trực tiếp khác',pnl.otherDirectCosts],
     ['K — Tổng chi phí trước VAT (= G + thuế chi phí + chi phí khác)',pnl.totalK],
     ['VAT đầu vào công ty (tách riêng, không cộng K)',pnl.vatInput],
-    ['L — Tổng phải chi (= K + VAT)',pnl.totalPayableL],
+    ['L — Tổng phải chi đã biết (theo tổng dòng nguồn; = K + VAT khi phân loại đủ)',pnl.totalPayableL],
     ['Lợi nhuận (= Doanh thu trước thuế − K)',pnl.profit],
   ];
   return <div className="border rounded-xl p-4 bg-white">
@@ -256,7 +256,7 @@ function PnlBlock({title,pnl}:{title:string;pnl:any}){
       <div className="flex justify-between gap-4"><span>Phần đã chốt theo hợp đồng (NET)</span><strong>{money(pnl.committed.net)}</strong></div>
       <div className="flex justify-between gap-4"><span>Phần dự kiến từ hồ sơ/tự xác nhận (NET)</span><strong>{money(pnl.estimated.net)}</strong></div>
     </div>
-    {pnl.unknownTax>0&&<p className="text-xs text-amber-800 mt-2">Có {money(pnl.unknownTax)} tiền thuế chưa phân loại — không cộng vào K hay VAT cho tới khi xác nhận loại thuế.</p>}
+    {pnl.unknownTax>0&&<p className="text-xs text-amber-800 mt-2">Có {money(pnl.unknownTax)} tiền thuế chưa phân loại — chưa cộng vào K (lợi nhuận chưa kết luận), nhưng tổng phải chi L vẫn tính đủ khoản này vì nó nằm trong tổng GROSS của nguồn chi phí.</p>}
     {!pnl.complete&&pnl.missingLines?.length>0&&<p className="text-xs text-amber-800 mt-2">Dòng thiếu dữ liệu: {pnl.missingLines.map((x:any)=>`${x.creator} (${x.reason==='no_source'?'chưa gắn nguồn chi phí':x.reason==='unknown_tax_category'?'chưa xác định loại thuế':'chưa có giá đầu vào'})`).join('; ')}. Chỉ cộng phần đã biết, không tự coi phần thiếu là 0.</p>}
     <p className="text-xs text-slate-500 mt-2">Quy ước nghiệp vụ nội bộ: K không gồm VAT đầu vào công ty (tách riêng để dự trù dòng tiền ở L). Lợi nhuận không tính từ tiền đã trả.</p>
   </div>;
@@ -518,8 +518,11 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
               <div className="flex justify-between gap-4"><span>Còn phải trả (theo giá trị hợp đồng − đã trả)</span><strong>{money(pnlData.cash.totals.remaining)}</strong></div>
               <div className="flex justify-between gap-4"><span>Hợp đồng chưa lên kế hoạch đủ</span><strong>{pnlData.cash.totals.missingPlan.toLocaleString('vi-VN')}</strong></div>
               <div className="flex justify-between gap-4"><span>Hợp đồng ngoài phương án chốt</span><strong>{pnlData.baseline?pnlData.cash.totals.outsideSelectedCount.toLocaleString('vi-VN')+' ('+money(pnlData.cash.totals.outsideSelectedGross)+')':'Chưa có phương án chốt'}</strong></div>
-              <div className="flex justify-between gap-4"><span>Hợp đồng đã huỷ (tách riêng, không tính)</span><strong>{pnlData.cash.cancelled.length.toLocaleString('vi-VN')}</strong></div>
-              <div className="flex justify-between gap-4"><span>Hợp đồng còn nháp (chưa ký, chưa tính)</span><strong>{pnlData.cash.draftCount.toLocaleString('vi-VN')}</strong></div>
+              <div className="flex justify-between gap-4"><span>Hợp đồng đã huỷ (tách riêng; không tính vào còn phải trả)</span><strong>{pnlData.cash.cancelled.length.toLocaleString('vi-VN')}</strong></div>
+              <div className="flex justify-between gap-4"><span>Đã trả thuộc hợp đồng đã huỷ (vẫn hiện, chưa giả định hoàn tiền)</span><strong>{money(pnlData.cash.totals.paidCancelled??0)}</strong></div>
+              <div className="flex justify-between gap-4"><span>Hợp đồng còn nháp (chưa ký, chưa tính nghĩa vụ)</span><strong>{pnlData.cash.draftCount.toLocaleString('vi-VN')}</strong></div>
+              <div className="flex justify-between gap-4"><span>Đã trả thuộc hợp đồng nháp</span><strong>{money(pnlData.cash.totals.paidDraft??0)}</strong></div>
+              <div className="flex justify-between gap-4"><span>Tổng đã trả mọi phạm vi (hiệu lực + huỷ + nháp)</span><strong>{money(pnlData.cash.totals.paidAll??0)}</strong></div>
             </div>
             <p className="text-xs text-slate-500 mt-2">Mỗi hợp đồng đếm đúng một lần theo dự án, không nhân theo dòng hay phương án. Đã trả chỉ để theo dõi dòng tiền — không dùng để suy ra lợi nhuận thực tế.</p>
           </div>
