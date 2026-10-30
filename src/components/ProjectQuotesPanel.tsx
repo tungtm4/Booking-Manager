@@ -262,7 +262,7 @@ function PnlBlock({title,pnl}:{title:string;pnl:any}){
   </div>;
 }
 
-export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{projectId:string;isAdmin:boolean;onProjectChanged:()=>Promise<void>}){
+export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyChange}:{projectId:string;isAdmin:boolean;onProjectChanged:()=>Promise<void>;onDirtyChange?:(dirty:boolean)=>void}){
   const [data,setData]=useState<any>(null),[quote,setQuote]=useState<any>(null),[items,setItems]=useState<Item[]>([]);
   const [discount,setDiscount]=useState<any>({mode:'fixed',value:0}),[fee,setFee]=useState<any>({mode:'percent',value:0}),[tax,setTax]=useState(0);
   const [optionId,setOptionId]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[dirty,setDirty]=useState(false);
@@ -279,6 +279,9 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged}:{project
   const [pnlData,setPnlData]=useState<any>(null);
   const loadSeqRef=useRef(0);
   const base=`/projects/${projectId}`;
+  // Báo trạng thái chưa lưu lên shell để chặn chuyển tab làm mất dữ liệu đang sửa.
+  useEffect(()=>{onDirtyChange?.(dirty);},[dirty,onDirtyChange]);
+  useEffect(()=>()=>{onDirtyChange?.(false);},[]);
   function loadQuote(q:any){setQuote(q);setItems(q?.items??[]);setDiscount(q?.discount??{mode:'fixed',value:0});setFee(q?.agencyFee??{mode:'percent',value:0});setTax(q?.taxRate??0);setDirty(false);setCustomer(null);}
   async function refresh(preferred?:string){
     let result:any;
