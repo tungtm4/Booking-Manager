@@ -224,7 +224,7 @@ test('UX-3.3 (M9): Chế độ chỉ đọc ngăn toàn bộ đường ghi của
   assert.equal(deletedKol, false, 'deleteKol trả về false khi ở chế độ chỉ đọc');
 
   // Thử cập nhật giá hàng loạt -> trả về 0
-  const bulkPriceRes = StorageService.bulkUpdatePrices([{ kolId: 'kol-sample-1', bangGia: {} }]);
+  const bulkPriceRes = StorageService.bulkUpdatePrices([{ kolId: 'kol-sample-1', bangGia: {} as any }]);
   assert.equal(bulkPriceRes, 0, 'bulkUpdatePrices trả về 0 khi ở chế độ chỉ đọc');
 
   // Thử import batch -> trả về 0

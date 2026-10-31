@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Users, 
   Share2, 
@@ -56,6 +56,14 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
   const [activeTool, setActiveTool] = useState<'excel' | 'paste' | 'ai' | 'bulk_price' | null>(null);
   const [showCommunityImport, setShowCommunityImport] = useState<boolean>(false);
 
+  // Gương của selectedKolForDetail để loadKols đọc mà không thành dependency —
+  // nếu loadKols phụ thuộc state này, mỗi lần đồng bộ chi tiết đang mở sẽ tạo object mới,
+  // kích hoạt lại effect tải danh sách thành vòng lặp vô hạn và ghi đè thao tác đóng modal.
+  const selectedKolRef = useRef<CatalogKol | null>(null);
+  useEffect(() => {
+    selectedKolRef.current = selectedKolForDetail;
+  }, [selectedKolForDetail]);
+
   // Tải danh sách KOL từ kho server chính thức
   const loadKols = useCallback(async () => {
     setLoading(true);
@@ -63,8 +71,9 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
       const list = await CatalogService.list();
       setKols(list);
       setError('');
-      if (selectedKolForDetail) {
-        const updated = list.find((k) => k.id === selectedKolForDetail.id);
+      const selected = selectedKolRef.current;
+      if (selected) {
+        const updated = list.find((k) => k.id === selected.id);
         setSelectedKolForDetail(updated || null);
       }
     } catch (e) {
@@ -72,7 +81,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
     } finally {
       setLoading(false);
     }
-  }, [selectedKolForDetail]);
+  }, []);
 
   useEffect(() => {
     loadKols();
