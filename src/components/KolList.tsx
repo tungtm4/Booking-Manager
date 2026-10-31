@@ -55,6 +55,7 @@ interface KolListProps {
   onOpenAddKol: () => void;
   onAddToSow?: (kol: KolProfile) => void;
   initialSearch?: string;
+  canEdit?: boolean;
 }
 
 type SortOption = 'followers_desc' | 'followers_asc' | 'price_asc' | 'price_desc' | 'newest';
@@ -68,6 +69,7 @@ export const KolList: React.FC<KolListProps> = ({
   onOpenAddKol,
   onAddToSow,
   initialSearch = '',
+  canEdit = true,
 }) => {
   // State Bộ lọc
   const [keyword, setKeyword] = useState(initialSearch);
@@ -516,14 +518,16 @@ export const KolList: React.FC<KolListProps> = ({
               )}
             </button>
 
-            <button
-              onClick={onOpenAddKol}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium shadow-xs shadow-indigo-200 transition-all active:scale-95 shrink-0"
-            >
-              <PlusCircle className="w-4 h-4" />
-              <span className="hidden sm:inline">Thêm KOL</span>
-              <span className="sm:hidden">Thêm</span>
-            </button>
+            {canEdit && (
+              <button
+                onClick={onOpenAddKol}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium shadow-xs shadow-indigo-200 transition-all active:scale-95 shrink-0 cursor-pointer"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span className="hidden sm:inline">Thêm KOL</span>
+                <span className="sm:hidden">Thêm</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -954,21 +958,25 @@ export const KolList: React.FC<KolListProps> = ({
                       </button>
                     )}
 
-                    <button
-                      onClick={() => onEditKol(kol)}
-                      title="Chỉnh sửa hồ sơ"
-                      className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
+                    {canEdit && (
+                      <>
+                        <button
+                          onClick={() => onEditKol(kol)}
+                          title="Chỉnh sửa hồ sơ"
+                          className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
 
-                    <button
-                      onClick={() => onDeleteKol(kol)}
-                      title="Xóa hồ sơ"
-                      className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                        <button
+                          onClick={() => onDeleteKol(kol)}
+                          title="Xóa hồ sơ"
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
                     </div>
                   </div>
                 </div>
@@ -1139,20 +1147,24 @@ export const KolList: React.FC<KolListProps> = ({
                           >
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => onEditKol(kol)}
-                            className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition-colors"
-                            title="Chỉnh sửa"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => onDeleteKol(kol)}
-                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                            title="Xóa"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canEdit && (
+                            <>
+                              <button
+                                onClick={() => onEditKol(kol)}
+                                className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
+                                title="Chỉnh sửa"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => onDeleteKol(kol)}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                                title="Xóa"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>

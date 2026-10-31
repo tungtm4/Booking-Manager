@@ -16,13 +16,22 @@ import { AiPriceExtractor } from './components/AiPriceExtractor';
 import { DataImportView } from './components/DataImportView';
 import { DataBackupModal } from './components/DataBackupModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
-import { StorageService } from './services/storageService';
+import { StorageService, setStorageReadOnly } from './services/storageService';
 import { CatalogService, readLegacyLocalKols } from './services/catalogService';
 import { CatalogMigrationModal } from './components/CatalogMigrationModal';
 import { CollaborationHistory, KolProfile, RatingReview, SowQuote, PRICE_FORMAT_LABELS, RecommendedKolSowItem, SowLineItem } from './types/kol';
 
-export default function App() {
+export default function App({ readOnly = false }: { readOnly?: boolean } = {}) {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+
+  useEffect(() => {
+    if (readOnly) {
+      setStorageReadOnly(true);
+      return () => {
+        setStorageReadOnly(false);
+      };
+    }
+  }, [readOnly]);
 
   // Core Data State
   // Kho KOL chính thức nằm trên server (Vấn đề 7); localStorage chỉ còn giữ báo giá SOW lẻ và thẻ tùy chỉnh.
@@ -295,6 +304,15 @@ export default function App() {
         onOpenBackup={() => setIsBackupModalOpen(true)}
       />
 
+      {readOnly && (
+        <div className="bg-amber-100/80 border-b border-amber-300 px-6 py-2.5 text-amber-900 text-xs font-semibold flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="bg-amber-700 text-white text-[10px] uppercase font-bold px-2 py-0.5 rounded">Lưu trữ / Dữ liệu cũ (Chỉ đọc)</span>
+            <span>Các báo giá SOW và hồ sơ trên trình duyệt ở chế độ chỉ đọc để tra cứu và chuyển đổi lên kho server. Không nhận thêm hoặc sửa đổi dữ liệu tại đây.</span>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6">
         {kolsLoading && <p className="py-4 text-slate-500">Đang tải kho KOL từ server…</p>}
@@ -314,9 +332,9 @@ export default function App() {
           <Dashboard
             kols={kols}
             onSelectKol={(kol) => setSelectedKolForDetail(kol)}
-            onOpenAddKol={handleOpenAddKol}
+            onOpenAddKol={readOnly ? () => {} : handleOpenAddKol}
             setActiveTab={setActiveTab}
-            onDeleteSampleData={handleDeleteSampleData}
+            onDeleteSampleData={readOnly ? () => {} : handleDeleteSampleData}
             onQuickSearch={handleQuickSearch}
           />
         )}
@@ -324,6 +342,7 @@ export default function App() {
         {activeTab === 'kols' && (
           <KolList
             kols={kols}
+            canEdit={!readOnly}
             onSelectKol={(kol) => setSelectedKolForDetail(kol)}
             onEditKol={handleOpenEditKol}
             onDeleteKol={handleRequestDeleteKol}
@@ -411,6 +430,7 @@ export default function App() {
         onAddToSow={handleAddKolToSow}
         onAddCollaboration={handleAddCollaboration}
         onUpdateRating={handleUpdateRating}
+        canEdit={!readOnly}
       />
 
       {/* Add / Edit Form Modal */}

@@ -38,6 +38,7 @@ interface KolDetailModalProps {
   onAddToSow: (kol: KolProfile) => void;
   onAddCollaboration: (kolId: string, item: Omit<CollaborationHistory, 'id'>) => void;
   onUpdateRating: (kolId: string, rating: { diem: number; nhanXet: string }) => void;
+  canEdit?: boolean;
 }
 
 export const KolDetailModal: React.FC<KolDetailModalProps> = ({
@@ -49,6 +50,7 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
   onAddToSow,
   onAddCollaboration,
   onUpdateRating,
+  canEdit = true,
 }) => {
   const [showAddCollabModal, setShowAddCollabModal] = useState(false);
   const [showRatingModal, setShowRatingModal] = useState(false);
@@ -418,13 +420,15 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
                 </h3>
                 <p className="text-xs text-slate-400">Các chiến dịch đã book với KOL này trước đây</p>
               </div>
-              <button
-                onClick={() => setShowAddCollabModal(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Thêm lịch sử job</span>
-              </button>
+              {canEdit && (
+                <button
+                  onClick={() => setShowAddCollabModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Thêm lịch sử job</span>
+                </button>
+              )}
             </div>
 
             {kol.lichSuHopTac && kol.lichSuHopTac.length > 0 ? (
@@ -498,29 +502,35 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
 
         {/* Modal Footer Actions */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
-          <button
-            onClick={() => onDelete(kol)}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-          >
-            <Trash2 className="w-4 h-4" />
-            <span>Xóa hồ sơ</span>
-          </button>
+          <div>
+            {canEdit && (
+              <button
+                onClick={() => onDelete(kol)}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xóa hồ sơ</span>
+              </button>
+            )}
+          </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                if (signingDirty && !confirmDiscardSigningChanges()) return;
-                onEdit(kol);
-              }}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors"
-            >
-              <Edit2 className="w-3.5 h-3.5" />
-              <span>Sửa hồ sơ</span>
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => {
+                  if (signingDirty && !confirmDiscardSigningChanges()) return;
+                  onEdit(kol);
+                }}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors cursor-pointer"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+                <span>Sửa hồ sơ</span>
+              </button>
+            )}
 
             <button
               onClick={guardedClose}
-              className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors"
+              className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
             >
               Đóng
             </button>

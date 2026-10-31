@@ -264,7 +264,21 @@ export function applyImportBatchToList(
     return { created: createdCount, updated: updatedCount, kols, changed };
 }
 
+let _isReadOnlyArchive = false;
+
+export function setStorageReadOnly(readOnly: boolean): void {
+  _isReadOnlyArchive = readOnly;
+}
+
+export function isStorageReadOnly(): boolean {
+  return _isReadOnlyArchive;
+}
+
 export const StorageService = {
+  isReadOnly(): boolean {
+    return _isReadOnlyArchive;
+  },
+
   // Lấy danh sách KOL
   getKols(): KolProfile[] {
     try {
@@ -303,6 +317,10 @@ export const StorageService = {
 
   // Lưu mới hoặc cập nhật KOL
   saveKol(kol: KolProfile): KolProfile {
+    if (_isReadOnlyArchive) {
+      console.warn('StorageService ở chế độ chỉ đọc. Không nhận ghi KOL mới.');
+      return kol;
+    }
     const kols = this.getKols();
     const now = new Date().toISOString();
     const index = kols.findIndex((k) => k.id === kol.id);
@@ -331,6 +349,10 @@ export const StorageService = {
 
   // Xóa KOL
   deleteKol(id: string): boolean {
+    if (_isReadOnlyArchive) {
+      console.warn('StorageService ở chế độ chỉ đọc. Không xoá KOL.');
+      return false;
+    }
     const kols = this.getKols();
     const target = kols.find((k) => k.id === id);
     if (!target) return false;
@@ -346,7 +368,7 @@ export const StorageService = {
 
   // Xóa nhiều KOL cùng lúc
   deleteMultipleKols(ids: string[]): number {
-    if (!ids || ids.length === 0) return 0;
+    if (_isReadOnlyArchive || !ids || ids.length === 0) return 0;
     const idSet = new Set(ids);
     const kols = this.getKols();
     const removedKols = kols.filter((k) => idSet.has(k.id));
@@ -412,6 +434,10 @@ export const StorageService = {
 
   // Cập nhật bảng giá hàng loạt cho nhiều KOL (Feature 2.1)
   bulkUpdatePrices(updates: Array<{ kolId: string; bangGia: KolProfile['bangGia'] }>): number {
+    if (_isReadOnlyArchive) {
+      console.warn('StorageService ở chế độ chỉ đọc. Không cập nhật bảng giá.');
+      return 0;
+    }
     const kols = this.getKols();
     const now = new Date().toISOString();
     let updatedCount = 0;
@@ -437,6 +463,10 @@ export const StorageService = {
 
   // Cập nhật giá 1 format cho KOL (dùng cho AI trích xuất giá - Feature 2.2)
   updateKolPriceFormat(kolId: string, format: keyof KolProfile['bangGia'], price: number | null): KolProfile | null {
+    if (_isReadOnlyArchive) {
+      console.warn('StorageService ở chế độ chỉ đọc. Không cập nhật giá.');
+      return null;
+    }
     const kol = this.getKolById(kolId);
     if (!kol) return null;
 
@@ -465,6 +495,10 @@ export const StorageService = {
     matchKey: 'name' | 'link' = 'name',
     overwriteEmpty: boolean = false
   ): { created: number; updated: number } {
+    if (_isReadOnlyArchive) {
+      console.warn('StorageService ở chế độ chỉ đọc. Không nhận import batch.');
+      return { created: 0, updated: 0 };
+    }
     const r = applyImportBatchToList(this.getKols(), items, matchKey, overwriteEmpty);
     localStorage.setItem(STORAGE_KEYS.KOLS, JSON.stringify(r.kols));
     notifyChange(STORAGE_KEYS.KOLS);
@@ -473,6 +507,10 @@ export const StorageService = {
 
   // Xóa toàn bộ dữ liệu mẫu
   deleteSampleKols(): number {
+    if (_isReadOnlyArchive) {
+      console.warn('StorageService ở chế độ chỉ đọc. Không xoá dữ liệu mẫu.');
+      return 0;
+    }
     const kols = this.getKols();
     const nonSample = kols.filter((k) => !k.isSample);
     const countRemoved = kols.length - nonSample.length;
@@ -484,6 +522,10 @@ export const StorageService = {
 
   // Khôi phục 20 KOL mẫu
   restoreSampleKols(): void {
+    if (_isReadOnlyArchive) {
+      console.warn('StorageService ở chế độ chỉ đọc. Không khôi phục dữ liệu mẫu.');
+      return;
+    }
     const current = this.getKols().filter((k) => !k.isSample);
     const combined = [...INITIAL_SAMPLE_KOLS, ...current];
     localStorage.removeItem('kol_booking_samples_cleared');
@@ -495,6 +537,10 @@ export const StorageService = {
   // Khôi phục riêng báo giá SOW lẻ và thẻ tùy chỉnh từ file sao lưu.
   // Không đụng vào dữ liệu KOL cũ trên trình duyệt (bản đối chiếu/khôi phục cho nhập chuyển đổi).
   restoreQuotesAndTags(quotes: SowQuote[] | null, customTags: string[] | null): void {
+    if (_isReadOnlyArchive) {
+      console.warn('StorageService ở chế độ chỉ đọc. Không khôi phục/ghi báo giá cũ.');
+      return;
+    }
     if (Array.isArray(quotes)) {
       localStorage.setItem(STORAGE_KEYS.SOW_QUOTES, JSON.stringify(quotes));
       notifyChange(STORAGE_KEYS.SOW_QUOTES);
@@ -520,6 +566,10 @@ export const StorageService = {
   },
 
   saveQuote(quote: SowQuote): SowQuote {
+    if (_isReadOnlyArchive) {
+      console.warn('StorageService ở chế độ chỉ đọc. Không nhận ghi báo giá mới.');
+      return quote;
+    }
     const quotes = this.getQuotes();
     const idx = quotes.findIndex((q) => q.id === quote.id);
     if (idx >= 0) {
@@ -533,6 +583,10 @@ export const StorageService = {
   },
 
   deleteQuote(id: string): boolean {
+    if (_isReadOnlyArchive) {
+      console.warn('StorageService ở chế độ chỉ đọc. Không xoá báo giá.');
+      return false;
+    }
     const quotes = this.getQuotes();
     const filtered = quotes.filter((q) => q.id !== id);
     if (filtered.length !== quotes.length) {

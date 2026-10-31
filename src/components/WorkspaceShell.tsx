@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ProjectShortlistPanel } from './ProjectShortlistPanel';
 import { CommunityManager } from './CommunityManager';
+import { PartnerCatalogManager } from './PartnerCatalogManager';
 import { ProjectProposal } from './ProjectProposal';
 import { ProjectQuotesPanel } from './ProjectQuotesPanel';
 import { ProjectContractsPanel } from './ProjectContractsPanel';
@@ -575,8 +576,9 @@ export default function WorkspaceShell() {
   const [busy, setBusy] = useState(false);
 
   // Shell Menu & Top Navigation State
-  const [page, setPage] = useState<'projects' | 'proposal' | 'users' | 'legacy' | 'communities'>('projects');
-  const [partnerSubTab, setPartnerSubTab] = useState<'community' | 'kol'>('community');
+  const [page, setPage] = useState<'projects' | 'partners' | 'proposal' | 'users' | 'legacy' | 'communities'>('projects');
+  const [partnerSubTab, setPartnerSubTab] = useState<'community' | 'kol'>('kol');
+  const [showArchiveModule, setShowArchiveModule] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
 
@@ -792,32 +794,26 @@ export default function WorkspaceShell() {
                 Dự án
               </button>
               <button
-                onClick={() => handleNavigateWithGuard(() => setPage('communities'))}
+                onClick={() => handleNavigateWithGuard(() => setPage('partners'))}
                 className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                  page === 'communities' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
+                  page === 'partners' || page === 'communities' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
                 }`}
               >
-                Kho Community
+                Kho đối tác
               </button>
               {user.role === 'admin' && (
-                <>
-                  <button
-                    onClick={() => handleNavigateWithGuard(() => setPage('users'))}
-                    className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                      page === 'users' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
-                    }`}
-                  >
-                    Tài khoản
-                  </button>
-                  <button
-                    onClick={() => handleNavigateWithGuard(() => setPage('legacy'))}
-                    className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-                      page === 'legacy' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
-                    }`}
-                  >
-                    KOL & Báo giá hiện có
-                  </button>
-                </>
+                <button
+                  onClick={() => handleNavigateWithGuard(() => setPage('users'))}
+                  className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer ${
+                    page === 'users' ? 'bg-[#7C3AED] text-white shadow-xs' : 'text-slate-600 hover:text-purple-700 hover:bg-purple-100/50'
+                  }`}
+                >
+                  Tài khoản
+                </button>
+              )}
+              {/* Tương thích ngược: Kho Community đã được gộp trong Kho đối tác */}
+              {false && (
+                <button onClick={() => setPage('communities')}>Kho Community</button>
               )}
               {/* Tương thích ngược: Đề xuất KOL đã được chuyển vào tab Đối tác & Phase của dự án */}
               {false && (
@@ -915,14 +911,16 @@ export default function WorkspaceShell() {
               Vào tab Đối tác & Phase của dự án
             </button>
           </div>
+        ) : page === 'partners' ? (
+          <PartnerCatalogManager isAdmin={user.role === 'admin'} initialTab={partnerSubTab} />
         ) : page === 'communities' ? (
-          <CommunityManager isAdmin={user.role === 'admin'} />
+          <PartnerCatalogManager isAdmin={user.role === 'admin'} initialTab="community" />
         ) : page === 'legacy' && user.role === 'admin' ? (
           <div className="space-y-4">
             <p className="px-6 py-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl text-sm font-medium">
-              Dữ liệu KOL và SOW hiện có vẫn lưu trên trình duyệt này, chưa chia sẻ theo dự án. Chỉ Admin được mở module này trong giai đoạn chuyển đổi.
+              Dữ liệu KOL và SOW cũ trên trình duyệt ở chế độ chỉ đọc. Chỉ Admin được mở module này trong giai đoạn chuyển đổi.
             </p>
-            <App />
+            <App readOnly={true} />
           </div>
         ) : page === 'users' && user.role === 'admin' ? (
           <div className="space-y-6">
@@ -993,6 +991,37 @@ export default function WorkspaceShell() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* M9: Khu Lưu trữ / Dữ liệu cũ chỉ đọc dành riêng cho Admin trong Quản trị */}
+            <div className="bg-white p-6 rounded-3xl border border-amber-200 shadow-xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-100 pb-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 uppercase tracking-wider">
+                      Lưu trữ / Dữ liệu cũ
+                    </span>
+                    <span className="text-xs text-slate-500 font-medium">Chế độ chỉ đọc (Read-Only)</span>
+                  </div>
+                  <h2 className="text-lg font-bold text-slate-900 mt-1">Khu Lưu trữ & Báo giá SOW cũ</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Gom các module cũ (báo giá SOW cũ, dashboard KOL cũ, dữ liệu trình duyệt chưa chuyển đổi). Chỉ Admin tra cứu và chuyển đổi lên kho chính thức. Toàn bộ đường ghi mới đều bị chặn.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowArchiveModule(!showArchiveModule)}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs"
+                >
+                  {showArchiveModule ? 'Thu gọn Khu Lưu trữ' : 'Mở Khu Lưu trữ (Chỉ đọc)'}
+                </button>
+              </div>
+
+              {showArchiveModule && (
+                <div className="pt-2">
+                  <App readOnly={true} />
+                </div>
+              )}
             </div>
           </div>
         ) : (

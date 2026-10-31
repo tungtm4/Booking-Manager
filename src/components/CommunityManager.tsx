@@ -38,15 +38,56 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
   const [loaiFilter, setLoaiFilter] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+
+  // M6: Tách màn Xem chi tiết (chỉ đọc) khỏi form Sửa
+  const [viewing, setViewing] = useState<CatalogCommunity | null>(null);
+  const [viewingSigningDirty, setViewingSigningDirty] = useState(false);
+
   const [editing, setEditing] = useState<CommunityProfile | null>(null);
+  const [editingInitial, setEditingInitial] = useState<CommunityProfile | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [signingDirty, setSigningDirty] = useState(false);
-  // Đóng form khi khối ký kết còn thay đổi chưa lưu phải hỏi trước (cùng nguyên tắc mọi bề mặt).
+
+  // Đóng màn xem chi tiết
+  const closeViewing = () => {
+    if (viewingSigningDirty && !confirmDiscardSigningChanges()) return;
+    setViewingSigningDirty(false);
+    setViewing(null);
+  };
+
+  // Đóng form khi còn thay đổi chưa lưu (form hoặc signing) phải xác nhận trước
   const closeEditing = () => {
+    const isFormDirty = Boolean(
+      editing && editingInitial && JSON.stringify(editing) !== JSON.stringify(editingInitial)
+    );
+    if (isFormDirty) {
+      if (!window.confirm('Bạn có thay đổi chưa lưu trong form Community. Bạn có chắc muốn đóng và hủy bỏ thay đổi dở dang?')) {
+        return;
+      }
+    }
     if (signingDirty && !confirmDiscardSigningChanges()) return;
     setSigningDirty(false);
     setEditing(null);
+    setEditingInitial(null);
   };
+
+  const startEdit = (c: CatalogCommunity) => {
+    if (viewingSigningDirty && !confirmDiscardSigningChanges()) return;
+    setViewingSigningDirty(false);
+    setViewing(null);
+    const cloned = JSON.parse(JSON.stringify(c));
+    setEditing(cloned);
+    setEditingInitial(cloned);
+    setIsNew(false);
+  };
+
+  const startNew = () => {
+    const blank = blankProfile();
+    setEditing(blank);
+    setEditingInitial(JSON.parse(JSON.stringify(blank)));
+    setIsNew(true);
+  };
+
   const [showImport, setShowImport] = useState(false);
 
   async function load() {
@@ -99,6 +140,7 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
       if (signingDirty && !confirmDiscardSigningChanges()) { await load(); return; }
       setSigningDirty(false);
       setEditing(null);
+      setEditingInitial(null);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không lưu được Community.');
@@ -126,8 +168,8 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
         </div>
         {isAdmin && (
           <div className="flex gap-2">
-            <button type="button" className="border rounded-lg px-3 py-2 text-sm bg-white hover:bg-slate-50" onClick={() => setShowImport(true)}>Nhập từ Sheet/Excel</button>
-            <button type="button" className={button} onClick={() => { setEditing(blankProfile()); setIsNew(true); }}>Thêm Community</button>
+            <button type="button" className="border rounded-lg px-3 py-2 text-sm bg-white hover:bg-slate-50 cursor-pointer" onClick={() => setShowImport(true)}>Nhập từ Sheet/Excel</button>
+            <button type="button" className={button + ' cursor-pointer'} onClick={startNew}>Thêm Community</button>
           </div>
         )}
       </div>
@@ -148,21 +190,29 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
       {loading ? <p className="text-slate-500">Đang tải kho Community…</p> : (
         <div className="space-y-3">
           {paged.pageItems.map(c => (
-            <article key={c.id} className="bg-white border rounded-2xl p-4 space-y-2">
+            <article key={c.id} className="bg-white border rounded-2xl p-4 space-y-2 hover:border-purple-200 transition-colors">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <h3 className="font-semibold">{c.ten}
-                    <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">{COMMUNITY_KIND_LABELS[c.loai]}</span>
-                    <span className="ml-1 text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{c.nenTang}</span>
+                  <h3
+                    className="font-semibold text-slate-900 cursor-pointer hover:text-indigo-600 transition-colors flex items-center flex-wrap gap-1.5"
+                    onClick={() => setViewing(c)}
+                  >
+                    <span>{c.ten}</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">{COMMUNITY_KIND_LABELS[c.loai]}</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{c.nenTang}</span>
                   </h3>
                   {c.link && <a className="text-xs text-indigo-700 underline break-all" href={c.link} target="_blank" rel="noreferrer">{c.link}</a>}
                 </div>
-                {isAdmin && (
-                  <div className="flex gap-2 text-sm">
-                    <button type="button" className="text-indigo-700 underline" disabled={busy} onClick={() => { setEditing(JSON.parse(JSON.stringify(c))); setIsNew(false); }}>Sửa</button>
-                    <button type="button" className="text-red-700 underline" disabled={busy} onClick={() => remove(c)}>Xoá</button>
-                  </div>
-                )}
+                <div className="flex items-center gap-2 text-sm">
+                  <button type="button" className="text-indigo-600 hover:underline cursor-pointer" onClick={() => setViewing(c)}>Xem chi tiết</button>
+                  {isAdmin && (
+                    <>
+                      <span className="text-slate-300">|</span>
+                      <button type="button" className="text-indigo-700 underline cursor-pointer" disabled={busy} onClick={() => startEdit(c)}>Sửa</button>
+                      <button type="button" className="text-red-700 underline cursor-pointer" disabled={busy} onClick={() => remove(c)}>Xoá</button>
+                    </>
+                  )}
+                </div>
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
                 <span>{communityScaleLabel(c)}</span>
@@ -208,12 +258,172 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
         </div>
       )}
 
+      {/* M6: MÀN XEM CHI TIẾT CHỈ ĐỌC (Không có bất kỳ ô input/form nào) */}
+      {viewing && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto p-4" role="dialog" aria-modal="true" aria-label="Chi tiết Community">
+          <div className="bg-white rounded-3xl shadow-xl w-full max-w-4xl my-8 p-6 space-y-6">
+            <div className="flex items-start justify-between border-b pb-4">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xl font-bold text-slate-900">{viewing.ten}</h2>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-semibold">{COMMUNITY_KIND_LABELS[viewing.loai]}</span>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-medium">{viewing.nenTang}</span>
+                </div>
+                {viewing.link && (
+                  <a className="text-sm text-indigo-600 hover:underline break-all mt-1 inline-block" href={viewing.link} target="_blank" rel="noreferrer">
+                    {viewing.link} ↗
+                  </a>
+                )}
+              </div>
+              <button type="button" onClick={closeViewing} aria-label="Đóng" className="text-slate-400 hover:text-slate-700 p-1 text-xl font-bold leading-none cursor-pointer">✕</button>
+            </div>
+
+            {/* Thông tin tổng quan chỉ đọc */}
+            <div className="grid sm:grid-cols-3 gap-4 text-sm bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <div>
+                <span className="text-xs text-slate-500 block">Quy mô theo dõi / thành viên</span>
+                <strong className="text-slate-900 text-base">{communityScaleLabel(viewing)}</strong>
+              </div>
+              <div>
+                <span className="text-xs text-slate-500 block">Chủ đề / Lĩnh vực</span>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {(viewing.linhVuc ?? []).length > 0 ? (
+                    viewing.linhVuc.map(t => (
+                      <span key={t} className="text-xs px-2 py-0.5 bg-white border border-slate-200 rounded-md font-medium text-slate-700">{t}</span>
+                    ))
+                  ) : <span className="text-slate-400 italic">Chưa xác định</span>}
+                </div>
+              </div>
+              <div>
+                <span className="text-xs text-slate-500 block">Cập nhật lần cuối</span>
+                <span className="text-slate-800 font-medium">
+                  {viewing.updatedAt ? formatDateTimeVN(viewing.updatedAt) : (viewing.ngayCapNhat ? formatDateTimeVN(viewing.ngayCapNhat) : '—')}
+                </span>
+              </div>
+              {viewing.linkInsight && (
+                <div className="sm:col-span-3">
+                  <span className="text-xs text-slate-500 block">Link insight phân tích</span>
+                  <a href={viewing.linkInsight} target="_blank" rel="noreferrer" className="text-xs text-indigo-700 underline break-all">
+                    {viewing.linkInsight} ↗
+                  </a>
+                </div>
+              )}
+              {viewing.ghiChuTep && (
+                <div className="sm:col-span-3">
+                  <span className="text-xs text-slate-500 block">Tệp người xem & lưu ý</span>
+                  <p className="text-xs text-slate-700 whitespace-pre-line mt-0.5">{viewing.ghiChuTep}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Thông tin liên hệ chỉ đọc */}
+            {(viewing.lienHe?.tenNguoiLienHe || viewing.lienHe?.soDienThoai || viewing.lienHe?.emailZalo || viewing.nguon) && (
+              <div className="p-4 border rounded-2xl bg-white space-y-2 text-sm">
+                <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500">Thông tin liên hệ & Nguồn</h4>
+                <div className="grid sm:grid-cols-3 gap-3">
+                  {viewing.lienHe?.tenNguoiLienHe && (
+                    <div>
+                      <span className="text-xs text-slate-400 block">Người phụ trách</span>
+                      <strong className="text-slate-800">{viewing.lienHe.tenNguoiLienHe}</strong>
+                    </div>
+                  )}
+                  {viewing.lienHe?.soDienThoai && (
+                    <div>
+                      <span className="text-xs text-slate-400 block">Số điện thoại</span>
+                      <strong className="text-slate-800">{viewing.lienHe.soDienThoai}</strong>
+                    </div>
+                  )}
+                  {viewing.lienHe?.emailZalo && (
+                    <div>
+                      <span className="text-xs text-slate-400 block">Email / Zalo</span>
+                      <strong className="text-slate-800">{viewing.lienHe.emailZalo}</strong>
+                    </div>
+                  )}
+                  {viewing.nguon && (
+                    <div className="sm:col-span-3">
+                      <span className="text-xs text-slate-400 block">Nguồn hồ sơ</span>
+                      <span className="text-slate-700 text-xs">{viewing.nguon}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Bảng giá dịch vụ Community (Chỉ đọc) */}
+            <div className="space-y-3">
+              <h4 className="font-bold text-sm text-slate-900">Bảng giá dịch vụ tham khảo ({viewing.dichVu?.length || 0})</h4>
+              {(viewing.dichVu ?? []).length > 0 ? (
+                <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 text-left text-xs font-semibold text-slate-600 border-b">
+                        <th className="px-4 py-2.5">Tên dịch vụ</th>
+                        <th className="px-4 py-2.5">Đơn vị</th>
+                        <th className="px-4 py-2.5">Giá tham khảo</th>
+                        <th className="px-4 py-2.5">Điều kiện / Phạm vi</th>
+                        <th className="px-4 py-2.5">Nguồn giá</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {viewing.dichVu.map(s => (
+                        <tr key={s.id} className="hover:bg-slate-50/50">
+                          <td className="px-4 py-2.5 font-medium text-slate-900">
+                            <div>{s.ten}</div>
+                            {s.moTa && <div className="text-xs text-slate-400 mt-0.5">{s.moTa}</div>}
+                          </td>
+                          <td className="px-4 py-2.5 text-slate-600">{s.donVi}</td>
+                          <td className="px-4 py-2.5 font-bold text-slate-900">
+                            {s.giaThamKhao != null ? formatVND(s.giaThamKhao) : <span className="text-amber-700 font-normal">Chưa có giá</span>}
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-slate-600">{s.dieuKien || '—'}</td>
+                          <td className="px-4 py-2.5 text-xs text-slate-500">{s.nguon || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="p-4 border border-dashed rounded-xl text-center text-xs text-slate-400">Community này chưa có bảng giá dịch vụ tham khảo.</p>
+              )}
+            </div>
+
+            {/* Khối ký kết & hợp đồng cho Community */}
+            <div className="border-t pt-4 space-y-4">
+              <PartnerSigningPanel
+                key={viewing.id}
+                partnerType="community"
+                partnerId={viewing.id}
+                onDirtyChange={setViewingSigningDirty}
+              />
+              <PartnerContractsList partnerType="community" partnerId={viewing.id} />
+            </div>
+
+            {/* Actions Footer */}
+            <div className="flex items-center justify-between border-t pt-4">
+              <button type="button" onClick={closeViewing} className="border border-slate-300 rounded-xl px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
+                Đóng
+              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  className={button + ' cursor-pointer'}
+                  onClick={() => startEdit(viewing)}
+                >
+                  Sửa thông tin Community
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FORM SỬA / THÊM MỚI (CHỈ ADMIN) - Có Unsaved Guard */}
       {editing && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto p-4" role="dialog" aria-modal="true" aria-label={isNew ? 'Thêm Community' : 'Sửa Community'}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl my-8 p-6 space-y-4">
             <div className="flex items-start justify-between">
               <h3 className="text-lg font-bold">{isNew ? 'Thêm Community' : 'Sửa Community'}</h3>
-              <button type="button" onClick={closeEditing} aria-label="Đóng">✕</button>
+              <button type="button" onClick={closeEditing} aria-label="Đóng" className="p-1 cursor-pointer">✕</button>
             </div>
             <div className="grid sm:grid-cols-2 gap-3">
               <label className="text-sm sm:col-span-2">Tên Fanpage/Group *
@@ -265,7 +475,7 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h4 className="font-semibold text-sm">Bảng giá dịch vụ riêng của Community</h4>
-                <button type="button" className="text-sm text-indigo-700 underline" onClick={() => setEditing({ ...editing, dichVu: [...editing.dichVu, blankService()] })}>Thêm dịch vụ</button>
+                <button type="button" className="text-sm text-indigo-700 underline cursor-pointer" onClick={() => setEditing({ ...editing, dichVu: [...editing.dichVu, blankService()] })}>Thêm dịch vụ</button>
               </div>
               <p className="text-xs text-slate-500">Mỗi dịch vụ có đơn vị và điều kiện riêng. Không mặc định giá đăng bài đã gồm sản xuất nội dung, comment, like/share hoặc KPI buzz.</p>
               {editing.dichVu.map((s, idx) => (
@@ -288,23 +498,17 @@ export function CommunityManager({ isAdmin }: { isAdmin: boolean }) {
                   <label className="text-xs sm:col-span-2">Mô tả dịch vụ
                     <input className={field} value={s.moTa} onChange={e => setEditing({ ...editing, dichVu: editing.dichVu.map((x, i) => i === idx ? { ...x, moTa: e.target.value } : x) })} maxLength={1000} />
                   </label>
-                  <button type="button" className="text-xs text-red-700 underline justify-self-start" onClick={() => setEditing({ ...editing, dichVu: editing.dichVu.filter((_, i) => i !== idx) })}>Xoá dịch vụ này</button>
+                  <button type="button" className="text-xs text-red-700 underline justify-self-start cursor-pointer" onClick={() => setEditing({ ...editing, dichVu: editing.dichVu.filter((_, i) => i !== idx) })}>Xoá dịch vụ này</button>
                 </div>
               ))}
               <datalist id="community-unit-suggestions">
                 {COMMUNITY_SERVICE_UNIT_SUGGESTIONS.map(u => <option key={u} value={u} />)}
               </datalist>
             </div>
-            <div className="flex gap-2 justify-end">
-              <button type="button" className="border rounded-lg px-3 py-2 text-sm" onClick={closeEditing}>Huỷ</button>
-              <button type="button" className={button} disabled={busy || !editing.ten.trim()} onClick={save}>{busy ? 'Đang lưu…' : 'Lưu Community'}</button>
+            <div className="flex gap-2 justify-end pt-2">
+              <button type="button" className="border rounded-lg px-3 py-2 text-sm cursor-pointer" onClick={closeEditing}>Huỷ</button>
+              <button type="button" className={button + ' cursor-pointer'} disabled={busy || !editing.ten.trim()} onClick={save}>{busy ? 'Đang lưu…' : 'Lưu Community'}</button>
             </div>
-            {!isNew && editing.id && (
-              <div className="border-t pt-3">
-                <PartnerSigningPanel key={editing.id} partnerType="community" partnerId={editing.id} onDirtyChange={setSigningDirty} />
-                <PartnerContractsList partnerType="community" partnerId={editing.id} />
-              </div>
-            )}
           </div>
         </div>
       )}
