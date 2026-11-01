@@ -323,8 +323,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
     </section>
     {manage&&<div className="grid sm:grid-cols-3 gap-3">
       <div className="p-4 rounded-xl border bg-indigo-50"><p className="text-xs text-indigo-800">Phương án đã chốt</p><strong>{baseline?data.options.find((o:any)=>o.id===baseline.optionId)?.name+' · V'+baseline.number:'Chưa chốt'}</strong></div>
-      <div className="p-4 rounded-xl border"><p className="text-xs text-slate-500">Doanh thu trước thuế đã chốt</p><strong>{baseline?money(baseline.finance.revenueBeforeTax):'Chưa có baseline'}</strong></div>
-      <div className="p-4 rounded-xl border"><p className="text-xs text-slate-500">Lợi nhuận dự kiến đã chốt</p><strong>{baseline?money(baseline.finance.profit):'Chưa có baseline'}</strong></div>
+      {/* UX-4 (M7): doanh thu/lợi nhuận của bản chốt chỉ xem ở tab Tài chính & P&L — không hiển thị số P&L trong tab Báo giá. */}
     </div>}
     {manage&&<form className="grid sm:grid-cols-3 gap-3 p-4 border rounded-xl" onSubmit={e=>{e.preventDefault();const form=e.currentTarget;const body=Object.fromEntries(new FormData(form));run(async()=>{const result=await request(base+'/options',body);form.reset();await refresh(result.quoteId);setNotice('Đã tạo phương án mới với báo giá V1.');});}}>
       <label className="text-sm">Tên phương án<input name="name" required maxLength={200} placeholder="Phương án A — KOL chủ lực" className={field}/></label>
