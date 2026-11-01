@@ -435,10 +435,80 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { proj
   );
 }
 
+function PnlBlock({ title, pnl }: { title: string; pnl: any }) {
+  if (!pnl) return null;
+  const money = (v: number | null | undefined) =>
+    v === null || v === undefined ? 'Chưa xác định' : v.toLocaleString('vi-VN') + ' ₫';
+  const rows: [string, number | null][] = [
+    ['Doanh thu trước thuế (sau chiết khấu + agency fee)', pnl.revenueBeforeTax],
+    ['G — Tổng NET KOL/Community', pnl.netG],
+    ['Thuế cá nhân/HKD tính vào chi phí', pnl.costTax],
+    ['Chi phí trực tiếp khác', pnl.otherDirectCosts],
+    ['K — Tổng chi phí trước VAT (= G + thuế chi phí + chi phí khác)', pnl.totalK],
+    ['VAT đầu vào công ty (tách riêng, không cộng K)', pnl.vatInput],
+    ['L — Tổng phải chi đã biết (theo tổng dòng nguồn; = K + VAT khi phân loại đủ)', pnl.totalPayableL],
+    ['Lợi nhuận (= Doanh thu trước thuế − K)', pnl.profit],
+  ];
+  return (
+    <div className="border border-purple-100 rounded-2xl p-5 bg-white shadow-xs space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-purple-100 pb-3">
+        <h4 className="font-bold text-slate-800 text-base">{title}</h4>
+        {pnl.complete ? (
+          <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
+            {pnl.hasEstimates ? 'Đầy đủ dữ liệu · có phần DỰ KIẾN' : 'Đầy đủ dữ liệu · đã chốt'}
+          </span>
+        ) : (
+          <span className="text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200 font-semibold">
+            Thiếu dữ liệu — chưa kết luận P&L đầy đủ
+          </span>
+        )}
+      </div>
+      <div className="grid sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex justify-between items-baseline gap-4 py-0.5 border-b border-slate-50">
+            <span className="text-slate-600 text-xs sm:text-sm">{label}</span>
+            <strong className="text-slate-900 font-semibold">{money(value)}</strong>
+          </div>
+        ))}
+        <div className="flex justify-between items-baseline gap-4 py-0.5 border-b border-slate-50">
+          <span className="text-slate-600 text-xs sm:text-sm">Biên lợi nhuận</span>
+          <strong className="text-slate-900 font-semibold">
+            {pnl.marginPercent === null || pnl.marginPercent === undefined
+              ? 'Chưa xác định'
+              : pnl.marginPercent.toLocaleString('vi-VN', { maximumFractionDigits: 2 }) + '%'}
+          </strong>
+        </div>
+        <div className="flex justify-between items-baseline gap-4 py-0.5 border-b border-slate-50">
+          <span className="text-slate-600 text-xs sm:text-sm">Phần đã chốt theo hợp đồng (NET)</span>
+          <strong className="text-slate-900 font-semibold">{money(pnl.committed?.net ?? 0)}</strong>
+        </div>
+        <div className="flex justify-between items-baseline gap-4 py-0.5 border-b border-slate-50">
+          <span className="text-slate-600 text-xs sm:text-sm">Phần dự kiến từ hồ sơ/tự xác nhận (NET)</span>
+          <strong className="text-slate-900 font-semibold">{money(pnl.estimated?.net ?? 0)}</strong>
+        </div>
+      </div>
+      {pnl.unknownTax > 0 && (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 p-2.5 rounded-xl">
+          Có {money(pnl.unknownTax)} tiền thuế chưa phân loại — chưa cộng vào K (lợi nhuận chưa kết luận), nhưng tổng phải chi L vẫn tính đủ khoản này vì nó nằm trong tổng GROSS của nguồn chi phí.
+        </p>
+      )}
+      {!pnl.complete && pnl.missingLines?.length > 0 && (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 p-2.5 rounded-xl">
+          Dòng thiếu dữ liệu: {pnl.missingLines.map((x: any) => `${x.creator} (${x.reason === 'no_source' ? 'chưa gắn nguồn chi phí' : x.reason === 'unknown_tax_category' ? 'chưa xác định loại thuế' : 'chưa có giá đầu vào'})`).join('; ')}. Chỉ cộng phần đã biết, không tự coi phần thiếu là 0.
+        </p>
+      )}
+      <p className="text-xs text-slate-500 pt-1">
+        Quy ước nghiệp vụ nội bộ: K không gồm VAT đầu vào công ty (tách riêng để dự trù dòng tiền ở L). Lợi nhuận không tính từ tiền đã trả.
+      </p>
+    </div>
+  );
+}
+
 function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedQuoteId, setSelectedQuoteId] = useState<string>('');
 
   useEffect(() => {
     let active = true;
@@ -447,6 +517,12 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
         if (active) {
           setData(res);
           setLoading(false);
+          if (res.baseline?.quoteId) {
+            setSelectedQuoteId(res.baseline.quoteId);
+          } else {
+            const firstVer = res.options?.[0]?.versions?.[0]?.quoteId;
+            if (firstVer) setSelectedQuoteId(firstVer);
+          }
         }
       })
       .catch((e) => {
@@ -466,103 +542,213 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
   const baseline = data?.baseline;
   const cash = data?.cash;
   const options = data?.options || [];
+  const money = (v: number | null | undefined) =>
+    v === null || v === undefined ? 'Chưa xác định' : v.toLocaleString('vi-VN') + ' ₫';
+
+  // Gom mọi phiên bản để xem chi tiết
+  const allVersions: any[] = options.flatMap((o: any) =>
+    (o.versions || []).map((v: any) => ({ ...v, optionName: o.name, optionId: o.optionId }))
+  );
+  const currentVersion = allVersions.find((v) => v.quoteId === selectedQuoteId) || allVersions[0] || null;
 
   return (
     <div className="space-y-6">
-      <div className="bg-gradient-to-r from-purple-900 to-indigo-900 text-white p-6 rounded-2xl shadow-sm space-y-4">
-        <div className="flex justify-between items-start">
+      {/* (a) P&L tổng dự án theo bản chốt */}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-purple-300">Báo cáo Tài chính & P&L Dự án</span>
-            <h3 className="text-2xl font-bold mt-1">Lợi nhuận & Dòng tiền (PM/Admin Scope)</h3>
+            <span className="text-xs font-semibold uppercase tracking-wider text-purple-700">Khối 1 — Tổng dự án</span>
+            <h3 className="text-xl font-bold text-slate-900">P&L tổng dự án — chỉ tính phương án khách chốt</h3>
           </div>
           {baseline && (
-            <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full text-xs font-bold">
-              Phương án chốt: {baseline.optionName} (V{baseline.number})
+            <span className="px-3 py-1 bg-purple-100 text-purple-800 border border-purple-200 rounded-full text-xs font-bold">
+              Baseline: {baseline.optionName} / V{baseline.number}
             </span>
           )}
         </div>
 
         {baseline ? (
-          <div className="grid sm:grid-cols-4 gap-4 pt-4 border-t border-purple-700/50">
-            <div>
-              <span className="text-xs text-purple-200 block">Doanh thu trước thuế</span>
-              <strong className="text-xl font-bold text-white">
-                {baseline.pnl?.revenueBeforeTax != null ? formatVND(baseline.pnl.revenueBeforeTax) : 'Chưa đủ giá'}
-              </strong>
-            </div>
-            <div>
-              <span className="text-xs text-purple-200 block">K — Chi phí trước VAT</span>
-              <strong className="text-xl font-bold text-amber-300">
-                {baseline.pnl?.totalK != null ? formatVND(baseline.pnl.totalK) : 'Chưa có giá đầu vào'}
-              </strong>
-            </div>
-            <div>
-              <span className="text-xs text-purple-200 block">L — Tổng phải chi</span>
-              <strong className="text-xl font-bold text-amber-100">
-                {baseline.pnl?.totalPayableL != null ? formatVND(baseline.pnl.totalPayableL) : '—'}
-              </strong>
-            </div>
-            <div>
-              <span className="text-xs text-purple-200 block">Lợi nhuận gộp (Margin %)</span>
-              <strong className={`text-xl font-bold ${baseline.pnl?.profit >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-                {baseline.pnl?.profit != null ? `${formatVND(baseline.pnl.profit)} (${baseline.pnl?.marginPercent?.toFixed(1) ?? '0'}%)` : '—'}
-              </strong>
-            </div>
-          </div>
+          <PnlBlock title={`Phương án chốt: ${baseline.optionName} / V${baseline.number}`} pnl={baseline.pnl} />
         ) : (
-          <p className="text-sm text-purple-200 bg-white/10 p-3 rounded-xl">Dự án chưa chọn phương án chốt (Baseline). Dưới đây là phân tích P&L theo từng phiên bản nháp.</p>
+          <div className="p-4 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl text-sm">
+            <p className="font-semibold">Chưa có phương án chốt — tổng dự án chưa kết luận.</p>
+            <p className="text-xs text-amber-800 mt-1">
+              Chọn một phương án ở bên dưới để xem P&L dự kiến của riêng phương án đó; các phương án song song là lựa chọn thay thế, không cộng dồn.
+            </p>
+          </div>
         )}
-      </div>
 
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-        <h4 className="font-bold text-slate-900 text-base">So sánh P&L giữa các phương án</h4>
-        <div className="divide-y border rounded-xl overflow-hidden text-sm">
-          {options.map((opt: any) => (
-            <div key={opt.optionId} className="p-4 space-y-2 bg-slate-50/50">
-              <strong className="text-slate-800 font-bold">{opt.name}</strong>
-              <div className="space-y-1.5 pl-2">
-                {opt.versions?.map((ver: any) => (
-                  <div key={ver.quoteId} className="flex flex-wrap items-center justify-between text-xs p-2 bg-white rounded-lg border border-slate-200">
-                    <span className="font-semibold text-slate-700">Phiên bản {ver.number} ({ver.status}) {ver.isBaseline && '★ BASELINE'}</span>
-                    <div className="flex gap-4">
-                      <span>Doanh thu: {ver.pnl?.revenueBeforeTax != null ? formatVND(ver.pnl.revenueBeforeTax) : '—'}</span>
-                      <span>K: {ver.pnl?.totalK != null ? formatVND(ver.pnl.totalK) : '—'}</span>
-                      <span>L: {ver.pnl?.totalPayableL != null ? formatVND(ver.pnl.totalPayableL) : '—'}</span>
-                      <strong className={ver.pnl?.profit >= 0 ? 'text-emerald-700' : 'text-red-700'}>
-                        LN: {ver.pnl?.profit != null ? formatVND(ver.pnl.profit) : '—'}
-                      </strong>
-                    </div>
-                  </div>
-                ))}
+        {/* Khối tiền theo hợp đồng tách riêng */}
+        {cash && (
+          <div className="border border-purple-100 rounded-2xl p-5 bg-white shadow-xs space-y-3">
+            <div className="border-b border-purple-100 pb-3">
+              <h4 className="font-bold text-slate-900 text-base">
+                Tiền theo hợp đồng của dự án (phạm vi riêng — không gộp vào chi phí phương án)
+              </h4>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Theo dõi dòng tiền thanh toán thực tế theo từng hợp đồng đã ký kết.
+              </p>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+              <div className="flex justify-between gap-4 py-0.5 border-b border-slate-50">
+                <span className="text-slate-600">Tổng giá trị hợp đồng đã ký (tổng phải chi)</span>
+                <strong className="text-slate-900">{money(cash.totals?.gross)}</strong>
+              </div>
+              <div className="flex justify-between gap-4 py-0.5 border-b border-slate-50">
+                <span className="text-slate-600">Đã lên kế hoạch các đợt</span>
+                <strong className="text-slate-900">{money(cash.totals?.planned)}</strong>
+              </div>
+              <div className="flex justify-between gap-4 py-0.5 border-b border-slate-50">
+                <span className="text-slate-600">Đã trả</span>
+                <strong className="text-emerald-700">{money(cash.totals?.paid)}</strong>
+              </div>
+              <div className="flex justify-between gap-4 py-0.5 border-b border-slate-50">
+                <span className="text-slate-600">Còn phải trả (theo giá trị hợp đồng − đã trả)</span>
+                <strong className="text-amber-700">{money(cash.totals?.remaining)}</strong>
+              </div>
+              <div className="flex justify-between gap-4 py-0.5 border-b border-slate-50">
+                <span className="text-slate-600">Hợp đồng chưa lên kế hoạch đủ</span>
+                <strong className="text-slate-900">{cash.totals?.missingPlan?.toLocaleString('vi-VN') ?? 0}</strong>
+              </div>
+              <div className="flex justify-between gap-4 py-0.5 border-b border-slate-50">
+                <span className="text-slate-600">Hợp đồng ngoài phương án chốt</span>
+                <strong className="text-slate-900">
+                  {baseline
+                    ? (cash.totals?.outsideSelectedCount?.toLocaleString('vi-VN') ?? 0) + ' (' + money(cash.totals?.outsideSelectedGross) + ')'
+                    : 'Chưa có phương án chốt'}
+                </strong>
+              </div>
+              <div className="flex justify-between gap-4 py-0.5 border-b border-slate-50">
+                <span className="text-slate-600">Hợp đồng đã huỷ (tách riêng; không tính vào còn phải trả)</span>
+                <strong className="text-slate-900">{cash.cancelled?.length?.toLocaleString('vi-VN') ?? 0}</strong>
+              </div>
+              <div className="flex justify-between gap-4 py-0.5 border-b border-slate-50">
+                <span className="text-slate-600">Đã trả thuộc hợp đồng đã huỷ (vẫn hiện, chưa giả định hoàn tiền)</span>
+                <strong className="text-slate-900">{money(cash.totals?.paidCancelled ?? 0)}</strong>
+              </div>
+              <div className="flex justify-between gap-4 py-0.5 border-b border-slate-50">
+                <span className="text-slate-600">Hợp đồng còn nháp (chưa ký, chưa tính nghĩa vụ)</span>
+                <strong className="text-slate-900">{cash.draftCount?.toLocaleString('vi-VN') ?? 0}</strong>
+              </div>
+              <div className="flex justify-between gap-4 py-0.5 border-b border-slate-50">
+                <span className="text-slate-600">Đã trả thuộc hợp đồng nháp</span>
+                <strong className="text-slate-900">{money(cash.totals?.paidDraft ?? 0)}</strong>
+              </div>
+              <div className="flex justify-between gap-4 py-0.5 border-b border-slate-50 sm:col-span-2">
+                <span className="text-slate-600 font-semibold">Tổng đã trả mọi phạm vi (hiệu lực + huỷ + nháp)</span>
+                <strong className="text-slate-900 font-bold">{money(cash.totals?.paidAll ?? 0)}</strong>
               </div>
             </div>
-          ))}
-        </div>
-      </div>
-
-      {cash && (
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-          <h4 className="font-bold text-slate-900 text-base">Tổng quan Thực thu / Thực chi theo Hợp đồng</h4>
-          <div className="grid sm:grid-cols-4 gap-4 text-sm bg-purple-50/30 p-4 rounded-xl border border-purple-100">
-            <div>
-              <span className="text-xs text-slate-500 block">Tổng giá trị hợp đồng đã ký</span>
-              <strong className="text-slate-800 text-base">{formatVND(cash.totals?.gross || 0)}</strong>
-            </div>
-            <div>
-              <span className="text-xs text-slate-500 block">Đã thanh toán thực tế</span>
-              <strong className="text-emerald-700 text-base">{formatVND(cash.totals?.paid || 0)}</strong>
-            </div>
-            <div>
-              <span className="text-xs text-slate-500 block">Còn lại phải thanh toán</span>
-              <strong className="text-amber-700 text-base">{formatVND(cash.totals?.remaining || 0)}</strong>
-            </div>
-            <div>
-              <span className="text-xs text-slate-500 block">Đã trả (HĐ Hủy/Nháp)</span>
-              <strong className="text-slate-600 text-base">{formatVND((cash.totals?.paidCancelled || 0) + (cash.totals?.paidDraft || 0))}</strong>
-            </div>
+            <p className="text-xs text-slate-500 pt-1">
+              Mỗi hợp đồng đếm đúng một lần theo dự án, không nhân theo dòng hay phương án. Đã trả chỉ để theo dõi dòng tiền — không dùng để suy ra lợi nhuận thực tế.
+            </p>
           </div>
+        )}
+      </section>
+
+      {/* (b) So sánh P&L giữa các phương án */}
+      <section className="bg-white p-5 rounded-2xl border border-purple-100 shadow-xs space-y-4">
+        <div>
+          <span className="text-xs font-semibold uppercase tracking-wider text-purple-700">Khối 2 — So sánh</span>
+          <h4 className="font-bold text-slate-900 text-lg">So sánh P&L giữa các phương án</h4>
+          <p className="text-xs text-slate-500">
+            Các phương án là lựa chọn thay thế (không cộng dồn). Bấm vào một phiên bản để xem chi tiết bên dưới.
+          </p>
         </div>
-      )}
+        {options.length === 0 ? (
+          <p className="text-xs text-slate-500 italic p-3 border rounded-xl">Dự án chưa có phương án nào.</p>
+        ) : (
+          <div className="divide-y border border-purple-100 rounded-2xl overflow-hidden text-sm">
+            {options.map((opt: any) => (
+              <div key={opt.optionId} className="p-4 space-y-2 bg-slate-50/50">
+                <div className="flex items-center justify-between">
+                  <strong className="text-slate-900 font-bold">{opt.name}</strong>
+                  <span className="text-xs text-slate-500">{opt.versions?.length || 0} phiên bản</span>
+                </div>
+                <div className="space-y-1.5">
+                  {opt.versions?.map((ver: any) => {
+                    const isSelected = ver.quoteId === currentVersion?.quoteId;
+                    return (
+                      <div
+                        key={ver.quoteId}
+                        onClick={() => setSelectedQuoteId(ver.quoteId)}
+                        className={`flex flex-wrap items-center justify-between text-xs p-3 rounded-xl border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-purple-50 border-purple-300 ring-2 ring-purple-200'
+                            : 'bg-white border-slate-200 hover:border-purple-200 hover:bg-purple-50/20'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-slate-800">
+                            V{ver.number} ({ver.status})
+                          </span>
+                          {ver.isBaseline && (
+                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold text-[10px]">
+                              ★ BASELINE
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-4 text-slate-600">
+                          <span>Doanh thu: {money(ver.pnl?.revenueBeforeTax)}</span>
+                          <span>K: {money(ver.pnl?.totalK)}</span>
+                          <span>L: {money(ver.pnl?.totalPayableL)}</span>
+                          <strong className={ver.pnl?.profit >= 0 ? 'text-emerald-700 font-bold' : 'text-red-700 font-bold'}>
+                            LN: {money(ver.pnl?.profit)}
+                          </strong>
+                          <span className="text-purple-700 font-semibold text-[11px] underline">
+                            {isSelected ? 'Đang xem' : 'Xem chi tiết'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* (c) Xem chi tiết P&L của từng phiên bản báo giá */}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <span className="text-xs font-semibold uppercase tracking-wider text-purple-700">Khối 3 — Chi tiết phiên bản</span>
+            <h4 className="font-bold text-slate-900 text-lg">Xem chi tiết P&L từng phiên bản báo giá</h4>
+          </div>
+          {allVersions.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label htmlFor="pnl-version-select" className="text-xs font-semibold text-slate-600">
+                Chọn phiên bản:
+              </label>
+              <select
+                id="pnl-version-select"
+                aria-label="Chọn phiên bản báo giá để xem P&L"
+                className="rounded-xl border border-purple-200 px-3 py-1.5 bg-white text-xs text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-purple-400"
+                value={currentVersion?.quoteId || ''}
+                onChange={(e) => setSelectedQuoteId(e.target.value)}
+              >
+                {allVersions.map((v) => (
+                  <option key={v.quoteId} value={v.quoteId}>
+                    {v.optionName} — V{v.number} ({v.status}) {v.isBaseline ? '★ Baseline' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {currentVersion ? (
+          <PnlBlock
+            title={`Dashboard P&L theo nguồn chi phí (Giai đoạn C) — ${currentVersion.optionName} / V${currentVersion.number}`}
+            pnl={currentVersion.pnl}
+          />
+        ) : (
+          <p className="text-xs text-slate-500 italic p-4 bg-white border border-dashed rounded-xl">
+            Chưa có phiên bản báo giá nào để hiển thị chi tiết P&L.
+          </p>
+        )}
+      </section>
     </div>
   );
 }
@@ -1251,7 +1437,15 @@ export default function WorkspaceShell() {
                       <ProjectQuotesPanel key={selected.id} projectId={selected.id} isAdmin={user.role === 'admin'} onProjectChanged={refresh} onDirtyChange={setIsDirty} />
                     )}
                     {projectView === 'contracts' && <ProjectContractsPanel key={selected.id} projectId={selected.id} />}
-                    {projectView === 'pnl' && (user.role === 'admin' || selected.canManage) && <ProjectFinancePnlPanel key={selected.id} projectId={selected.id} />}
+                    {projectView === 'pnl' && (
+                      user.role === 'admin' || selected.canManage ? (
+                        <ProjectFinancePnlPanel key={selected.id} projectId={selected.id} />
+                      ) : (
+                        <div className="p-6 bg-red-50 border border-red-200 text-red-800 rounded-2xl text-sm font-medium">
+                          Bạn không có quyền truy cập tab Tài chính & P&L. Chỉ Admin và Quản lý dự án (PM) mới có quyền xem thông tin tài chính này.
+                        </div>
+                      )
+                    )}
                   </div>
                 ) : (
                   <div className="border-2 border-dashed border-purple-200/80 rounded-3xl p-16 text-center text-slate-500 bg-white/50">

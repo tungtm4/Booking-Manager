@@ -228,40 +228,6 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
   </div>;
 }
 
-// Giai đoạn C (đợt đầu): khối P&L theo nguồn chi phí (G/K/L) — chỉ PM/Admin thấy
-// (server cũng chặn Booking ở API). Số liệu lấy từ endpoint tổng hợp, không tự tính
-// lại ở client để tránh lệch nguồn.
-function PnlBlock({title,pnl}:{title:string;pnl:any}){
-  if(!pnl)return null;
-  const rows:[string,number|null][]=[
-    ['Doanh thu trước thuế (sau chiết khấu + agency fee)',pnl.revenueBeforeTax],
-    ['G — Tổng NET KOL/Community',pnl.netG],
-    ['Thuế cá nhân/HKD tính vào chi phí',pnl.costTax],
-    ['Chi phí trực tiếp khác',pnl.otherDirectCosts],
-    ['K — Tổng chi phí trước VAT (= G + thuế chi phí + chi phí khác)',pnl.totalK],
-    ['VAT đầu vào công ty (tách riêng, không cộng K)',pnl.vatInput],
-    ['L — Tổng phải chi đã biết (theo tổng dòng nguồn; = K + VAT khi phân loại đủ)',pnl.totalPayableL],
-    ['Lợi nhuận (= Doanh thu trước thuế − K)',pnl.profit],
-  ];
-  return <div className="border rounded-xl p-4 bg-white">
-    <div className="flex flex-wrap items-center gap-2 mb-2">
-      <h4 className="font-semibold">{title}</h4>
-      {pnl.complete
-        ? <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">{pnl.hasEstimates?'Đầy đủ dữ liệu · có phần DỰ KIẾN':'Đầy đủ dữ liệu · đã chốt'}</span>
-        : <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">Thiếu dữ liệu — chưa kết luận P&L đầy đủ</span>}
-    </div>
-    <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
-      {rows.map(([label,value])=><div key={label} className="flex justify-between gap-4"><span>{label}</span><strong>{value===null||value===undefined?'Chưa xác định':money(value)}</strong></div>)}
-      <div className="flex justify-between gap-4"><span>Biên lợi nhuận</span><strong>{pnl.marginPercent===null||pnl.marginPercent===undefined?'Chưa xác định':pnl.marginPercent.toLocaleString('vi-VN',{maximumFractionDigits:2})+'%'}</strong></div>
-      <div className="flex justify-between gap-4"><span>Phần đã chốt theo hợp đồng (NET)</span><strong>{money(pnl.committed.net)}</strong></div>
-      <div className="flex justify-between gap-4"><span>Phần dự kiến từ hồ sơ/tự xác nhận (NET)</span><strong>{money(pnl.estimated.net)}</strong></div>
-    </div>
-    {pnl.unknownTax>0&&<p className="text-xs text-amber-800 mt-2">Có {money(pnl.unknownTax)} tiền thuế chưa phân loại — chưa cộng vào K (lợi nhuận chưa kết luận), nhưng tổng phải chi L vẫn tính đủ khoản này vì nó nằm trong tổng GROSS của nguồn chi phí.</p>}
-    {!pnl.complete&&pnl.missingLines?.length>0&&<p className="text-xs text-amber-800 mt-2">Dòng thiếu dữ liệu: {pnl.missingLines.map((x:any)=>`${x.creator} (${x.reason==='no_source'?'chưa gắn nguồn chi phí':x.reason==='unknown_tax_category'?'chưa xác định loại thuế':'chưa có giá đầu vào'})`).join('; ')}. Chỉ cộng phần đã biết, không tự coi phần thiếu là 0.</p>}
-    <p className="text-xs text-slate-500 mt-2">Quy ước nghiệp vụ nội bộ: K không gồm VAT đầu vào công ty (tách riêng để dự trù dòng tiền ở L). Lợi nhuận không tính từ tiền đã trả.</p>
-  </div>;
-}
-
 export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyChange}:{projectId:string;isAdmin:boolean;onProjectChanged:()=>Promise<void>;onDirtyChange?:(dirty:boolean)=>void}){
   const [data,setData]=useState<any>(null),[quote,setQuote]=useState<any>(null),[items,setItems]=useState<Item[]>([]);
   const [discount,setDiscount]=useState<any>({mode:'fixed',value:0}),[fee,setFee]=useState<any>({mode:'percent',value:0}),[tax,setTax]=useState(0);
@@ -276,7 +242,6 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
   const [loadState,setLoadState]=useState<'loading'|'ready'|'error'>('loading'),[loadError,setLoadError]=useState('');
   const [confirmSources,setConfirmSources]=useState<Record<string,string>>({});
   const [costItemId,setCostItemId]=useState<string|null>(null);
-  const [pnlData,setPnlData]=useState<any>(null);
   const loadSeqRef=useRef(0);
   const base=`/projects/${projectId}`;
   // Báo trạng thái chưa lưu lên shell để chặn chuyển tab làm mất dữ liệu đang sửa.
@@ -291,7 +256,6 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
     // Tải phase độc lập: lỗi ở phần phase không làm mất báo giá đã tải.
     request(base+'/phases').then(r=>{setPhases(r.phases??[]);setFromPhaseIds(prev=>prev.length?prev:(r.phases??[]).map((x:any)=>x.id));}).catch(()=>{});
     request(base+'/shortlist').then(r=>setShortlistRows(r.rows??[])).catch(()=>{});
-    if(result.canManage)request(base+'/pnl').then(r=>setPnlData(r)).catch(()=>setPnlData(null));else setPnlData(null);
     const all=result.options.flatMap((o:any)=>o.versions);
     const selected=all.find((q:any)=>q.id===(preferred??quote?.id))??all[0]??null;
     loadQuote(selected);setOptionId(selected?.optionId??'');
@@ -303,7 +267,6 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
       const d=await request(base+'/options');
       if(seq!==loadSeqRef.current)return;
       setData(d);const first=d.options[0]?.versions[0]??null;loadQuote(first);setOptionId(first?.optionId??'');setLoadState('ready');
-      if(d.canManage)request(base+'/pnl').then(r=>{if(seq===loadSeqRef.current)setPnlData(r);}).catch(()=>{});
     }catch(e){
       if(seq!==loadSeqRef.current)return;
       setLoadError(e instanceof Error?e.message:'Không thể tải dữ liệu.');setLoadState('error');
@@ -311,7 +274,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
     request(base+'/phases').then(r=>{if(seq===loadSeqRef.current){setPhases(r.phases??[]);setFromPhaseIds((r.phases??[]).map((x:any)=>x.id));}}).catch(()=>{});
     request(base+'/shortlist').then(r=>{if(seq===loadSeqRef.current)setShortlistRows(r.rows??[]);}).catch(()=>{});
   }
-  useEffect(()=>{setData(null);setPnlData(null);loadQuote(null);setError('');setNotice('');loadInitial();},[projectId]);
+  useEffect(()=>{setData(null);loadQuote(null);setError('');setNotice('');loadInitial();},[projectId]);
   async function run(work:()=>Promise<void>){setBusy(true);setError('');setNotice('');try{await work();}catch(e){setError(e instanceof Error?e.message:'Không thể xử lý.');}finally{setBusy(false);}}
   if(!data)return loadState==='error'
     ? <div className="py-6 space-y-3"><p role="alert" className="p-3 bg-red-50 text-red-700 rounded-lg">Không tải được phương án và báo giá của dự án này. {loadError}</p><button type="button" className="border rounded-lg px-3 py-2 text-sm" onClick={()=>loadInitial()}>Thử tải lại</button></div>
@@ -477,9 +440,9 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
       <div className="flex gap-2 flex-wrap">{data.options.map((o:any)=><button key={o.id} className={'border px-3 py-2 rounded-lg text-sm '+(optionId===o.id?'bg-indigo-50 border-indigo-500 text-indigo-800':'bg-white')} onClick={()=>choose(o.versions[0])}>{o.name}{o.versions.some((q:any)=>q.id===data.baselineId)?' · Đã chốt':''}</button>)}</div>
       {quote&&<section className="space-y-4"><p className="text-sm text-indigo-800">Đã chọn {new Set(items.filter(i=>i.included&&i.kind==='kol').map(i=>i.shortlistId||i.creator)).size} KOL · {new Set(items.filter(i=>i.included&&i.kind==='community').map(i=>i.shortlistId||i.creator)).size} Community · {items.filter(i=>i.included).reduce((n,i)=>n+i.quantity,0)} đơn vị hạng mục.</p>
         <div className="flex flex-wrap items-end gap-3"><label className="text-sm">Phiên bản<select aria-label="Phiên bản báo giá" className={field} value={quote.id} onChange={e=>choose(currentOption.versions.find((q:any)=>q.id===e.target.value))}>{currentOption.versions.map((q:any)=><option key={q.id} value={q.id}>V{q.number} — {statusLabel[q.status]}</option>)}</select></label><p className="text-sm text-slate-500">{currentOption.brief}</p></div>
-        {!manage&&<p className="text-sm bg-indigo-50 p-3 rounded-lg">Bạn đang xem giá đầu vào. Giá bán, phí và P&L chỉ dành cho PM/Admin.</p>}
+        {!manage&&<p className="text-sm bg-indigo-50 p-3 rounded-lg">Bạn đang xem giá đầu vào. Giá bán và phí chỉ dành cho PM/Admin.</p>}
         {manage&&data.target&&<p className="text-sm text-slate-600">Mục tiêu brief: {data.target.count??'Chưa đặt'} KOL · Ngân sách: {money(data.target.budget)} · {quote.finance?.totalWithTax==null?'Chưa đủ giá để đối chiếu':data.target.budget==null?'Chưa đặt ngân sách':quote.finance.totalWithTax>data.target.budget?'Vượt ngân sách '+money(quote.finance.totalWithTax-data.target.budget):'Còn trong ngân sách '+money(data.target.budget-quote.finance.totalWithTax)} (so với tổng sau thuế của bản đã lưu).</p>}
-        {editable&&manage&&items.some(i=>i.shortlistId)&&<button className="border rounded-lg px-3 py-2 text-sm" disabled={busy||dirty} onClick={()=>{if(window.confirm('Lấy giá đầu vào và trạng thái xác nhận mới nhất từ danh sách KOL vào bản nháp này? Giá bán và số lượng giữ nguyên.'))run(async()=>{const r=await request(`${base}/quotes/${quote.id}/refresh-prices`,{revision:quote.revision});await refresh();setNotice(`Đã lấy giá mới cho ${r.updated} dòng.${r.missingPrice?` Còn ${r.missingPrice} dòng thiếu giá đầu vào.`:''}${r.unconfirmedPrice?` Còn ${r.unconfirmedPrice} dòng giá chưa xác nhận — cần Booking xác nhận trong danh sách KOL.`:''} Kiểm tra lại P&L trước khi duyệt.`);});}}>Lấy lại giá KOL mới nhất vào bản nháp</button>}
+        {editable&&manage&&items.some(i=>i.shortlistId)&&<button className="border rounded-lg px-3 py-2 text-sm" disabled={busy||dirty} onClick={()=>{if(window.confirm('Lấy giá đầu vào và trạng thái xác nhận mới nhất từ danh sách KOL vào bản nháp này? Giá bán và số lượng giữ nguyên.'))run(async()=>{const r=await request(`${base}/quotes/${quote.id}/refresh-prices`,{revision:quote.revision});await refresh();setNotice(`Đã lấy giá mới cho ${r.updated} dòng.${r.missingPrice?` Còn ${r.missingPrice} dòng thiếu giá đầu vào.`:''}${r.unconfirmedPrice?` Còn ${r.unconfirmedPrice} dòng giá chưa xác nhận — cần Booking xác nhận trong danh sách KOL.`:''} Kiểm tra lại trước khi duyệt.`);});}}>Lấy lại giá KOL mới nhất vào bản nháp</button>}
         {editable&&manage&&<button className={button} onClick={()=>{setItems(prev=>[...prev,{id:crypto.randomUUID(),creator:'',description:'',phase:'',kind:'kol',quantity:1,buyUnitPrice:null,sellUnitPrice:null,included:true}]);setDirty(true);}}>+ Thêm KOL / Chi phí trực tiếp</button>}
         <div className="overflow-x-auto border rounded-xl"><table className="w-full text-sm min-w-[750px]"><thead className="bg-slate-100"><tr><th className="p-3">Chọn</th><th className="p-3 text-left">KOL / Hạng mục</th><th className="p-3">Số lượng</th><th className="p-3">Giá đầu vào / đơn vị</th>{manage&&<><th className="p-3">Giá báo khách / đơn vị</th><th className="p-3">Chênh lệch dòng</th></>}</tr></thead><tbody>{items.map(i=><tr key={i.id} className="border-t align-top">
           <td className="p-3"><input aria-label={'Tính hạng mục '+(i.creator||'mới')} type="checkbox" checked={i.included} disabled={!editable||!manage} onChange={e=>updateItem(i.id,'included',e.target.checked)}/></td>
@@ -503,33 +466,8 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
             {quote.status==='approved'&&<><button className={button} disabled={busy||data.baselineId===quote.id} onClick={()=>{if(window.confirm('Xác nhận khách đã chọn phương án này? Đây sẽ là baseline duy nhất của dự án.'))run(async()=>{await request(`${base}/quotes/${quote.id}/select`,{});await refresh();setNotice('Đã chốt phương án và phiên bản cho dự án.');});}}>Chốt phương án khách chọn</button><button className="border rounded-lg px-3 py-2" disabled={busy} onClick={()=>run(async()=>setCustomer(await request(`${base}/quotes/${quote.id}/customer`)))}>Xem bản báo khách</button></>}
           </>}
         </div>
-        {dirty&&<p className="text-sm text-amber-800">Có chỉnh sửa chưa lưu. Tổng phía dưới là kết quả của bản đã lưu gần nhất.</p>}
-        {manage&&quote.finance&&<section className="bg-indigo-50 border border-indigo-100 rounded-xl p-5"><h3 className="font-bold mb-3">P&L dự kiến — {currentOption.name} / V{quote.number}</h3><div className="grid sm:grid-cols-2 gap-2 text-sm">{[['Tổng hạng mục báo khách',quote.finance.knownSellTotal],['Chiết khấu khách hàng',quote.finance.discount],['Cơ sở tính agency fee',quote.finance.feeBase],['Agency fee',quote.finance.agencyFee],['Doanh thu trước thuế',quote.finance.revenueBeforeTax],['Chi phí đầu vào đã biết',quote.finance.knownBuyTotal],['Lợi nhuận dự kiến',quote.finance.profit],['Thuế',quote.finance.tax],['Tổng khách thanh toán',quote.finance.totalWithTax]].map(([label,value])=><div key={label as string} className="flex justify-between gap-4"><span>{label}</span><strong>{money(value as number|null)}</strong></div>)}</div><p className="text-sm mt-3">Biên lợi nhuận: {quote.finance.marginPercent===null?'Chưa đủ dữ liệu':quote.finance.marginPercent.toLocaleString('vi-VN',{maximumFractionDigits:2})+'%'} · Thiếu giá mua: {quote.finance.missingBuy} · Thiếu giá bán: {quote.finance.missingSell} · Giá đầu vào chưa xác nhận: {priceProblems(quote.items??[]).unconfirmedBuy}</p><p className="text-xs text-slate-500 mt-2">P&L từng phương án không cộng dồn. Chi phí thực tế, hợp đồng và thanh toán sẽ được bổ sung ở bước sau.</p></section>}
+        {dirty&&<p className="text-sm text-amber-800">Có chỉnh sửa chưa lưu. Hãy bấm Lưu báo giá để cập nhật.</p>}
         {isAdmin&&editable&&<section className="border rounded-xl p-4 space-y-3"><h3 className="font-semibold">Lấy hạng mục từ SOW cũ trên trình duyệt</h3><p className="text-xs text-slate-500">Chỉ sao chép vào phương án đang mở, không xóa bản cũ. Giữ giá SOW cũ là giá báo khách; giá đầu vào để trống chờ xác nhận. Không sao chép chiết khấu/phụ phí cũ tự động.</p><select aria-label="Chọn báo giá cũ" className={field} value={legacyId} onChange={e=>setLegacyId(e.target.value)}><option value="">Chọn báo giá cũ…</option>{legacyQuotes.map(q=><option key={q.id} value={q.id}>{q.tenChienDich} — {q.maBaoGia}</option>)}</select><button className="border rounded-lg px-3 py-2 text-sm" disabled={!legacyId||busy} onClick={()=>{const old=legacyQuotes.find(q=>q.id===legacyId);if(!old)return;setItems(prev=>[...prev,...old.items.map(i=>({id:crypto.randomUUID(),creator:i.kolName,description:i.formatLabel+(i.ghiChu?' · '+i.ghiChu:''),phase:'',kind:'kol',quantity:i.soLuong,buyUnitPrice:null,sellUnitPrice:i.donGia,included:true}))]);setDirty(true);setLegacyId('');setNotice('Đã lấy các dòng vào bản nháp. Kiểm tra rồi bấm Lưu báo giá.');}}>Lấy hạng mục vào phương án này</button></section>}
-        {manage&&pnlData&&quote&&(()=>{const v=pnlData.options.flatMap((o:any)=>o.versions.map((x:any)=>({...x,optionName:o.name}))).find((x:any)=>x.quoteId===quote.id);return v?<section className="space-y-3"><h3 className="font-bold">Dashboard P&L theo nguồn chi phí (Giai đoạn C) — {v.optionName} / V{v.number}</h3><PnlBlock title="P&L của phiên bản đang xem" pnl={v.pnl}/></section>:null;})()}
-        {manage&&pnlData&&<section className="space-y-3">
-          <h3 className="font-bold">Tổng dự án — chỉ tính phương án khách chốt</h3>
-          {pnlData.baseline
-            ? <PnlBlock title={`Phương án chốt: ${pnlData.baseline.optionName} / V${pnlData.baseline.number}`} pnl={pnlData.baseline.pnl}/>
-            : <p className="text-sm bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-lg">Chưa có phương án chốt — tổng dự án chưa kết luận. Chọn một phương án ở trên để xem P&L dự kiến của riêng phương án đó; các phương án song song là lựa chọn thay thế, không cộng dồn.</p>}
-          <div className="border rounded-xl p-4 bg-white">
-            <h4 className="font-semibold mb-2">Tiền theo hợp đồng của dự án (phạm vi riêng — không gộp vào chi phí phương án)</h4>
-            <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
-              <div className="flex justify-between gap-4"><span>Tổng giá trị hợp đồng đã ký (tổng phải chi)</span><strong>{money(pnlData.cash.totals.gross)}</strong></div>
-              <div className="flex justify-between gap-4"><span>Đã lên kế hoạch các đợt</span><strong>{money(pnlData.cash.totals.planned)}</strong></div>
-              <div className="flex justify-between gap-4"><span>Đã trả</span><strong>{money(pnlData.cash.totals.paid)}</strong></div>
-              <div className="flex justify-between gap-4"><span>Còn phải trả (theo giá trị hợp đồng − đã trả)</span><strong>{money(pnlData.cash.totals.remaining)}</strong></div>
-              <div className="flex justify-between gap-4"><span>Hợp đồng chưa lên kế hoạch đủ</span><strong>{pnlData.cash.totals.missingPlan.toLocaleString('vi-VN')}</strong></div>
-              <div className="flex justify-between gap-4"><span>Hợp đồng ngoài phương án chốt</span><strong>{pnlData.baseline?pnlData.cash.totals.outsideSelectedCount.toLocaleString('vi-VN')+' ('+money(pnlData.cash.totals.outsideSelectedGross)+')':'Chưa có phương án chốt'}</strong></div>
-              <div className="flex justify-between gap-4"><span>Hợp đồng đã huỷ (tách riêng; không tính vào còn phải trả)</span><strong>{pnlData.cash.cancelled.length.toLocaleString('vi-VN')}</strong></div>
-              <div className="flex justify-between gap-4"><span>Đã trả thuộc hợp đồng đã huỷ (vẫn hiện, chưa giả định hoàn tiền)</span><strong>{money(pnlData.cash.totals.paidCancelled??0)}</strong></div>
-              <div className="flex justify-between gap-4"><span>Hợp đồng còn nháp (chưa ký, chưa tính nghĩa vụ)</span><strong>{pnlData.cash.draftCount.toLocaleString('vi-VN')}</strong></div>
-              <div className="flex justify-between gap-4"><span>Đã trả thuộc hợp đồng nháp</span><strong>{money(pnlData.cash.totals.paidDraft??0)}</strong></div>
-              <div className="flex justify-between gap-4"><span>Tổng đã trả mọi phạm vi (hiệu lực + huỷ + nháp)</span><strong>{money(pnlData.cash.totals.paidAll??0)}</strong></div>
-            </div>
-            <p className="text-xs text-slate-500 mt-2">Mỗi hợp đồng đếm đúng một lần theo dự án, không nhân theo dòng hay phương án. Đã trả chỉ để theo dõi dòng tiền — không dùng để suy ra lợi nhuận thực tế.</p>
-          </div>
-        </section>}
         {customer&&<section className="border rounded-xl p-5 bg-white"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Bản xem trước báo khách</h3><button type="button" className={button} onClick={()=>setShowPrint(true)}>In / Lưu PDF</button></div><p>{customer.client} · {customer.campaign} · V{customer.version}</p><table className="w-full text-sm mt-4"><thead><tr className="border-b"><th className="text-left">Hạng mục</th><th>SL</th><th>Đơn giá</th><th>Thành tiền</th></tr></thead><tbody>{customerGroups.map((g:any)=>{return <React.Fragment key={g.phase||'__'}>{(g.showHeader)&&<tr className="bg-slate-50"><td colSpan={4} className="py-2 font-semibold">{g.phase?('Phase: '+g.phase):'Hạng mục khác'}</td></tr>}{g.items.map((i:any,index:number)=><tr key={index} className="border-b"><td className="py-2">{i.creator} — {i.description}{i.note&&<span className="block text-xs text-slate-500 whitespace-pre-line mt-0.5">{i.note}</span>}{i.commentsIncluded!==undefined&&<span className="block text-xs text-slate-500 mt-0.5">Tổng số comment bao gồm: {i.commentsIncluded!==null?i.commentsIncluded.toLocaleString('vi-VN'):'Chưa xác định'}{i.scopeNote?` · Phạm vi: ${i.scopeNote}`:''}</span>}</td><td className="text-center">{i.quantity}{i.unit?' '+i.unit:''}</td><td className="text-center">{money(i.sellUnitPrice)}</td><td className="text-right">{money(i.total)}</td></tr>)}{(g.showHeader)&&<tr className="border-b"><td colSpan={3} className="py-1 text-right text-xs text-slate-500">Tiểu tổng {g.phase||'nhóm'}:</td><td className="py-1 text-right font-medium">{money(g.subtotal)}</td></tr>}</React.Fragment>})}</tbody></table><div className="mt-4 text-sm text-right"><p>Chiết khấu: {money(customer.discount)}</p><p>Agency fee: {money(customer.agencyFee)}</p><p>Trước thuế: {money(customer.revenueBeforeTax)}</p><p>Thuế: {money(customer.tax)}</p><strong>Tổng thanh toán: {money(customer.totalWithTax)}</strong></div></section>}
         {costItem&&quote&&<CostSourceDialog projectId={projectId} quoteId={quote.id} revision={quote.revision} item={costItem} onClose={()=>setCostItemId(null)} onApplied={async()=>{setCostItemId(null);await refresh(quote.id);setNotice('Đã áp dụng nguồn chi phí cho dòng. Số liệu là snapshot — hồ sơ/hợp đồng đổi sau này không tự đổi dòng đã lưu.');}}/>}
         {showPrint&&customer&&<div className="fixed inset-0 z-50 bg-black/50 overflow-y-auto print:bg-white print:overflow-visible">
