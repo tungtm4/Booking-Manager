@@ -599,6 +599,8 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
   const [sheetNames, setSheetNames] = useState<string[]>([]);
   const [activeSheetName, setActiveSheetName] = useState<string>('');
   const [sourceMatrix, setSourceMatrix] = useState<CellData[][]>([]);
+  // Thông báo minh bạch về việc chọn tab theo gid trong link (FIX-1): khớp được hay không đều phải hiện rõ
+  const [gidNotice, setGidNotice] = useState<{ kind: 'matched' | 'unmatched'; tabName: string } | null>(null);
 
   // Dòng tiêu đề (Việc 2)
   const [headerRowIndex, setHeaderRowIndex] = useState<number>(0);
@@ -876,6 +878,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
   // Chuyển tab trong file bảng tính (Việc 1)
   const handleSwitchSheet = async (newSheetName: string) => {
     if (!workbookSheets[newSheetName]) return;
+    setGidNotice(null);
     setActiveSheetName(newSheetName);
     await processMatrix(workbookSheets[newSheetName].rows, newSheetName);
     showToast(`Đã chuyển sang tab "${newSheetName}" và nhận diện lại cột!`);
@@ -944,6 +947,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         }
 
         setWorkbookSheets(extractedSheets);
+        setGidNotice(null);
         setSheetNames(workbook.SheetNames);
         const firstTab = workbook.SheetNames[0];
         setActiveSheetName(firstTab);
@@ -1005,24 +1009,28 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
 
       setWorkbookSheets(data.sheets);
       setSheetNames(data.sheetNames);
+      setGidNotice(null);
 
       let targetSheetName = data.sheetNames[0];
 
       // Nếu link có gid, đối chiếu dấu vân tay qua endpoint fetch-csv
       if (gid) {
+        let matchedName: string | null = null;
         try {
           const csvRes = await fetch(`/api/sheets/fetch-csv?sheetId=${encodeURIComponent(sheetId)}&gid=${encodeURIComponent(gid)}`);
           if (csvRes.ok) {
             const csvText = await csvRes.text();
-            const matchedName = findSheetByGidCsvFingerprint(data.sheets, csvText);
-            if (matchedName) {
-              targetSheetName = matchedName;
-            } else {
-              showToast(`Không khớp được tab theo gid=${gid}. Đang mở tab đầu tiên: ${targetSheetName}. Bạn có thể chọn tab khác.`);
-            }
+            matchedName = findSheetByGidCsvFingerprint(data.sheets, csvText);
           }
         } catch {
-          // Bỏ qua nếu fetch-csv không khả dụng
+          // fetch-csv không khả dụng -> coi như không xác định được tab
+        }
+        if (matchedName) {
+          targetSheetName = matchedName;
+          setGidNotice({ kind: 'matched', tabName: matchedName });
+        } else {
+          setGidNotice({ kind: 'unmatched', tabName: targetSheetName });
+          showToast(`Không khớp được tab theo gid=${gid}. Đang mở tab đầu tiên: ${targetSheetName}. Bạn có thể chọn tab khác.`);
         }
       }
 
@@ -1061,6 +1069,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
 
       const sheets = { 'Dữ liệu dán': { name: 'Dữ liệu dán', rows: pasteMatrix } };
       setWorkbookSheets(sheets);
+      setGidNotice(null);
       setSheetNames(['Dữ liệu dán']);
       setActiveSheetName('Dữ liệu dán');
       await processMatrix(pasteMatrix, 'Dữ liệu dán');
@@ -2430,6 +2439,34 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
               Tọa độ tiêu đề: {getColumnLetter(0)}1 → {getColumnLetter(fileHeaders.length - 1)}{headerRowIndex + 1}
             </span>
           </div>
+
+          {/* Thông báo chọn tab theo gid trong link (FIX-1): khớp hay không đều hiện rõ, không chọn thầm */}
+          {gidNotice && (
+            <div
+              className={`flex items-center gap-2 p-3 border rounded-xl text-xs ${
+                gidNotice.kind === 'matched'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-amber-50 border-amber-200 text-amber-900'
+              }`}
+            >
+              {gidNotice.kind === 'matched' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+              )}
+              <span>
+                {gidNotice.kind === 'matched' ? (
+                  <>
+                    Đã chọn tab <strong>“{gidNotice.tabName}”</strong> theo liên kết bạn dán.
+                  </>
+                ) : (
+                  <>
+                    Không xác định được tab từ liên kết — đang hiển thị tab <strong>“{gidNotice.tabName}”</strong>. Hãy chọn lại tab đúng ở ô <strong>Đang nhập tab</strong> phía trên nếu cần.
+                  </>
+                )}
+              </span>
+            </div>
+          )}
 
           {/* Cảnh báo Cần kiểm tra dòng tiêu đề nếu độ tin cậy thấp (Việc 2) */}
           {headerCandidate?.confidence === 'thấp' && (

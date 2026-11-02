@@ -358,6 +358,138 @@ test('Import-1 (g): Đối chiếu gid tab theo dấu vân tay CSV (Việc 1)', 
   assert.equal(matched, 'QUOTATION - R1 update', 'Phải khớp đúng tab "QUOTATION - R1 update" theo dấu vân tay');
 });
 
+// ============================================================================
+// FIX-1: Fixture mô phỏng ĐÚNG các bẫy của sheet báo giá thật (La Vie Quotation)
+// mà fixture cũ chưa có: cột TOTAL nằm ngay trong hàng tiêu đề, dòng dữ liệu
+// chứa Category "Artist (KOL)", ô SOW dài > 200 ký tự chứa nhiều từ khóa,
+// ô link hiển thị chữ "Link", và 2 tab báo giá song song dùng chung khối dự án.
+// ============================================================================
+const LONG_SOW =
+  "Hint story/broadcast với keyword 'dịu nhẹ' + Sx 1 video 'Mở Tủ' theo brief + vận hành minigame cùng fandom (quà: Dây Dịu Nhẹ + lời nhắn thu âm của KOL sẽ cần có brief chi tiết mới quyết định) + CTA #lavievidiunhe — kèm 2 tiếng khách mời Livestream và 2 tuần SDHA, FOC 1 post teaser";
+
+function createTrapHeaderRow(): CellData[] {
+  return [
+    'PIC', 'tình hình', 'STT', 'Category', 'FANPAGE/ KOL', 'Link Facebook', 'Link Tiktok',
+    'NỀN TẢNG ĐĂNG', 'SOW', 'BHD suggested\nBrand Pick', 'UNIT', 'UNIT COST', 'QUANITY',
+    'TOTAL', 'Note', 'Reasonale', 'Demo Content', 'KPI BUZZ', 'LA VIE FEEDBACK', 'KPI VIEW', 'KPI ENGAGEMENT',
+  ].map((v) => ({ value: v }));
+}
+
+function createTrapDataRow(pic: string, stt: string, name: string, fbVal: string, fbLink: string, ttVal: string, ttLink: string): CellData[] {
+  return [
+    { value: pic },
+    { value: 'Đã báo giá' },
+    { value: stt },
+    { value: 'Artist (KOL)' },
+    { value: name },
+    { value: fbVal, link: fbLink },
+    { value: ttVal, link: ttLink },
+    { value: 'Tiktok' },
+    { value: LONG_SOW },
+  ];
+}
+
+function createRealTrapSheet(creatorNames: string[]): CellData[][] {
+  const matrix: CellData[][] = [];
+  // 14 dòng khối thông tin dự án (dùng chung giữa các tab song song)
+  matrix.push([{ value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: 'BOOKING AGENCY' }, { value: '' }, { value: 'CÔNG TY TNHH BÌNH HẠNH ĐAN' }]);
+  matrix.push([{ value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: 'BHD Contact' }, { value: '' }, { value: 'Tùng Trần — tungtm@bhdvn.com' }]);
+  matrix.push([{ value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: 'Project' }, { value: '' }, { value: 'La Vie Light - Social Outreach & Livestream Sustain 2026' }]);
+  matrix.push([{ value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: 'Client' }, { value: '' }, { value: 'La Vie - Nước Khoáng Thiên Nhiên' }]);
+  for (let i = 4; i < 14; i++) matrix.push([{ value: '' }]);
+  // Dòng 15: tiêu đề thật (có cột TOTAL ở cột N)
+  matrix.push(createTrapHeaderRow());
+  // Dòng 16: SECTION ngay dưới tiêu đề
+  matrix.push([{ value: 'A' }, { value: '' }, { value: '' }, { value: '' }, { value: 'SECTION A — ARTIST (KOL)' }]);
+  // Các dòng dữ liệu "giàu từ khóa" — bẫy khiến bộ dò cũ chọn nhầm dòng 19
+  creatorNames.forEach((name, i) => {
+    matrix.push(
+      createTrapDataRow(
+        i % 2 === 0 ? 'Tích' : 'Vũ',
+        i === 0 ? '1' : i === 1 ? '2a' : '2b',
+        name,
+        i === 2 ? 'Link' : '209.000',
+        `https://www.facebook.com/${name.replace(/\s+/g, '').toLowerCase()}`,
+        i === 2 ? '237,400' : '379.500',
+        `https://www.tiktok.com/@${name.replace(/\s+/g, '').toLowerCase()}`
+      )
+    );
+  });
+  // Dòng TOTAL / VAT ở cuối vùng dữ liệu
+  matrix.push([{ value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: '' }, { value: 'TOTAL' }, { value: '1.250.000.000' }]);
+  matrix.push([{ value: 'VAT 8%' }, { value: 'Thuế giá trị gia tăng' }]);
+  return matrix;
+}
+
+function matrixToCsv(rows: CellData[][]): string {
+  return rows
+    .map((r) =>
+      r
+        .map((c) => {
+          const v = String(c?.value || '');
+          return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+        })
+        .join(',')
+    )
+    .join('\n');
+}
+
+test('FIX-1 (i): Sheet bẫy thật — tiêu đề có cột TOTAL + dòng dữ liệu giàu từ khóa → vẫn chọn đúng dòng 15, tin cậy cao', () => {
+  const matrix = createRealTrapSheet(['Vương Bình', 'Jaysonlei', 'Dillan']);
+
+  const candidate = findBestHeaderRow(matrix);
+  assert.equal(candidate.rowIndex, 14, 'Phải chọn dòng 15 làm tiêu đề, không chọn dòng dữ liệu');
+  assert.equal(candidate.rowNumber, 15);
+  assert.equal(candidate.confidence, 'cao', 'Thắng áp đảo trước dòng dữ liệu thì độ tin cậy phải là cao');
+
+  // Dòng dữ liệu giàu từ khóa nhất (dòng 19) phải thua xa dòng tiêu đề
+  const headerScore = scoreHeaderRow(matrix[14], 14, matrix).score;
+  const dataScore = scoreHeaderRow(matrix[18], 18, matrix).score;
+  assert.ok(dataScore < headerScore * 0.85, `Dòng dữ liệu (${dataScore}) phải thua rõ dòng tiêu đề (${headerScore})`);
+
+  // Map cột theo chỉ số vẫn đúng E/F/G trên fixture bẫy
+  const headers = matrix[14].map((c, i) => c?.value || `Cột ${getColumnLetter(i)} — trống`);
+  const mapping = smartDetectColumnsIndexed(headers, matrix, 14);
+  assert.equal(mapping['ten'], 4);
+  assert.equal(mapping['linkFacebook'], 5);
+  assert.equal(mapping['linkTikTok'], 6);
+});
+
+test('FIX-1 (j): Hai dòng tiêu đề giống hệt nhau → chọn dòng ở trên', () => {
+  const matrix: CellData[][] = [];
+  for (let i = 0; i < 4; i++) matrix.push([{ value: `Khối thông tin ${i + 1}` }]);
+  matrix.push(createTrapHeaderRow()); // index 4
+  matrix.push(createTrapDataRow('Tích', '1', 'Vương Bình', '209.000', 'https://www.facebook.com/vuongbinh', '379.500', 'https://www.tiktok.com/@vuongbinh'));
+  for (let i = 0; i < 4; i++) matrix.push([{ value: '' }]);
+  matrix.push(createTrapHeaderRow()); // index 11 — bản lặp ở dưới
+  matrix.push(createTrapDataRow('Vũ', '1', 'Jaysonlei', '185.000', 'https://www.facebook.com/jaysonlei', '496.900', 'https://www.tiktok.com/@jaysonlei'));
+
+  const candidate = findBestHeaderRow(matrix);
+  assert.equal(candidate.rowIndex, 4, 'Điểm sát nhau thì phải chọn dòng tiêu đề ở trên (index 4)');
+});
+
+test('FIX-1 (k): Dấu vân tay gid phân định được 2 tab song song dùng chung khối dự án; CSV lạ → null', () => {
+  const tabR1 = createRealTrapSheet(['Bùi Công Nam', 'Khoai Lang Thang', 'Cody Nam Võ']);
+  const tabR1Update = createRealTrapSheet(['Vương Bình', 'Jaysonlei', 'Dillan']);
+  const sheets = {
+    'QUOTATION - R1': { rows: tabR1 },
+    'QUOTATION - R1 update': { rows: tabR1Update },
+  };
+
+  // CSV mô phỏng bản xuất theo gid của tab R1 update (số giữ định dạng chấm)
+  const csvFromUpdate = matrixToCsv(tabR1Update.slice(0, 30));
+  const matched = findSheetByGidCsvFingerprint(sheets as any, csvFromUpdate);
+  assert.equal(matched, 'QUOTATION - R1 update', 'Phải chọn đúng tab R1 update dù 2 tab dùng chung khối dự án');
+
+  // CSV của tab R1 cũng phải khớp về đúng tab R1
+  const csvFromR1 = matrixToCsv(tabR1.slice(0, 30));
+  assert.equal(findSheetByGidCsvFingerprint(sheets as any, csvFromR1), 'QUOTATION - R1');
+
+  // CSV của một bảng hoàn toàn khác -> không khớp tab nào -> null (UI sẽ báo người dùng tự chọn)
+  const foreignCsv = 'Báo cáo tồn kho tháng,Tên sản phẩm,Số lượng\nKho miền Nam,Gạo ST25 đặc biệt,150\nKho miền Bắc,Đường cát trắng,200';
+  assert.equal(findSheetByGidCsvFingerprint(sheets as any, foreignCsv), null);
+});
+
 test('Import-1 (h): Kiểm tra mã nguồn server và giao diện DataImportView có đủ 7 việc', () => {
   const serverCode = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
   const importViewCode = readFileSync(new URL('../src/components/DataImportView.tsx', import.meta.url), 'utf8');

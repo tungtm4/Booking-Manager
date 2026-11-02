@@ -160,18 +160,23 @@ export function scoreHeaderRow(row: CellData[], rowIndex: number, allRows: CellD
 
   let score = 0;
   let nonEmptyCount = 0;
-  let shortTextCount = 0;
-  let longTextCount = 0;
+  let numericCellCount = 0;
+  let longCellCount = 0;
 
   for (const cellText of rowCells) {
     if (!cellText) continue;
     nonEmptyCount++;
     const folded = foldText(cellText);
 
-    // Kiểm tra độ dài chữ của ô tiêu đề (tiêu đề thường ngắn < 50 ký tự)
-    if (cellText.length <= 40) shortTextCount++;
-    else if (cellText.length > 80) longTextCount++;
+    // Ô thuần số có phân cách (vd "436.000", "1,200,000") là dấu hiệu dòng DỮ LIỆU, không phải tiêu đề
+    if (/^[\d][\d\s.,]*$/.test(cellText)) numericCellCount++;
+    // Ô văn dài (> 60 ký tự) là mô tả SOW/nội dung, không phải tên cột
+    if (cellText.length > 60) longCellCount++;
 
+    // Mỗi ô chỉ đóng góp NHÓM từ khóa có trọng số cao nhất mà nó khớp:
+    // tránh một ô văn dài (SOW chứa cả "kol", "video", "livestream"...) cộng dồn nhiều nhóm và thắng cả hàng tiêu đề thật
+    let bestWeight = 0;
+    let bestLabel = '';
     for (const group of KEYWORD_WEIGHTS) {
       const isMatched = group.keywords.some((kw) => {
         if (kw === folded) return true;
@@ -179,32 +184,45 @@ export function scoreHeaderRow(row: CellData[], rowIndex: number, allRows: CellD
         if (kw.length >= 3 && folded.includes(kw)) return true;
         return false;
       });
-      if (isMatched) {
-        score += group.weight;
-        if (!matchedKeywords.includes(group.label)) {
-          matchedKeywords.push(group.label);
-        }
+      if (isMatched && group.weight > bestWeight) {
+        bestWeight = group.weight;
+        bestLabel = group.label;
+      }
+    }
+    if (bestWeight > 0) {
+      score += bestWeight;
+      if (bestLabel && !matchedKeywords.includes(bestLabel)) {
+        matchedKeywords.push(bestLabel);
       }
     }
   }
 
-  // Trừ điểm mạnh nếu ô chứa từ khóa dòng SECTION hoặc TOTAL (dòng tổng chi phí)
-  const fullRowText = foldText(rowCells.join(' '));
+  // Phạt ô số và ô văn dài (đặc trưng dòng dữ liệu)
+  score -= Math.min(numericCellCount * 8, 40);
+  score -= Math.min(longCellCount * 15, 45);
+
+  // Trừ điểm mạnh CHỈ khi bản thân dòng là dòng SECTION/TOTAL:
+  // nhãn TOTAL/VAT phải nằm ở các ô đầu tiên của dòng, hoặc dòng rất ít ô.
+  // Một dòng tiêu đề thật có cột tên là "TOTAL"/"UNIT COST" ở phía sau (sheet báo giá thật có cột TOTAL ở cột N)
+  // KHÔNG được bị phạt — đó là lỗi cũ khiến dòng tiêu đề thật bị -200 điểm.
+  const nonEmptyIdx = rowCells.map((c, i) => (c ? i : -1)).filter((i) => i >= 0);
+  const firstNonEmpty = nonEmptyIdx.length ? rowCells[nonEmptyIdx[0]] : '';
   const isSectionPrefix = rowCells.some((c) => /^section\b/i.test(c.trim()));
-  const firstNonEmpty = rowCells.find((c) => c.length > 0) || '';
   const isSingleLetterStt = /^[A-Z]$/.test(firstNonEmpty.trim());
-
-  if (isSectionPrefix || isSingleLetterStt || fullRowText.includes('section')) {
-    score -= 200;
-  }
-
-  if (
-    fullRowText.startsWith('section') ||
-    fullRowText.includes('total') ||
-    fullRowText.includes('grand total') ||
-    fullRowText.includes('vat') ||
-    fullRowText.includes('tong cong')
-  ) {
+  const totalLabelIdx = rowCells.findIndex((c) => {
+    const f = foldText(c);
+    return (
+      f === 'total' ||
+      f === 'grand total' ||
+      f.startsWith('grand total') ||
+      f === 'tong cong' ||
+      f.startsWith('tong cong') ||
+      f === 'vat' ||
+      f.startsWith('vat ')
+    );
+  });
+  const totalLabelEarly = totalLabelIdx >= 0 && nonEmptyIdx.indexOf(totalLabelIdx) <= 2;
+  if (isSectionPrefix || isSingleLetterStt || totalLabelEarly || (totalLabelIdx >= 0 && nonEmptyCount <= 4)) {
     score -= 200;
   }
 
@@ -215,19 +233,28 @@ export function scoreHeaderRow(row: CellData[], rowIndex: number, allRows: CellD
     score += 10;
   }
 
-  // Trừ điểm nếu có nhiều ô văn bản dài (đặc trưng của dòng dữ liệu SOW hoặc mô tả, không phải header)
-  if (longTextCount > 2) {
-    score -= 25;
-  }
-
-  // Cộng điểm nếu các dòng NGAY SAU (1-2 dòng kế tiếp) trông giống dữ liệu creator (chứa link, số follower, giá...)
-  if (rowIndex + 1 < allRows.length) {
-    const nextRow = allRows[rowIndex + 1] || [];
-    const nextRowHasLinks = nextRow.some((c) => Boolean(c.link) || isUrlString(c.value));
-    const nextRowHasNumbers = nextRow.some((c) => parseNumberWithSuffix(c.value) !== undefined && Number(parseNumberWithSuffix(c.value)) > 1000);
+  // Cộng điểm nếu trong 3 dòng kế tiếp (bỏ qua dòng SECTION/TOTAL) có dòng trông giống dữ liệu creator
+  // (dòng SECTION ngay dưới tiêu đề là cấu trúc bình thường của sheet báo giá, không được chặn điểm cộng này)
+  for (let k = 1; k <= 3 && rowIndex + k < allRows.length; k++) {
+    const nxt = allRows[rowIndex + k] || [];
+    const nxtCells = nxt.map((c) => (c?.value ? String(c.value).trim() : ''));
+    const nxtFirst = nxtCells.find((c) => c.length > 0) || '';
+    const nxtIsSectionOrTotal =
+      nxtCells.some((c) => /^section\b/i.test(c.trim())) ||
+      /^[A-Z]$/.test(nxtFirst.trim()) ||
+      foldText(nxtFirst).startsWith('total') ||
+      foldText(nxtFirst).startsWith('grand total') ||
+      foldText(nxtFirst).startsWith('tong cong');
+    if (nxtIsSectionOrTotal) continue;
+    const nextRowHasLinks = nxt.some((c) => Boolean(c.link) || isUrlString(c.value));
+    const nextRowHasNumbers = nxt.some((c) => {
+      const n = parseNumberWithSuffix(c.value);
+      return n !== undefined && n > 1000;
+    });
     if (nextRowHasLinks || nextRowHasNumbers) {
       score += 20;
     }
+    break;
   }
 
   let confidence: 'cao' | 'trung bình' | 'thấp' = 'thấp';
@@ -258,28 +285,43 @@ export function findBestHeaderRow(matrix: CellData[][], maxScan = 100): HeaderRo
   }
 
   const scanLimit = Math.min(matrix.length, maxScan);
-  let bestCandidate: HeaderRowCandidate = {
-    rowIndex: 0,
-    rowNumber: 1,
-    score: -999,
-    confidence: 'thấp',
-    matchedKeywords: [],
-    headerCells: [],
-  };
-
+  const candidates: HeaderRowCandidate[] = [];
   for (let r = 0; r < scanLimit; r++) {
-    const candidate = scoreHeaderRow(matrix[r], r, matrix);
-    if (candidate.score > bestCandidate.score) {
-      bestCandidate = candidate;
-    }
+    candidates.push(scoreHeaderRow(matrix[r], r, matrix));
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  const top = candidates[0];
+
+  // Không có ứng viên nào có điểm dương: trả ứng viên cao nhất với độ tin cậy thấp để UI yêu cầu người dùng tự chọn
+  if (!top || top.score <= 0) {
+    return {
+      ...(top || { rowIndex: 0, rowNumber: 1, score: 0, matchedKeywords: [], headerCells: [] }),
+      confidence: 'thấp',
+    };
   }
 
-  // Nếu điểm quá thấp (< 15 điểm), đánh dấu confidence = 'thấp' để UI yêu cầu người dùng kiểm tra
-  if (bestCandidate.score < 15) {
-    bestCandidate.confidence = 'thấp';
+  // Dải điểm sát nhau (trong vòng 15% của điểm cao nhất): chọn dòng Ở TRÊN NHẤT —
+  // tiêu đề thật luôn nằm trên dữ liệu của nó, tránh chọn nhầm dòng dữ liệu có điểm tương đương ở phía dưới
+  const band = candidates.filter((c) => c.score >= top.score * 0.85);
+  band.sort((a, b) => a.rowIndex - b.rowIndex);
+  const winner = band[0];
+
+  // Biên thắng so với ứng viên tốt nhất CÒN LẠI (khác dòng thắng)
+  const bestOther = candidates.find((c) => c.rowIndex !== winner.rowIndex);
+  const margin = bestOther ? winner.score - bestOther.score : winner.score;
+
+  // Độ tin cậy 'cao' chỉ khi: điểm đủ lớn + có cả nhóm Tên lẫn nhóm Nền tảng/Link + thắng áp đảo (> 15%)
+  const hasNameGroup = winner.matchedKeywords.includes('Tên KOL / Creator');
+  const hasPlatformGroup = winner.matchedKeywords.includes('Nền tảng / Link mạng xã hội');
+  if (winner.score >= 40 && hasNameGroup && hasPlatformGroup && margin > winner.score * 0.15) {
+    winner.confidence = 'cao';
+  } else if (winner.score >= 20) {
+    winner.confidence = 'trung bình';
+  } else {
+    winner.confidence = 'thấp';
   }
 
-  return bestCandidate;
+  return winner;
 }
 
 // ----------------------------------------------------------------------------
@@ -689,55 +731,102 @@ export function checkNonCreatorRow(
 // ----------------------------------------------------------------------------
 // VIỆC 1 (Hỗ trợ đối chiếu gid theo dấu vân tay nội dung)
 // ----------------------------------------------------------------------------
+// Phân tích CSV đúng chuẩn (tôn trọng dấu ngoặc kép kể cả khi ô chứa dấu phẩy/xuống dòng)
+function parseCsvText(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cur += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(cur);
+      cur = '';
+    } else if (ch === '\n') {
+      row.push(cur);
+      rows.push(row);
+      row = [];
+      cur = '';
+    } else if (ch !== '\r') {
+      cur += ch;
+    }
+  }
+  row.push(cur);
+  rows.push(row);
+  return rows;
+}
+
+// Tập ô CHỮ đặc trưng của một dòng: có chữ cái, không phải số thuần.
+// Số bị loại vì định dạng khác nhau giữa CSV ("209.000") và XLSX ("209,000") sẽ làm trượt đối chiếu.
+function textCellSet(cells: string[]): Set<string> {
+  const set = new Set<string>();
+  for (const cell of cells) {
+    const v = String(cell || '').trim();
+    if (v.length < 3) continue;
+    if (!/\p{L}/u.test(v)) continue;
+    if (/^[\d][\d\s.,]*$/.test(v)) continue;
+    set.add(foldText(v));
+  }
+  return set;
+}
+
+// Đối chiếu tab theo gid bằng dấu vân tay Ô CHỮ, so theo VỊ TRÍ DÒNG + theo TẬP HỢP:
+// - Các tab báo giá song song dùng chung khối thông tin dự án và phần lớn creator,
+//   nên chỉ so "có xuất hiện hay không" sẽ hòa điểm; phải so thêm theo đúng vị trí dòng
+//   (thứ tự/tổ hợp creator ở các dòng đầu khác nhau giữa các tab).
+// - Điểm = số ô chữ khớp theo từng dòng (30 dòng đầu) + số ô chữ đặc trưng khớp trong tập hợp 30 dòng đầu.
+// - Chỉ trả về tab thắng khi thắng RÕ RÀNG (hơn tab nhì >= 3 điểm); ngược lại trả null
+//   để UI thông báo cho người dùng tự chọn tab, tuyệt đối không đoán bừa.
 export function findSheetByGidCsvFingerprint(
   sheets: Record<string, { rows: CellData[][] }>,
   csvText: string
 ): string | null {
   if (!csvText || !sheets) return null;
 
-  const csvLines = csvText
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
+  const csvRowSets = parseCsvText(csvText).slice(0, 30).map(textCellSet);
+  const distinctive = new Set<string>();
+  csvRowSets.forEach((s) => s.forEach((v) => distinctive.add(v)));
+  if (distinctive.size < 4) return null;
 
-  if (csvLines.length === 0) return null;
-
-  // Lấy 3 dòng đầu làm fingerprint
-  const targetSamples = csvLines.slice(0, 3).map((l) => foldText(l.replace(/[,;"]+/g, ' ')));
-  const joinedTargetSample = targetSamples.join(' ');
-
-  let bestMatch: { sheetName: string; score: number } | null = null;
-
+  const scored: Array<{ name: string; score: number }> = [];
   for (const [sheetName, sheetData] of Object.entries(sheets)) {
-    const nonBlankRows = sheetData.rows.filter((r) => r.some((c) => Boolean(c.value?.trim()) || Boolean(c.link)));
-    if (nonBlankRows.length === 0) continue;
-
-    const sheetFirstRowsText = foldText(
-      nonBlankRows
-        .slice(0, Math.min(10, nonBlankRows.length))
-        .map((r) => r.map((c) => c.value || '').join(' '))
-        .join(' ')
-    );
-
-    let matchCount = 0;
-    for (const sample of targetSamples) {
-      if (sample.length >= 5 && sheetFirstRowsText.includes(sample.slice(0, Math.min(sample.length, 30)))) {
-        matchCount++;
-      }
+    const tabRowSets = (sheetData.rows || [])
+      .slice(0, 30)
+      .map((r) => textCellSet((r || []).map((c) => String(c?.value || ''))));
+    let positional = 0;
+    for (let i = 0; i < csvRowSets.length; i++) {
+      const tabSet = tabRowSets[i];
+      if (!tabSet) continue;
+      csvRowSets[i].forEach((v) => {
+        if (tabSet.has(v)) positional++;
+      });
     }
-
-    if (joinedTargetSample.length >= 10 && sheetFirstRowsText.includes(joinedTargetSample.slice(0, 30))) {
-      matchCount += 3;
-    }
-
-    const rowDiff = Math.abs(nonBlankRows.length - csvLines.length);
-    let score = matchCount * 10;
-    if (rowDiff <= 2) score += 5;
-
-    if (matchCount > 0 && (!bestMatch || score > bestMatch.score)) {
-      bestMatch = { sheetName, score };
-    }
+    const allTab = new Set<string>();
+    tabRowSets.forEach((s) => s.forEach((v) => allTab.add(v)));
+    let setOverlap = 0;
+    distinctive.forEach((v) => {
+      if (allTab.has(v)) setOverlap++;
+    });
+    scored.push({ name: sheetName, score: positional + setOverlap });
   }
 
-  return bestMatch ? bestMatch.sheetName : null;
+  scored.sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  const second = scored[1];
+  if (!best || best.score < 10) return null;
+  if (second && best.score - second.score < 3) return null;
+  return best.name;
 }
