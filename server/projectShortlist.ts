@@ -252,7 +252,9 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     res.json({phases:rows.map(phaseOut)});
   });
   router.post('/projects/:id/phases',(req,res)=>{
-    const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật dự án này.'});
+    // Phase là kế hoạch của PM: chỉ PM/Admin được tạo/sửa/xoá phase (anh chốt 03/11/2026).
+    // Booking là người scout/check giá nên shortlist + xác nhận giá vẫn mở ở quyền thành viên.
+    const u=res.locals.user,pid=req.params.id;if(!access(u,pid,true))return res.status(403).json({message:'Chỉ PM/Admin được tạo phase.'});
     const {name,kind,description,budget,sortOrder,brief}=req.body??{};
     if(!str(name,200)||!name.trim())return res.status(400).json({message:'Vui lòng nhập tên phase.'});
     if(kind!==undefined&&!phaseKinds.includes(kind))return res.status(400).json({message:'Loại phase không hợp lệ.'});
@@ -267,7 +269,7 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     audit(u.id,'create_phase',id);res.json({id});
   });
   router.patch('/projects/:id/phases/:phaseId',(req,res)=>{
-    const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật dự án này.'});
+    const u=res.locals.user,pid=req.params.id;if(!access(u,pid,true))return res.status(403).json({message:'Chỉ PM/Admin được sửa phase.'});
     const row=db.prepare('SELECT * FROM project_phases WHERE id=? AND project_id=?').get(req.params.phaseId,pid) as any;
     if(!row)return res.status(404).json({message:'Không tìm thấy phase trong dự án.'});
     if(req.body?.revision!==row.revision)return res.status(409).json({message:'Phase đã thay đổi. Tải lại trước khi lưu.'});
@@ -284,7 +286,7 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
   });
   // Xoá phase qua POST (quy ước của app: mọi thao tác ghi đều là POST + JSON; DELETE không body bị guard 415 chặn).
   router.post('/projects/:id/phases/:phaseId/delete',(req,res)=>{
-    const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật dự án này.'});
+    const u=res.locals.user,pid=req.params.id;if(!access(u,pid,true))return res.status(403).json({message:'Chỉ PM/Admin được xoá phase.'});
     const row=db.prepare('SELECT * FROM project_phases WHERE id=? AND project_id=?').get(req.params.phaseId,pid) as any;
     if(!row)return res.status(404).json({message:'Không tìm thấy phase trong dự án.'});
     const used=(db.prepare('SELECT COUNT(*) AS c FROM project_shortlist WHERE project_id=? AND phase_id=?').get(pid,row.id) as any).c;

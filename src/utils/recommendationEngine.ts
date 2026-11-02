@@ -80,9 +80,10 @@ export function calculateKolRecommendation(
   let giaHienTaiCalculated: number | null = null;
 
   if (hasGoiHangMuc && filter.nganSachToiDa && filter.nganSachToiDa > 0) {
+    // Giá 0đ là giá HỢP LỆ (đã chốt với đối tác), không phải thiếu giá — chỉ trống/không có mới là thiếu.
     const isMissingAnyPrice = activeGoiHangMuc.some((item) => {
       const p = kol.bangGia ? kol.bangGia[item.format] : null;
-      return p === null || p === undefined || p === 0;
+      return p === null || p === undefined;
     });
 
     if (isMissingAnyPrice) {
@@ -126,7 +127,7 @@ export function calculateKolRecommendation(
     // Có gói hạng mục nhưng không có giới hạn ngân sách tối đa
     const isMissingAnyPrice = activeGoiHangMuc.some((item) => {
       const p = kol.bangGia ? kol.bangGia[item.format] : null;
-      return p === null || p === undefined || p === 0;
+      return p === null || p === undefined;
     });
 
     if (isMissingAnyPrice) {
@@ -154,7 +155,7 @@ export function calculateKolRecommendation(
     giaHienTaiCalculated = currentPrice;
 
     if (filter.nganSachToiDa && filter.nganSachToiDa > 0) {
-      if (currentPrice === null || currentPrice === undefined || currentPrice === 0) {
+      if (currentPrice === null || currentPrice === undefined) {
         diemGia = 8;
         lyDo.push(`Chưa có báo giá cho ${formatLabel} (cần deal giá riêng)`);
       } else if (currentPrice <= filter.nganSachToiDa) {

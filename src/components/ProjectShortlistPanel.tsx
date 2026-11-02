@@ -773,6 +773,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
                   {(d.kpiTopics != null || d.kpiComments != null || d.kpiBuzz != null || (d.services ?? []).length > 0) && <p className="text-xs text-slate-600">{[d.kpiTopics != null ? 'KPI ' + d.kpiTopics.toLocaleString('vi-VN') + ' bài' : null, d.kpiComments != null ? d.kpiComments.toLocaleString('vi-VN') + ' comments' : null, d.kpiBuzz != null ? d.kpiBuzz.toLocaleString('vi-VN') + ' buzz' : null].filter(Boolean).join(' · ')}{(d.services ?? []).length > 0 ? ' · Dịch vụ: ' + d.services.map((s: any) => s.name + ' × ' + s.quantity.toLocaleString('vi-VN')).join(', ') : ''}</p>}
                 </div>
               ))}
+              {data.canManage && (
               <button type="button" className={button} disabled={busy || !aiDrafts.some((d: any) => d.include)} onClick={() => run(async () => {
                 let created = 0;
                 for (const d of aiDrafts.filter((x: any) => x.include)) {
@@ -783,6 +784,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
                 await refresh();
                 setNotice(`Đã tạo ${created} phase từ bản bóc tách AI.`);
               })}>Tạo {aiDrafts.filter((d: any) => d.include).length} phase đã chọn</button>
+              )}
             </div>
           )}
         </div>
@@ -819,7 +821,14 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
             })}
           </div>
         )}
-        {activePhase && phaseBrief && (
+        {activePhase && phaseBrief && !data.canManage && (
+          <div className="rounded-xl bg-slate-50 p-3 space-y-1.5 text-sm text-slate-600">
+            <p><span className="font-semibold text-slate-800">{phaseInfo.name}</span> · {PHASE_KIND_LABELS[phaseInfo.kind as keyof typeof PHASE_KIND_LABELS] ?? phaseInfo.kind} · Ngân sách: {phaseInfo.budget === '' || phaseInfo.budget == null ? 'Chưa đặt' : Number(phaseInfo.budget).toLocaleString('vi-VN') + ' ₫'}</p>
+            {phaseInfo.description && <p>{phaseInfo.description}</p>}
+            <p className="text-xs text-slate-500">Brief: lĩnh vực {phaseBrief.category || '—'} · follower tối thiểu {(phaseBrief.minFollowers || 0).toLocaleString('vi-VN')} · mục tiêu {phaseBrief.targetCount ?? '—'} đối tác. Phase do PM quản lý — Booking xem brief để scout và xác nhận giá ở các mục dưới.</p>
+          </div>
+        )}
+        {activePhase && phaseBrief && data.canManage && (
           <div className="rounded-xl bg-slate-50 p-3 space-y-3">
             <div className="grid sm:grid-cols-2 gap-3">
               <label className="text-sm">Tên phase
@@ -893,6 +902,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
             </div>
           </div>
         )}
+        {data.canManage && (
         <form className="flex flex-wrap gap-2 items-end border-t pt-3" onSubmit={e => {
           e.preventDefault();
           if (!newPhase.name.trim()) return;
@@ -917,6 +927,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
           </label>
           <button className={button} disabled={busy || !newPhase.name.trim()}>Thêm phase</button>
         </form>
+        )}
       </section>
 
       {/* 3. Tìm & Đề xuất đối tác — Nhúng trực tiếp đề xuất hoặc tìm theo kho */}
