@@ -8,6 +8,19 @@ import {
   DEFAULT_PRICE_SERVICE_NAME, DEFAULT_PRICE_CONDITIONS,
   type CommunityColumnMapping, type CommunityMetricMode, type SkippedRow,
 } from '../utils/communityImport';
+import { formatNumberOnly } from '../utils/formatters';
+import { getColumnLetter } from '../utils/spreadsheetImport';
+
+// Kết quả áp dụng nhập Community — cha dùng để báo rõ cho người dùng:
+// thêm mới / cập nhật / không đổi (đã có sẵn) / giữ bản server / bị chặn vì server đã đổi.
+export interface CommunityImportResult {
+  added: number;
+  updated: number;
+  unchanged: number;
+  keptServer: number;
+  stale: any[];
+  serverOnly: number;
+}
 
 // Nhập Community từ Google Sheet / Excel — chỉ tạo CHỨC NĂNG nhập:
 // tải bảng -> ánh xạ cột -> chuyển thành hồ sơ (bỏ dòng tiêu đề nhóm/trống/liên hệ)
@@ -31,7 +44,7 @@ const MAPPING_FIELDS: { key: keyof CommunityColumnMapping; label: string; requir
 
 type Step = 'source' | 'mapping' | 'preview' | 'result';
 
-export function CommunityImportModal({ isOpen, onClose, onApplied }: { isOpen: boolean; onClose: () => void; onApplied: () => void }) {
+export function CommunityImportModal({ isOpen, onClose, onApplied }: { isOpen: boolean; onClose: () => void; onApplied: (result: CommunityImportResult) => void }) {
   const [step, setStep] = useState<Step>('source');
   const [sourceMode, setSourceMode] = useState<'excel' | 'sheet' | 'paste'>('excel');
   const [sheetUrl, setSheetUrl] = useState('');
@@ -194,7 +207,7 @@ export function CommunityImportModal({ isOpen, onClose, onApplied }: { isOpen: b
       }
       setResult(total);
       setStep('result');
-      onApplied();
+      onApplied(total);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không áp dụng được dữ liệu nhập.');
     } finally { setBusy(false); }
@@ -331,7 +344,7 @@ Gia Đình Trẻ	Fanpage	1.200.000	Gia đình	7.500.000`}
                   <select className={field} value={mapping[f.key]} onChange={e => setMapping({ ...mapping, [f.key]: Number(e.target.value) })}>
                     <option value={-1}>— Không dùng —</option>
                     {Array.from({ length: columnCount }, (_, i) => (
-                      <option key={i} value={i}>Cột {i + 1}: {String(rows[headerRowIndex]?.[i] ?? '').slice(0, 40) || '(trống)'}</option>
+                      <option key={i} value={i}>{getColumnLetter(i)} — {String(rows[headerRowIndex]?.[i] ?? '').slice(0, 40) || '(trống)'}</option>
                     ))}
                   </select>
                 </label>
@@ -413,7 +426,18 @@ Gia Đình Trẻ	Fanpage	1.200.000	Gia đình	7.500.000`}
                     <li key={p.id || idx} className={'flex flex-wrap items-center gap-2 text-sm border rounded-lg px-2 py-1.5 ' + (needsChoice && !loaiChoices[idx] ? 'border-amber-300 bg-amber-50' : 'border-slate-200')}>
                       <span className="font-medium">{p.ten}</span>
                       <span className="text-xs text-slate-500">{communityScaleLabel({ loai: effLoai, quyMo: p.quyMo, loaiChiSo: effMetric })}</span>
-                      {p.dichVu?.some(s => s.giaThamKhao == null) && <span className="text-xs text-amber-700">Có dịch vụ chưa có giá — vẫn giữ dịch vụ, Booking bổ sung giá sau</span>}
+                      {/* Giá dịch vụ đọc được từ bảng — hiện rõ ngay ở bước xem trước để kiểm tra trước khi lưu */}
+                      {p.dichVu && p.dichVu.length > 0 ? (
+                        <span className="flex flex-wrap gap-1">
+                          {p.dichVu.map((s, si) => (
+                            <span key={s.id || si} className={'text-[11px] px-1.5 py-0.5 rounded-md border ' + (s.giaThamKhao != null ? 'bg-purple-50/70 border-purple-200 text-purple-900' : 'bg-amber-50 border-amber-200 text-amber-800')}>
+                              {s.ten}: {s.giaThamKhao != null ? <strong>{formatNumberOnly(s.giaThamKhao)}đ</strong> : 'chưa có giá'}
+                            </span>
+                          ))}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic">Chưa có dịch vụ/giá trong bảng nhập</span>
+                      )}
                       <select aria-label={'Loại của ' + p.ten} className="ml-auto rounded-lg border border-slate-300 px-2 py-1 text-sm bg-white" value={current} onChange={e => { const v = e.target.value; if (v === 'page' || v === 'group') chooseLoai(idx, v); }}>
                         {needsChoice && <option value="">— Chọn loại —</option>}
                         <option value="page">Page (người theo dõi)</option>
@@ -449,6 +473,9 @@ Gia Đình Trẻ	Fanpage	1.200.000	Gia đình	7.500.000`}
 
         {step === 'result' && result && (
           <div className="space-y-3">
+            {result.added === 0 && result.updated === 0 && (
+              <p className="text-sm font-semibold text-slate-700">Không có hồ sơ nào thay đổi — toàn bộ hồ sơ nhập vào đều đã có sẵn trên server và không đổi, nên danh sách không có gì khác.</p>
+            )}
             <p className="text-sm">Đã thêm mới <strong>{result.added}</strong> · Đã cập nhật <strong>{result.updated}</strong> · Không đổi <strong>{result.unchanged}</strong> · Giữ bản server <strong>{result.keptServer}</strong> · Hồ sơ chỉ có trên server được giữ nguyên <strong>{result.serverOnly}</strong>.</p>
             {result.stale.length > 0 && (
               <div className="border border-amber-300 bg-amber-50 rounded-xl p-3">

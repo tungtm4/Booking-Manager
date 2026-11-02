@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, Upload, Plus, Eye, Edit2, Trash2 } from 'lucide-react';
+import { Search, Upload, Plus, Eye, Edit2, Trash2, LayoutGrid, List, Scale, Tag } from 'lucide-react';
 import type { CommunityProfile, CommunityService } from '../types/community';
 import { COMMUNITY_KIND_LABELS, COMMUNITY_METRIC_LABELS, COMMUNITY_SERVICE_UNIT_SUGGESTIONS } from '../types/community';
 import { CommunityService as CommunityApi, type CatalogCommunity } from '../services/communityService';
-import { communityScaleLabel } from '../domain/community';
+import { communityScaleLabel, filterCommunities, sortCommunities, type CommunitySortKey } from '../domain/community';
 import { CommunityImportModal } from './CommunityImportModal';
+import { CommunityCompareModal } from './CommunityCompareModal';
 import { PartnerSigningPanel, confirmDiscardSigningChanges } from './PartnerSigningPanel';
 import { PartnerContractsList } from './PartnerContractsList';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
@@ -49,6 +50,16 @@ export function CommunityManager({
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState('');
   const [loaiFilter, setLoaiFilter] = useState('');
+  // Bộ lọc + sắp xếp + chế độ xem + chọn để so sánh — ngang tính năng danh sách KOL
+  const [sortBy, setSortBy] = useState<CommunitySortKey>('newest');
+  const [selectedCats, setSelectedCats] = useState<string[]>([]);
+  const [minScale, setMinScale] = useState<number | ''>('');
+  const [maxScale, setMaxScale] = useState<number | ''>('');
+  const [maxBudget, setMaxBudget] = useState<number | ''>('');
+  const [includeNoPrice, setIncludeNoPrice] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
 
@@ -116,7 +127,7 @@ export function CommunityManager({
   }
   useEffect(() => { load(); }, []);
 
-  const filtered = useMemo(() => {
+  const baseFiltered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items.filter(c => {
       if (loaiFilter && c.loai !== loaiFilter) return false;
@@ -124,7 +135,45 @@ export function CommunityManager({
       return [c.ten, c.nenTang, (c.linhVuc ?? []).join(' '), c.link].join(' ').toLowerCase().includes(q);
     });
   }, [items, search, loaiFilter]);
+
+  // Tag lĩnh vực lấy từ chính dữ liệu đang có (sắp theo độ phổ biến) — Community dùng tag tự do, không ép 12 lĩnh vực của KOL
+  const availableCats = useMemo(() => {
+    const counts = new Map<string, number>();
+    items.forEach((c) => (c.linhVuc ?? []).forEach((cat) => {
+      const t = cat.trim();
+      if (t) counts.set(t, (counts.get(t) ?? 0) + 1);
+    }));
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([cat]) => cat).slice(0, 24);
+  }, [items]);
+
+  const filtered = useMemo(
+    () => sortCommunities(
+      filterCommunities(baseFiltered, { categories: selectedCats, minScale, maxScale, maxBudget, includeNoPrice }),
+      sortBy,
+    ),
+    [baseFiltered, selectedCats, minScale, maxScale, maxBudget, includeNoPrice, sortBy],
+  );
   const paged = paginateItems(filtered, page, pageSize);
+
+  // Chọn nhiều để so sánh (tối đa 4 hồ sơ một lần so sánh)
+  const toggleSelected = (id: string) =>
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const allFilteredSelected = filtered.length > 0 && filtered.every((c) => selectedIds.includes(c.id));
+  const toggleSelectAll = () =>
+    setSelectedIds((prev) =>
+      allFilteredSelected
+        ? prev.filter((id) => !filtered.some((c) => c.id === id))
+        : Array.from(new Set([...prev, ...filtered.map((c) => c.id)])),
+    );
+  const compareItems = useMemo(
+    () => selectedIds.map((id) => items.find((c) => c.id === id)).filter((c): c is CatalogCommunity => Boolean(c)),
+    [selectedIds, items],
+  );
+  const canCompare = compareItems.length >= 2 && compareItems.length <= 4;
+  const hasActiveFilters = selectedCats.length > 0 || minScale !== '' || maxScale !== '' || maxBudget !== '' || sortBy !== 'newest';
+  const resetFilters = () => {
+    setSelectedCats([]); setMinScale(''); setMaxScale(''); setMaxBudget(''); setIncludeNoPrice(false); setSortBy('newest'); setPage(1);
+  };
 
   async function save() {
     if (!editing) return;
@@ -264,17 +313,190 @@ export function CommunityManager({
         )}
       </div>
 
+      {/* Bảng lọc + sắp xếp + chế độ xem — gương thanh lọc của danh sách KOL */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-4">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-700">Sắp Xếp Theo</span>
+            <select
+              aria-label="Sắp xếp Community"
+              className={field + ' mt-1 cursor-pointer'}
+              value={sortBy}
+              onChange={(e) => { setSortBy(e.target.value as CommunitySortKey); setPage(1); }}
+            >
+              <option value="newest">Mới cập nhật nhất</option>
+              <option value="scale_desc">Quy mô lớn nhất</option>
+              <option value="scale_asc">Quy mô nhỏ nhất</option>
+              <option value="price_asc">Giá dịch vụ thấp đến cao</option>
+              <option value="price_desc">Giá dịch vụ cao đến thấp</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-700">Ngân Sách Tối Đa (VND)</span>
+            <span className="relative block mt-1">
+              <input
+                aria-label="Ngân sách tối đa cho Community"
+                className={field + ' pr-7'}
+                inputMode="numeric"
+                placeholder="Vd: 20.000.000"
+                value={formatMoneyInput(maxBudget)}
+                onChange={(e) => { const v = parseMoneyInput(e.target.value); setMaxBudget(v === '' ? '' : v); setPage(1); }}
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">đ</span>
+            </span>
+            <span className="text-[11px] text-slate-400">Tính theo giá dịch vụ thấp nhất của hồ sơ</span>
+          </label>
+          <div>
+            <span className="text-xs font-semibold text-slate-700">Khoảng Quy Mô</span>
+            <div className="flex items-center gap-1.5 mt-1">
+              <input
+                aria-label="Quy mô tối thiểu"
+                className={field}
+                inputMode="numeric"
+                placeholder="Min (vd 100.000)"
+                value={formatMoneyInput(minScale)}
+                onChange={(e) => { const v = parseMoneyInput(e.target.value); setMinScale(v === '' ? '' : v); setPage(1); }}
+              />
+              <span className="text-slate-400">-</span>
+              <input
+                aria-label="Quy mô tối đa"
+                className={field}
+                inputMode="numeric"
+                placeholder="Max"
+                value={formatMoneyInput(maxScale)}
+                onChange={(e) => { const v = parseMoneyInput(e.target.value); setMaxScale(v === '' ? '' : v); setPage(1); }}
+              />
+            </div>
+          </div>
+          <div className="flex flex-col justify-end gap-2">
+            <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-indigo-600"
+                checked={includeNoPrice}
+                onChange={(e) => { setIncludeNoPrice(e.target.checked); setPage(1); }}
+              />
+              Hiện cả Community chưa có giá dịch vụ
+            </label>
+            <div className="flex items-center gap-2">
+              {/* Chuyển chế độ xem Danh sách / Lưới */}
+              <div className="flex bg-slate-100 p-1 rounded-xl">
+                <button
+                  type="button"
+                  aria-label="Xem dạng danh sách"
+                  aria-pressed={viewMode === 'list'}
+                  onClick={() => setViewMode('list')}
+                  className={'p-1.5 rounded-lg transition-all cursor-pointer ' + (viewMode === 'list' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-600 hover:text-slate-900')}
+                >
+                  <List className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Xem dạng lưới"
+                  aria-pressed={viewMode === 'grid'}
+                  onClick={() => setViewMode('grid')}
+                  className={'p-1.5 rounded-lg transition-all cursor-pointer ' + (viewMode === 'grid' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-600 hover:text-slate-900')}
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+              </div>
+              {hasActiveFilters && (
+                <button type="button" onClick={resetFilters} className="text-xs text-indigo-700 underline cursor-pointer">
+                  Xoá bộ lọc
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+        {availableCats.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+              <Tag className="w-3.5 h-3.5 text-slate-400" /> Lĩnh vực (Chọn một hoặc nhiều tag)
+            </p>
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {availableCats.map((cat) => {
+                const active = selectedCats.some((x) => x.toLowerCase() === cat.toLowerCase());
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => {
+                      setSelectedCats((prev) => (active ? prev.filter((x) => x.toLowerCase() !== cat.toLowerCase()) : [...prev, cat]));
+                      setPage(1);
+                    }}
+                    className={'text-[11px] px-2.5 py-1 rounded-full border font-medium transition-colors cursor-pointer ' + (active ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-indigo-300')}
+                  >
+                    {cat}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
       {loading ? (
         <p className="text-slate-500 text-sm py-4">Đang tải kho Community…</p>
       ) : (
         <div className="space-y-3">
+          {/* Thanh chọn tất cả + so sánh — gương danh sách KOL */}
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2">
+            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                aria-label="Chọn tất cả Community đang hiển thị"
+                className="w-4 h-4 accent-indigo-600"
+                checked={allFilteredSelected}
+                onChange={toggleSelectAll}
+              />
+              <span>
+                Chọn tất cả <strong className="text-slate-900">({filtered.length.toLocaleString('vi-VN')} Community đang hiển thị)</strong>
+              </span>
+            </label>
+            {selectedIds.length > 0 ? (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-slate-500">
+                  Đã chọn <strong className="text-slate-900">{selectedIds.length}</strong>
+                  {selectedIds.length > 4 && <span className="text-amber-700"> — so sánh tối đa 4, hãy bỏ bớt {selectedIds.length - 4}</span>}
+                  {selectedIds.length === 1 && <span> — chọn thêm ít nhất 1 để so sánh</span>}
+                </span>
+                <button
+                  type="button"
+                  disabled={!canCompare}
+                  onClick={() => setCompareOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-bold disabled:opacity-40 cursor-pointer"
+                >
+                  <Scale className="w-3.5 h-3.5" /> So sánh ({compareItems.length})
+                </button>
+                <button type="button" onClick={() => setSelectedIds([])} className="px-2 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-600 cursor-pointer">
+                  Bỏ chọn
+                </button>
+              </div>
+            ) : (
+              <span className="text-[11px] text-slate-400">Tích chọn 2–4 hồ sơ để so sánh giá cạnh nhau</span>
+            )}
+          </div>
+          <div className={viewMode === 'grid' ? 'grid sm:grid-cols-2 xl:grid-cols-3 gap-3 items-start' : 'space-y-3'}>
           {paged.pageItems.map((c) => (
             <article
               key={c.id}
-              className="bg-white rounded-xl border p-2 flex flex-col md:flex-row md:items-center gap-3 transition-all border-slate-200 hover:border-indigo-300"
+              className={
+                (viewMode === 'grid'
+                  ? 'bg-white rounded-xl border p-2 flex flex-col gap-3 transition-all hover:border-indigo-300 '
+                  : 'bg-white rounded-xl border p-2 flex flex-col md:flex-row md:items-center gap-3 transition-all hover:border-indigo-300 ')
+                + (selectedIds.includes(c.id) ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-slate-200')
+              }
             >
-              {/* Khối trái: Avatar + Tên + Nhãn + Quy mô + Tag + Meta */}
+              {/* Khối trái: Ô chọn so sánh + Avatar + Tên + Nhãn + Quy mô + Tag + Meta */}
               <div className="flex items-start gap-3 min-w-0 flex-1">
+                <input
+                  type="checkbox"
+                  aria-label={'Chọn so sánh ' + c.ten}
+                  className="mt-1 shrink-0 w-4 h-4 accent-indigo-600 cursor-pointer"
+                  checked={selectedIds.includes(c.id)}
+                  onChange={() => toggleSelected(c.id)}
+                />
                 {/* Avatar chữ cái đầu (w-9 h-9) */}
                 <div className="w-9 h-9 rounded-full overflow-hidden bg-indigo-100 text-indigo-700 font-bold text-xs border border-indigo-200 shrink-0 flex items-center justify-center">
                   {c.ten.slice(0, 2).toUpperCase()}
@@ -361,7 +583,7 @@ export function CommunityManager({
               </div>
 
               {/* Khối phải: Bảng CHIP GIÁ TÓM TẮT theo dịch vụ + Cột nút thao tác */}
-              <div className="w-full md:w-[480px] shrink-0 flex gap-2">
+              <div className={'shrink-0 flex gap-2 ' + (viewMode === 'grid' ? 'w-full' : 'w-full md:w-[480px]')}>
                 {/* Bảng chip giá 3 cột x 2 hàng */}
                 <div className="grid grid-cols-3 gap-1 flex-1 self-center">
                   {(c.dichVu ?? []).slice(0, 6).map((s) => {
@@ -376,11 +598,14 @@ export function CommunityManager({
                             : 'bg-slate-50 border-slate-200 text-slate-400'
                         }`}
                       >
-                        <span className={hasPrice ? 'font-medium' : 'font-normal'}>{s.ten}: </span>
+                        {/* Giá đặt TRƯỚC tên dịch vụ và in đậm: tên dài bị cắt ở cuối chip cũng không che mất giá */}
                         {hasPrice ? (
-                          <span className="font-bold">{formatNumberOnly(s.giaThamKhao!)}đ</span>
+                          <>
+                            <span className="font-bold">{formatNumberOnly(s.giaThamKhao!)}đ</span>
+                            <span className="font-medium"> · {s.ten}</span>
+                          </>
                         ) : (
-                          <span>—</span>
+                          <span className="font-normal">{s.ten}: —</span>
                         )}
                       </div>
                     );
@@ -397,8 +622,19 @@ export function CommunityManager({
                   )}
                 </div>
 
-                {/* Cột nút thao tác ở rìa phải thẻ: Chi tiết, Sửa, Xoá */}
+                {/* Cột nút thao tác ở rìa phải thẻ: So sánh, Chi tiết, Sửa, Xoá */}
                 <div className="flex flex-col gap-1 shrink-0 w-[78px] justify-center">
+                  <button
+                    type="button"
+                    onClick={() => toggleSelected(c.id)}
+                    aria-pressed={selectedIds.includes(c.id)}
+                    title="Chọn/bỏ chọn hồ sơ này để so sánh"
+                    className={'flex items-center justify-center gap-1 px-1.5 py-1 text-[11px] font-semibold rounded-lg transition-colors w-full cursor-pointer ' + (selectedIds.includes(c.id) ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200')}
+                  >
+                    <Scale className="w-3.5 h-3.5" />
+                    <span>So sánh</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setViewing(c)}
@@ -435,6 +671,7 @@ export function CommunityManager({
               </div>
             </article>
           ))}
+          </div>
           {!filtered.length && <p className="border border-dashed rounded-2xl p-8 text-center text-slate-500">Chưa có Community nào khớp. {isAdmin ? 'Thêm thủ công hoặc nhập từ Sheet/Excel.' : ''}</p>}
           {filtered.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600 pt-1">
@@ -451,6 +688,15 @@ export function CommunityManager({
             </div>
           )}
         </div>
+      )}
+
+      {/* So sánh Community cạnh nhau (2–4 hồ sơ đã tích chọn) */}
+      {compareOpen && (
+        <CommunityCompareModal
+          items={compareItems}
+          onClose={() => setCompareOpen(false)}
+          onView={(c) => { setCompareOpen(false); setViewing(c); }}
+        />
       )}
 
       {/* M6: MÀN XEM CHI TIẾT CHỈ ĐỌC (Không có bất kỳ ô input/form nào) */}

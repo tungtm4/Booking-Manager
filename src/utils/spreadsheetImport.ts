@@ -35,6 +35,21 @@ export interface ExtractedChannel {
   warning?: string;
 }
 
+/**
+ * Trích URL từ công thức HYPERLINK("url", "nhãn") của một ô.
+ * Nhiều bảng báo giá chèn link kênh bằng CÔNG THỨC này thay vì hyperlink thường
+ * (ô không có quan hệ hyperlink trong file) — chỉ đọc hyperlink thường sẽ bỏ sót
+ * và báo nhầm "chưa có link" dù người dùng đã gắn link đầy đủ.
+ * Trả về undefined nếu công thức không phải HYPERLINK hoặc tham số đầu không phải URL http(s).
+ */
+export function extractHyperlinkFormulaUrl(formula: string | undefined | null): string | undefined {
+  if (!formula) return undefined;
+  const m = String(formula).match(/HYPERLINK\(\s*"((?:[^"]|"")+)"/i);
+  if (!m) return undefined;
+  const url = m[1].replace(/""/g, '"').trim();
+  return /^https?:\/\//i.test(url) ? url : undefined;
+}
+
 // Chuyển chỉ số cột 0-based sang ký tự chữ cái Excel: 0 -> 'A', 25 -> 'Z', 26 -> 'AA', 27 -> 'AB'...
 export function getColumnLetter(colIndex: number): string {
   if (colIndex < 0) return '';

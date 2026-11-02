@@ -13,6 +13,7 @@ import {
   getColumnLetter,
   parseNumberWithSuffix,
   findSheetByGidCsvFingerprint,
+  extractHyperlinkFormulaUrl,
 } from '../src/utils/spreadsheetImport';
 
 // Helper dựng fixture ma trận mô phỏng đúng cấu trúc Google Sheet báo giá thật
@@ -529,4 +530,33 @@ test('Import-1 (h): Kiểm tra mã nguồn server và giao diện DataImportView
     importViewCode.includes('Danh Sách Dòng Đã Tự Động Loại'),
     'DataImportView phải có modal hiển thị các dòng đã loại'
   );
+});
+
+test('Import-1 FIX-2: Link gắn bằng công thức HYPERLINK() vẫn trích được URL (không báo nhầm chưa có link)', () => {
+  // Bằng chứng thật từ sheet La Vie: ô F17 của Vương Bình là HYPERLINK("https://www.facebook.com/vuongbinhst319","209.000")
+  assert.equal(
+    extractHyperlinkFormulaUrl('HYPERLINK("https://www.facebook.com/vuongbinhst319","209.000")'),
+    'https://www.facebook.com/vuongbinhst319',
+  );
+  assert.equal(
+    extractHyperlinkFormulaUrl('HYPERLINK("https://www.tiktok.com/@jayson.lei","496.900")'),
+    'https://www.tiktok.com/@jayson.lei',
+  );
+  // Khoảng trắng sau dấu phẩy + URL có tham số truy vấn
+  assert.equal(
+    extractHyperlinkFormulaUrl('HYPERLINK("https://www.tiktok.com/@sleebingpeauty?_r=1&_d=abc", "90,000")'),
+    'https://www.tiktok.com/@sleebingpeauty?_r=1&_d=abc',
+  );
+  // Không phải HYPERLINK / không phải URL -> undefined
+  assert.equal(extractHyperlinkFormulaUrl('SUM(A1:A2)'), undefined);
+  assert.equal(extractHyperlinkFormulaUrl('HYPERLINK("#Sheet!A1","đi tới")'), undefined);
+  assert.equal(extractHyperlinkFormulaUrl(undefined), undefined);
+  assert.equal(extractHyperlinkFormulaUrl(''), undefined);
+});
+
+test('Import-1 FIX-2: Mã nguồn — cả endpoint server lẫn đường đọc file Excel đều nối fallback công thức HYPERLINK', () => {
+  const serverCode = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const viewCode = readFileSync(new URL('../src/components/DataImportView.tsx', import.meta.url), 'utf8');
+  assert.ok(serverCode.includes('extractHyperlinkFormulaUrl(cell?.f)'), 'fetch-workbook phải trích link từ công thức HYPERLINK');
+  assert.ok(viewCode.includes('extractHyperlinkFormulaUrl(cell?.f)'), 'Đọc file Excel phía client cũng phải trích link từ công thức HYPERLINK');
 });

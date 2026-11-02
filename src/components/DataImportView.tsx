@@ -37,6 +37,7 @@ import {
   HeaderRowCandidate,
   ExcludedRowInfo,
   getColumnLetter,
+  extractHyperlinkFormulaUrl,
   foldText,
   scoreHeaderRow,
   findBestHeaderRow,
@@ -947,7 +948,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
                 if (cell.w !== undefined && cell.w !== null) val = String(cell.w).trim();
                 else if (cell.v !== undefined && cell.v !== null) val = String(cell.v).trim();
               }
-              const link = cell?.l?.Target ? String(cell.l.Target).trim() : (cell?.l?.target ? String(cell.l.target).trim() : undefined);
+              const link = cell?.l?.Target ? String(cell.l.Target).trim() : (cell?.l?.target ? String(cell.l.target).trim() : extractHyperlinkFormulaUrl(cell?.f));
               rowCells.push({ value: val, ...(link ? { link } : {}) });
             }
             sheetRows.push(rowCells);

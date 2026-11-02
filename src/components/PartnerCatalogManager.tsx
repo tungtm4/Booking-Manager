@@ -25,6 +25,7 @@ import { KolFormModal } from './KolFormModal';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { CommunityManager } from './CommunityManager';
 import { CommunityImportModal } from './CommunityImportModal';
+import { CommunityBulkPriceUpdate } from './CommunityBulkPriceUpdate';
 import { DataImportView } from './DataImportView';
 import { AiPriceExtractor } from './AiPriceExtractor';
 import { CommunityService as CommunityApi } from '../services/communityService';
@@ -57,6 +58,9 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
   const [showEntryModal, setShowEntryModal] = useState<boolean>(false);
   const [activeTool, setActiveTool] = useState<'spreadsheet' | 'excel' | 'paste' | 'ai' | 'bulk_price' | null>(null);
   const [showCommunityImport, setShowCommunityImport] = useState<boolean>(false);
+  const [showCommunityBulkPrice, setShowCommunityBulkPrice] = useState<boolean>(false);
+  // Tăng key để danh sách Community nhúng bên dưới tải lại sau khi nhập áp dụng xong
+  const [communityReloadKey, setCommunityReloadKey] = useState<number>(0);
 
   // Tải số lượng Community ban đầu
   useEffect(() => {
@@ -348,6 +352,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
       {tab === 'community' && (
         <div className="bg-white p-6 rounded-3xl border border-purple-100 shadow-xs">
           <CommunityManager
+            key={communityReloadKey}
             isAdmin={isAdmin}
             hideTopHeader={true}
             onCountChange={(cnt) => setCommunityCount(cnt)}
@@ -366,7 +371,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
                 <p className="text-xs text-slate-500">
                   {tab === 'kol'
                     ? 'Chọn phương thức nhập liệu hoặc cập nhật giá cho Creator / KOL'
-                    : 'Nhập dữ liệu bảng tính cho Community (Fanpage / Group)'}
+                    : 'Nhập dữ liệu bảng tính hoặc cập nhật giá hàng loạt cho Community (Fanpage / Group)'}
                 </p>
               </div>
               <button
@@ -379,7 +384,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
             </div>
 
             {/* M12 Gom 4 đường nhập liệu: 1. Import Excel / Sheet và 2. Dán dữ liệu đã được gộp thành: 1. Nhập từ bảng tính; 3. AI Bóc Tách; 4. Cập nhật giá hàng loạt */}
-            <div className={`grid gap-3 ${tab === 'kol' ? 'sm:grid-cols-3' : 'grid-cols-1'}`}>
+            <div className={`grid gap-3 ${tab === 'kol' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
               {/* Mục 1: Nhập từ bảng tính (Tải file Excel · Link Google Sheet · Dán dữ liệu) */}
               <button
                 type="button"
@@ -450,6 +455,26 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
                     </p>
                   </button>
                 </>
+              )}
+
+              {tab === 'community' && (
+                /* Mục 2: Cập nhật giá hàng loạt cho Community — sửa giá trên bảng, mỗi cột một dịch vụ */
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEntryModal(false);
+                    setShowCommunityBulkPrice(true);
+                  }}
+                  className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-300 text-left transition-all cursor-pointer space-y-1.5 group"
+                >
+                  <div className="flex items-center gap-2 text-emerald-700 font-bold text-sm">
+                    <DollarSign className="w-5 h-5 text-emerald-600 group-hover:scale-110 transition-transform" />
+                    <span>2. Cập nhật giá hàng loạt</span>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Sửa giá dịch vụ cho nhiều Community cùng lúc ngay trên bảng — mỗi cột là một dịch vụ, có thể thêm cột dịch vụ mới.
+                  </p>
+                </button>
               )}
             </div>
 
@@ -563,13 +588,27 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
         </div>
       )}
 
-      {/* Community Import Modal */}
+      {/* Community Import Modal — áp dụng xong KHÔNG đóng ngay: người dùng đọc kết quả chi tiết ở bước 4 rồi tự đóng */}
       <CommunityImportModal
         isOpen={showCommunityImport}
         onClose={() => setShowCommunityImport(false)}
-        onApplied={() => {
-          setShowCommunityImport(false);
-          setNotice('Đã import Community từ Sheet/Excel thành công.');
+        onApplied={(r) => {
+          setCommunityReloadKey((k) => k + 1);
+          setNotice(
+            r.added === 0 && r.updated === 0
+              ? `Đã nhập Community: không có thay đổi — ${r.unchanged} hồ sơ đã có sẵn và không đổi${r.keptServer > 0 ? `, ${r.keptServer} hồ sơ giữ bản server` : ''}${r.stale.length > 0 ? `, ${r.stale.length} hồ sơ bị chặn vì server đã thay đổi` : ''}.`
+              : `Đã nhập Community: +${r.added} hồ sơ mới · ${r.updated} cập nhật · ${r.unchanged} không đổi (đã có sẵn)${r.keptServer > 0 ? ` · ${r.keptServer} giữ bản server` : ''}${r.stale.length > 0 ? ` · ${r.stale.length} hồ sơ bị chặn vì server đã thay đổi` : ''}.`
+          );
+        }}
+      />
+
+      {/* Cập nhật giá hàng loạt Community */}
+      <CommunityBulkPriceUpdate
+        isOpen={showCommunityBulkPrice}
+        onClose={() => setShowCommunityBulkPrice(false)}
+        onApplied={(updatedProfiles, changedPrices) => {
+          setCommunityReloadKey((k) => k + 1);
+          setNotice(`Đã cập nhật giá hàng loạt: ${changedPrices} giá trên ${updatedProfiles} Community.`);
         }}
       />
 

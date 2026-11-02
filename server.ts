@@ -6,6 +6,7 @@
 import express from 'express';
 import { createWorkspace } from './server/workspace';
 import { normalizePhaseDrafts } from './src/domain/phases';
+import { extractHyperlinkFormulaUrl } from './src/utils/spreadsheetImport';
 import { extractPillarsFromText } from './src/domain/projectBrief';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -903,7 +904,7 @@ app.get('/api/sheets/fetch-workbook', async (req, res) => {
               val = String(cell.v).trim();
             }
           }
-          const link = cell?.l?.Target ? String(cell.l.Target).trim() : (cell?.l?.target ? String(cell.l.target).trim() : undefined);
+          const link = cell?.l?.Target ? String(cell.l.Target).trim() : (cell?.l?.target ? String(cell.l.target).trim() : extractHyperlinkFormulaUrl(cell?.f));
           rowCells.push({ value: val, ...(link ? { link } : {}) });
         }
         sheetRows.push(rowCells);

@@ -173,3 +173,83 @@ export function pillarPostCounts(totalTopics: number, pillars: { name: string; p
   }
   return list.map((p, i) => ({ name: p.name, percent: p.percent, posts: posts[i] }));
 }
+
+// ---------------------------------------------------------------------------
+// Lọc & sắp xếp danh sách Community ở Kho — gương bộ lọc của danh sách KOL
+// (tag lĩnh vực khớp-bất-kỳ, khoảng quy mô, ngân sách tối đa, sắp xếp).
+// Quy tắc thuần để kiểm thử độc lập; component chỉ lo hiển thị.
+// ---------------------------------------------------------------------------
+
+export type CommunitySortKey = 'newest' | 'scale_desc' | 'scale_asc' | 'price_asc' | 'price_desc';
+
+export interface CommunityListFilter {
+  categories: string[];
+  minScale: number | '';
+  maxScale: number | '';
+  maxBudget: number | '';
+  includeNoPrice: boolean;
+}
+
+/** Giá đại diện của một hồ sơ Community = giá dịch vụ THẤP NHẤT trong các dịch vụ đã có giá.
+ *  null = hồ sơ chưa có giá dịch vụ nào (không đồng nghĩa giá 0). */
+export function communityMinPrice(p: { dichVu?: Array<{ giaThamKhao?: number | null }> | null }): number | null {
+  let min: number | null = null;
+  for (const s of p.dichVu ?? []) {
+    const v = s.giaThamKhao;
+    if (v != null && v > 0 && (min === null || v < min)) min = v;
+  }
+  return min;
+}
+
+export function filterCommunities<T extends CommunityProfile>(items: T[], f: CommunityListFilter): T[] {
+  const selectedCats = new Set(f.categories.map((c) => c.toLowerCase().trim()).filter(Boolean));
+  return items.filter((c) => {
+    // Lĩnh vực: chọn nhiều tag, khớp BẤT KỲ tag nào (giống danh sách KOL)
+    if (selectedCats.size > 0) {
+      const cats = (c.linhVuc ?? []).map((x) => x.toLowerCase().trim());
+      if (!cats.some((x) => selectedCats.has(x))) return false;
+    }
+    // Khoảng quy mô: hồ sơ chưa rõ quy mô bị loại khi có đặt cận
+    if (f.minScale !== '' && (c.quyMo == null || c.quyMo < f.minScale)) return false;
+    if (f.maxScale !== '' && (c.quyMo == null || c.quyMo > f.maxScale)) return false;
+    // Ngân sách tối đa theo giá dịch vụ thấp nhất; chưa có giá chỉ hiện khi người dùng chọn hiện cả
+    if (f.maxBudget !== '' && f.maxBudget > 0) {
+      const mp = communityMinPrice(c);
+      if (mp === null) {
+        if (!f.includeNoPrice) return false;
+      } else if (mp > f.maxBudget) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+export function sortCommunities<T extends CommunityProfile>(items: T[], sort: CommunitySortKey): T[] {
+  const updatedTime = (c: T): number => {
+    const raw = (c as { updatedAt?: string }).updatedAt || c.ngayCapNhat || c.ngayTao || '';
+    const t = new Date(raw).getTime();
+    return isNaN(t) ? 0 : t;
+  };
+  const byNullLast = (va: number | null, vb: number | null, dir: 1 | -1): number => {
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    return (va - vb) * dir;
+  };
+  return [...items].sort((a, b) => {
+    switch (sort) {
+      case 'scale_desc':
+        return byNullLast(a.quyMo ?? null, b.quyMo ?? null, -1);
+      case 'scale_asc':
+        return byNullLast(a.quyMo ?? null, b.quyMo ?? null, 1);
+      case 'price_asc':
+        return byNullLast(communityMinPrice(a), communityMinPrice(b), 1);
+      case 'price_desc':
+        return byNullLast(communityMinPrice(a), communityMinPrice(b), -1);
+      case 'newest':
+      default:
+        return updatedTime(b) - updatedTime(a);
+    }
+  });
+}
