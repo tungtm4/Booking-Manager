@@ -25,8 +25,8 @@ export type PriceFormatKey = keyof PriceList;
 
 export const PRICE_FORMAT_LABELS: Record<PriceFormatKey, string> = {
   post: 'Bài đăng (Post/Ảnh)',
-  video: 'Video dài (YouTube/FB)',
-  shorts: 'Video ngắn (TikTok/Reels/Shorts)',
+  video: 'Video dài',
+  shorts: 'Video ngắn',
   livestream: 'Livestream',
   thamDuSuKien: 'Tham dự sự kiện',
   sdha: 'Sử dụng hình ảnh (SDHA)',

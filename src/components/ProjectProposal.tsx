@@ -279,6 +279,9 @@ export function ProjectProposal({
 
   // Các trường form tiêu chuẩn & brief mở rộng
   const [briefText, setBriefText] = useState('');
+  // R2/P3: khi nhúng trong tab Đối tác, tiêu chí tìm kiếm THU GỌN mặc định thành dải tóm tắt
+  // (màn hình gọn); bấm "Chỉnh tiêu chí tìm kiếm" mới mở toàn bộ biểu mẫu như cũ.
+  const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [partnerType, setPartnerType] = useState<BriefPartnerType | null>(null);
   const [kolTargetCount, setKolTargetCount] = useState<number | null>(null);
   const [communityTargetCount, setCommunityTargetCount] = useState<number | null>(null);
@@ -898,6 +901,22 @@ export function ProjectProposal({
             Brief của phase đã được lưu. Bạn có thể tìm đối tác ngay hoặc chỉnh sửa tiêu chí bên dưới.
           </div>
         )}
+        {embedded && !criteriaOpen ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-slate-600">
+            <span>Lĩnh vực: <strong className="text-slate-800">{linhVuc || 'Tất cả'}</strong></span>
+            <span>·</span>
+            <span>Nền tảng: <strong className="text-slate-800">{platforms.length ? platforms.join(', ') : 'Tất cả'}</strong></span>
+            <span>·</span>
+            <span>Follower tối thiểu: <strong className="text-slate-800">{followerMin ? Number(followerMin).toLocaleString('vi-VN') : '—'}</strong></span>
+            <span>·</span>
+            <span>Ngân sách phase: <strong className="text-slate-800">{totalBudget ? formatVND(Number(totalBudget)) : '—'}</strong></span>
+            <span>·</span>
+            <span>Hạng mục tính điểm: <strong className="text-slate-800">{PRICE_FORMAT_LABELS[formatKey]}</strong></span>
+            <button type="button" className="text-indigo-700 underline text-sm cursor-pointer" onClick={() => setCriteriaOpen(true)}>Chỉnh tiêu chí tìm kiếm</button>
+            <button type="button" className={button} disabled={(!pool.length && !commPool.length) || parsing} onClick={search}>Tìm đối tác phù hợp</button>
+          </div>
+        ) : (
+        <>
         <textarea
           aria-label="Brief của phase để AI phân tích"
           className={field}
@@ -1283,7 +1302,12 @@ export function ProjectProposal({
           )}
           {!pool.length && <span className="text-xs text-slate-500">Thư viện chưa có KOL.</span>}
           {!commPool.length && <span className="text-xs text-slate-500">Kho Community chưa có hồ sơ.</span>}
+          {embedded && (
+            <button type="button" className="text-sm text-slate-500 underline cursor-pointer" onClick={() => setCriteriaOpen(false)}>Thu gọn tiêu chí</button>
+          )}
         </div>
+        </>
+        )}
       </section>
 
       {/* KẾT QUẢ ĐỀ XUẤT */}

@@ -36,7 +36,7 @@ const button = 'rounded-xl bg-[#7C3AED] hover:bg-purple-700 text-white font-semi
 const buttonSecondary = 'rounded-xl border border-purple-200 bg-white hover:bg-purple-50 text-slate-700 font-semibold px-4 py-2.5 disabled:opacity-50 transition-colors cursor-pointer';
 const labels: Record<string, string> = { admin: 'Admin', pm: 'PM', booking: 'Booking', pricing: 'Phụ trách giá', paperwork: 'Phụ trách hồ sơ', creator_support: 'Hỗ trợ creator' };
 
-function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { project: any; members: any[]; isAdmin: boolean; onSwitchTab: (tab: any) => void }) {
+function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjectChanged }: { project: any; members: any[]; isAdmin: boolean; onSwitchTab: (tab: any) => void; onProjectChanged?: () => void }) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -89,6 +89,32 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { proj
     setBriefDirty(true);
   };
 
+  // Thông tin dự án (tên/khách/chiến dịch): bề mặt sửa DUY NHẤT là thẻ này ở tab Tổng quan
+  // (form cũ ở tab Báo giá đã bỏ để tránh 2 nơi sửa — R2/P2).
+  const [editingInfo, setEditingInfo] = useState(false);
+  const [infoForm, setInfoForm] = useState({ name: '', client: '', campaign: '' });
+  const [infoSaving, setInfoSaving] = useState(false);
+  const [infoError, setInfoError] = useState('');
+  const startEditInfo = () => {
+    setInfoForm({ name: project.name || '', client: project.client_name || '', campaign: project.campaign_name || '' });
+    setInfoError('');
+    setEditingInfo(true);
+  };
+  const handleSaveInfo = async () => {
+    if (!canEdit) return;
+    setInfoSaving(true);
+    setInfoError('');
+    try {
+      await api(`/projects/${project.id}/details`, { name: infoForm.name, client: infoForm.client, campaign: infoForm.campaign });
+      setEditingInfo(false);
+      onProjectChanged?.();
+    } catch (e: any) {
+      setInfoError(e.message || 'Không thể lưu thông tin dự án.');
+    } finally {
+      setInfoSaving(false);
+    }
+  };
+
   const handleSaveBrief = async () => {
     if (!canEdit || !briefForm) return;
     setBriefSaving(true);
@@ -135,20 +161,53 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab }: { proj
         <div className="bg-white p-5 rounded-2xl border border-purple-100 shadow-sm space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-slate-900 text-lg">Thông tin chiến dịch & Khách hàng</h3>
-            <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-purple-50 text-purple-700 border border-purple-200">
-              {project.canManage ? 'PM / Quản lý' : 'Booking'}
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <span className="text-slate-400 text-xs block font-medium">Khách hàng / Nhãn hàng</span>
-              <strong className="text-slate-800">{project.client_name || 'Chưa cập nhật'}</strong>
-            </div>
-            <div>
-              <span className="text-slate-400 text-xs block font-medium">Tên chiến dịch</span>
-              <strong className="text-slate-800">{project.campaign_name || project.name}</strong>
+            <div className="flex items-center gap-2">
+              {canEdit && !editingInfo && (
+                <button type="button" onClick={startEditInfo} className="px-2.5 py-1 text-xs font-semibold rounded-full bg-white text-purple-700 border border-purple-200 hover:bg-purple-50 cursor-pointer">
+                  Chỉnh sửa
+                </button>
+              )}
+              <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                {project.canManage ? 'PM / Quản lý' : 'Booking'}
+              </span>
             </div>
           </div>
+          {editingInfo ? (
+            <div className="space-y-2.5">
+              <label className="block text-sm">
+                <span className="text-slate-400 text-xs block font-medium mb-1">Tên dự án</span>
+                <input aria-label="Tên dự án" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" maxLength={200} value={infoForm.name} onChange={(e) => setInfoForm({ ...infoForm, name: e.target.value })} />
+              </label>
+              <label className="block text-sm">
+                <span className="text-slate-400 text-xs block font-medium mb-1">Khách hàng / Nhãn hàng</span>
+                <input aria-label="Khách hàng / Nhãn hàng" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" maxLength={200} value={infoForm.client} onChange={(e) => setInfoForm({ ...infoForm, client: e.target.value })} />
+              </label>
+              <label className="block text-sm">
+                <span className="text-slate-400 text-xs block font-medium mb-1">Tên chiến dịch</span>
+                <input aria-label="Tên chiến dịch" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" maxLength={200} value={infoForm.campaign} onChange={(e) => setInfoForm({ ...infoForm, campaign: e.target.value })} />
+              </label>
+              {infoError && <p className="text-xs text-red-600">{infoError}</p>}
+              <div className="flex gap-2">
+                <button type="button" disabled={infoSaving} onClick={handleSaveInfo} className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 cursor-pointer">Lưu thông tin dự án</button>
+                <button type="button" disabled={infoSaving} onClick={() => setEditingInfo(false)} className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-white border border-slate-300 text-slate-600 cursor-pointer">Huỷ</button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <span className="text-slate-400 text-xs block font-medium">Tên dự án</span>
+                <strong className="text-slate-800">{project.name || 'Chưa cập nhật'}</strong>
+              </div>
+              <div>
+                <span className="text-slate-400 text-xs block font-medium">Khách hàng / Nhãn hàng</span>
+                <strong className="text-slate-800">{project.client_name || 'Chưa cập nhật'}</strong>
+              </div>
+              <div>
+                <span className="text-slate-400 text-xs block font-medium">Tên chiến dịch</span>
+                <strong className="text-slate-800">{project.campaign_name || project.name}</strong>
+              </div>
+            </div>
+          )}
           {brief.text && (
             <div className="pt-2 border-t border-slate-100">
               <span className="text-slate-400 text-xs block font-medium mb-1">Tóm tắt brief</span>
@@ -611,7 +670,7 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
                 <strong className="text-slate-900">{cash.totals?.missingPlan?.toLocaleString('vi-VN') ?? 0}</strong>
               </div>
               <div className="flex justify-between gap-4 py-0.5 border-b border-slate-50">
-                <span className="text-slate-600">Hợp đồng ngoài phương án chốt</span>
+                <span className="text-slate-600">Hợp đồng chưa gắn vào phương án chốt</span>
                 <strong className="text-slate-900">
                   {baseline
                     ? (cash.totals?.outsideSelectedCount?.toLocaleString('vi-VN') ?? 0) + ' (' + money(cash.totals?.outsideSelectedGross) + ')'
@@ -1416,7 +1475,7 @@ export default function WorkspaceShell() {
 
                     {/* Tab Views Content */}
                     {projectView === 'overview' && (
-                      <ProjectOverviewPanel project={selected} members={members} isAdmin={user.role === 'admin'} onSwitchTab={(tab) => handleNavigateWithGuard(() => setProjectView(tab))} />
+                      <ProjectOverviewPanel project={selected} members={members} isAdmin={user.role === 'admin'} onSwitchTab={(tab) => handleNavigateWithGuard(() => setProjectView(tab))} onProjectChanged={refresh} />
                     )}
                     {projectView === 'shortlist' && (
                       <ProjectShortlistPanel

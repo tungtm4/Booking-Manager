@@ -686,7 +686,10 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
               );
             })}
           </div>
-          <p className="text-xs text-slate-500 border-t pt-2">Danh sách sơ bộ chỉ là danh sách ỨNG VIÊN, chưa phải phân công: hệ thống không tự chia khối lượng (ví dụ 100 bài) cho các ứng viên và không nhân giá ứng viên thành chi phí phase. Chi phí triển khai chỉ được tính trong từng phương án, từ phân bổ thực tế do PM chọn (đối tác + dịch vụ/hạng mục + số lượng).</p>
+          <details className="border-t pt-2">
+            <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-600">Cách tính chi phí của danh sách sơ bộ</summary>
+            <p className="text-xs text-slate-500 pt-1">Danh sách sơ bộ chỉ là danh sách ỨNG VIÊN, chưa phải phân công: hệ thống không tự chia khối lượng (ví dụ 100 bài) cho các ứng viên và không nhân giá ứng viên thành chi phí phase. Chi phí triển khai chỉ được tính trong từng phương án, từ phân bổ thực tế do PM chọn (đối tác + dịch vụ/hạng mục + số lượng).</p>
+          </details>
         </section>
       )}
 
@@ -1167,7 +1170,11 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
 
       <section className="space-y-3">
         <h4 className="font-semibold">4. Danh sách {activePhase ? 'của phase “' + activePhase.name + '”' : 'sơ bộ'} — Booking kiểm tra giá ({visibleKolRows.length} KOL · {visibleCommRows.length} Community)</h4>
-        <p className="text-xs text-slate-500">Giá có sẵn trong thư viện/kho chưa được coi là đã xác nhận. Kiểm tra từng hạng mục/dịch vụ, ghi nguồn rồi xác nhận. Danh sách này là ỨNG VIÊN — chưa phân bổ công việc, chưa phát sinh chi phí. Việc cập nhật giá không tự thay đổi báo giá đã lập. Giữ Shift + Click để chọn nhiều dòng liên tiếp.</p>
+        <p className="text-xs text-slate-500">Giá trong kho chưa được coi là đã xác nhận — kiểm tra từng hạng mục/dịch vụ, ghi nguồn rồi xác nhận. Giữ Shift + Click để chọn nhiều dòng liên tiếp.</p>
+        <details>
+          <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-600">Danh sách này dùng để làm gì?</summary>
+          <p className="text-xs text-slate-500 pt-1">Danh sách này là ỨNG VIÊN — chưa phân bổ công việc, chưa phát sinh chi phí. Việc cập nhật giá không tự thay đổi báo giá đã lập.</p>
+        </details>
 
         {data.canManage && visibleKolRows.length > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-slate-50 p-2 rounded-xl border border-slate-100">

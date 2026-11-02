@@ -313,13 +313,10 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
     <div><h2 className="text-xl font-bold">Phương án KOL & Báo giá</h2><p className="text-sm text-slate-500">Chọn KOL từ tab Brief & Danh sách KOL vào phương án. Bản nháp được phép còn thiếu giá hoặc giá chưa xác nhận; gửi duyệt/duyệt/chốt chỉ khi các dòng được tính đã đủ giá và giá đầu vào đã xác nhận. Mỗi phương án là một lựa chọn cho khách. Các phiên bản là lịch sử chỉnh sửa của lựa chọn đó.</p></div>
     {error&&<p role="alert" className="bg-red-50 text-red-700 p-3 rounded-lg">{error}</p>}
     {notice&&<p role="status" className="bg-emerald-50 text-emerald-800 p-3 rounded-lg">{notice}</p>}
-    <section className="rounded-xl bg-slate-50 p-4"><h3 className="font-semibold mb-3">Thông tin chiến dịch</h3>
-      {manage?<form key={JSON.stringify(data.project)} className="grid md:grid-cols-3 gap-3" onSubmit={e=>{e.preventDefault();const body=Object.fromEntries(new FormData(e.currentTarget));run(async()=>{await request(base+'/details',body);await refresh();await onProjectChanged();setNotice('Đã cập nhật dự án. Bản báo giá đã duyệt giữ thông tin tại thời điểm chốt.');});}}>
-        <label className="text-sm">Tên dự án<input className={field} name="name" required maxLength={200} defaultValue={data.project.name}/></label>
-        <label className="text-sm">Khách hàng / Nhãn hàng<input className={field} name="client" required maxLength={200} defaultValue={data.project.client}/></label>
-        <label className="text-sm">Tên chiến dịch<input className={field} name="campaign" required maxLength={200} defaultValue={data.project.campaign}/></label>
-        <button className={button} disabled={busy||dirty}>Lưu thông tin dự án</button>
-      </form>:<p>{data.project.client||'Chưa nhập khách hàng'} · {data.project.campaign}</p>}
+    <section className="rounded-xl bg-slate-50 p-4"><h3 className="font-semibold mb-2">Thông tin chiến dịch</h3>
+      {/* R2/P2: thông tin dự án chỉ sửa ở tab Tổng quan (bề mặt sửa duy nhất) — ở đây chỉ hiển thị. */}
+      <p className="text-sm text-slate-700">{data.project.name} · {data.project.client||'Chưa nhập khách hàng'} · {data.project.campaign||'Chưa nhập chiến dịch'}</p>
+      {manage&&<p className="text-xs text-slate-500 mt-1">Cần sửa thông tin dự án? Sửa tại tab Tổng quan — bản báo giá đã duyệt vẫn giữ thông tin tại thời điểm chốt.</p>}
     </section>
     {manage&&<div className="grid sm:grid-cols-3 gap-3">
       <div className="p-4 rounded-xl border bg-indigo-50"><p className="text-xs text-indigo-800">Phương án đã chốt</p><strong>{baseline?data.options.find((o:any)=>o.id===baseline.optionId)?.name+' · V'+baseline.number:'Chưa chốt'}</strong></div>

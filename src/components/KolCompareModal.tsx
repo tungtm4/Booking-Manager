@@ -59,7 +59,7 @@ const PRICE_FORMAT_ORDER: PriceFormatKey[] = [
 const PRICE_SHORT_LABELS: Record<PriceFormatKey, string> = {
   post: 'Post/Ảnh',
   video: 'Video dài',
-  shorts: 'Video ngắn (TikTok/Reels)',
+  shorts: 'Video ngắn',
   livestream: 'Livestream',
   thamDuSuKien: 'Tham dự sự kiện',
   sdha: 'Sử dụng hình ảnh (SDHA)'
