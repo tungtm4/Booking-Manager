@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { paginateItems, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../utils/pagination';
 import { 
   Search, 
   Filter, 
@@ -94,6 +95,9 @@ export const KolList: React.FC<KolListProps> = ({
   // Sắp xếp & Hiển thị
   const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+  // Phân trang giống hệt bên Community: chọn 10/20/50/100 mục mỗi trang
+  const [kolPage, setKolPage] = useState(1);
+  const [kolPageSize, setKolPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [showFiltersMobile, setShowFiltersMobile] = useState(false);
 
   // Chọn nhiều KOL & Thao tác hàng loạt (chỉ trong table view)
@@ -353,6 +357,18 @@ export const KolList: React.FC<KolListProps> = ({
     return count;
   }, [keyword, selectedPlatform, selectedCategories, minFollowers, maxFollowers, maxBudget]);
 
+  // Tinh gọn (đồng nhất tinh thần với kho Community): bộ lọc nâng cao — Ngân sách/Format,
+  // Khoảng Followers, Lĩnh vực — thu gọn mặc định; TỰ MỞ khi đang có lọc nâng cao đang bật
+  // để không bao giờ giấu điều kiện đang áp dụng.
+  const advancedFilterCount =
+    (selectedCategories.length > 0 ? 1 : 0) +
+    (minFollowers !== '' || maxFollowers !== '' ? 1 : 0) +
+    (maxBudget !== '' ? 1 : 0);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  useEffect(() => {
+    if (advancedFilterCount > 0) setShowAdvancedFilters(true);
+  }, [advancedFilterCount]);
+
   // Bộ lọc đa điều kiện kết hợp
   const filteredKols = useMemo(() => {
     return kols.filter((kol) => {
@@ -439,6 +455,13 @@ export const KolList: React.FC<KolListProps> = ({
       }
     });
   }, [filteredKols, sortBy, budgetFormat]);
+
+  // Trang hiện tại của danh sách đã lọc + sắp xếp (chọn tất cả vẫn tính trên TOÀN BỘ danh sách đã lọc)
+  const pagedKols = paginateItems(sortedKols, kolPage, kolPageSize);
+  // Đổi bất kỳ điều kiện lọc/sắp xếp nào cũng quay về trang 1
+  useEffect(() => {
+    setKolPage(1);
+  }, [keyword, selectedPlatform, selectedCategories, minFollowers, maxFollowers, maxBudget, budgetFormat, includeNoPrice, sortBy, kols]);
 
   // Danh sách KOL đang chọn để so sánh
   const comparedKols = useMemo(() => {
@@ -581,8 +604,8 @@ export const KolList: React.FC<KolListProps> = ({
 
         {/* Filter Controls Accordion / Panel */}
         <div className={`space-y-4 pt-2 border-t border-slate-100 ${showFiltersMobile ? 'block' : 'hidden sm:block'}`}>
-          {/* Hàng 1: Nền tảng + Sắp xếp + Ngân sách theo format */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Hàng 1: Nền tảng + Sắp xếp (luôn hiện — hai lọc dùng nhiều nhất) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Nền tảng */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Kênh Mạng Xã Hội</label>
@@ -614,7 +637,30 @@ export const KolList: React.FC<KolListProps> = ({
                 <option value="price_desc">Giá format cao đến thấp</option>
               </select>
             </div>
+          </div>
 
+          {/* Nút mở Bộ lọc nâng cao */}
+          <button
+            type="button"
+            onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+            aria-expanded={showAdvancedFilters}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-slate-200 bg-slate-50/60 hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <Filter className="w-3.5 h-3.5 text-slate-400" />
+              Bộ lọc nâng cao: Ngân sách · Followers · Lĩnh vực
+              {advancedFilterCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold">
+                  đang bật {advancedFilterCount}
+                </span>
+              )}
+            </span>
+            {showAdvancedFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+
+          {showAdvancedFilters && (
+          <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {/* Ngân sách tối đa */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">
@@ -648,11 +694,8 @@ export const KolList: React.FC<KolListProps> = ({
                 ))}
               </select>
             </div>
-          </div>
 
-          {/* Hàng 2: Followers range + Checkbox chưa có giá */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-            {/* Followers range */}
+            {/* Followers range — cùng hàng với Ngân sách/Format trong Bộ lọc nâng cao */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Khoảng Followers</label>
               <div className="flex items-center gap-2">
@@ -732,6 +775,8 @@ export const KolList: React.FC<KolListProps> = ({
               })}
             </div>
           </div>
+          </div>
+          )}
         </div>
       </div>
 
@@ -791,7 +836,7 @@ export const KolList: React.FC<KolListProps> = ({
 
           {/* Dạng Dải Ngang (Horizontal Strips) */}
           <div className="flex flex-col gap-3">
-            {sortedKols.map((kol) => {
+            {pagedKols.pageItems.map((kol) => {
               const isSelected = selectedKolIds.includes(kol.id);
               return (
                 <div
@@ -1047,7 +1092,7 @@ export const KolList: React.FC<KolListProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {sortedKols.map((kol) => {
+                {pagedKols.pageItems.map((kol) => {
                   const priceForFormat = kol.bangGia ? kol.bangGia[budgetFormat] : null;
                   const isSelected = selectedKolIds.includes(kol.id);
 
@@ -1200,6 +1245,27 @@ export const KolList: React.FC<KolListProps> = ({
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Phân trang — đúng khuôn bên Community: Trang X / Y + chọn số mục mỗi trang + Trang trước/sau */}
+      {sortedKols.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600 pt-1">
+          <div className="flex items-center gap-2">
+            <span>Trang <strong>{pagedKols.page}</strong> / <strong>{pagedKols.totalPages}</strong></span>
+            <select
+              aria-label="Số lượng KOL mỗi trang"
+              value={kolPageSize}
+              onChange={(e) => { setKolPageSize(Number(e.target.value)); setKolPage(1); }}
+              className="rounded border border-slate-300 px-2 py-1 bg-white cursor-pointer"
+            >
+              {PAGE_SIZE_OPTIONS.map((sz) => <option key={sz} value={sz}>{sz} / trang</option>)}
+            </select>
+          </div>
+          <div className="flex gap-1">
+            <button type="button" disabled={pagedKols.page <= 1} onClick={() => setKolPage(pagedKols.page - 1)} className="px-2.5 py-1 rounded border bg-white disabled:opacity-40 cursor-pointer">Trang trước</button>
+            <button type="button" disabled={pagedKols.page >= pagedKols.totalPages} onClick={() => setKolPage(pagedKols.page + 1)} className="px-2.5 py-1 rounded border bg-white disabled:opacity-40 cursor-pointer">Trang sau</button>
           </div>
         </div>
       )}
