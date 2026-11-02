@@ -32,6 +32,20 @@ import { KolProfile, PriceFormatKey, PRICE_FORMAT_LABELS, ImportHistoryEntry } f
 import { formatVND } from '../utils/formatters';
 import { StorageService, applyImportBatchToList } from '../services/storageService';
 import { CatalogService } from '../services/catalogService';
+import {
+  CellData,
+  HeaderRowCandidate,
+  ExcludedRowInfo,
+  getColumnLetter,
+  foldText,
+  scoreHeaderRow,
+  findBestHeaderRow,
+  smartDetectColumnsIndexed,
+  parseCellDoubleInfo,
+  checkNonCreatorRow,
+  findSheetByGidCsvFingerprint,
+  isPackagePriceColumn,
+} from '../utils/spreadsheetImport';
 
 export interface ConflictItem {
   id: string;
@@ -573,12 +587,26 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
   );
   const [expandedHistoryIds, setExpandedHistoryIds] = useState<string[]>([]);
 
-  // Dữ liệu đọc được từ file: raw headers & raw rows
+  // Dữ liệu đọc được từ file: raw headers & raw rows (CellData[][])
   const [fileHeaders, setFileHeaders] = useState<string[]>([]);
-  const [rawRows, setRawRows] = useState<any[]>([]);
+  const [rawRows, setRawRows] = useState<CellData[][]>([]);
 
-  // Bảng map: { [fieldKey]: headerName }
-  const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
+  // Bảng map: { [fieldKey]: columnIndex (0-based) }
+  const [columnMapping, setColumnMapping] = useState<Record<string, number | null>>({});
+
+  // Nguồn dữ liệu ma trận đầy đủ & đa tab (Việc 1 & 3)
+  const [workbookSheets, setWorkbookSheets] = useState<Record<string, { name: string; rows: CellData[][] }>>({});
+  const [sheetNames, setSheetNames] = useState<string[]>([]);
+  const [activeSheetName, setActiveSheetName] = useState<string>('');
+  const [sourceMatrix, setSourceMatrix] = useState<CellData[][]>([]);
+
+  // Dòng tiêu đề (Việc 2)
+  const [headerRowIndex, setHeaderRowIndex] = useState<number>(0);
+  const [headerCandidate, setHeaderCandidate] = useState<HeaderRowCandidate | null>(null);
+
+  // Danh sách dòng bị loại (Việc 6)
+  const [excludedRows, setExcludedRows] = useState<ExcludedRowInfo[]>([]);
+  const [showExcludedModal, setShowExcludedModal] = useState<boolean>(false);
 
   // Khóa khớp: "name" (Tên KOL) hoặc "link" (Link kênh)
   const [matchKey, setMatchKey] = useState<'name' | 'link'>('name');
@@ -699,158 +727,177 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     showToast('Đã tải xuống file Excel mẫu chuẩn format!');
   };
 
-  // Xử lý dữ liệu bảng: gọi AI phân tích cấu trúc bảng & dòng tiêu đề (với fallback heuristic)
-  const processLoadedSheet = async (allJsonRows: any[]) => {
-    setRawSourceSheetRows(allJsonRows);
+  // Xử lý ma trận ô đầy đủ (CellData[][]): xác định hàng tiêu đề, phân loại cột, loại dòng không phải creator
+  const processMatrix = async (
+    matrix: CellData[][],
+    sheetTitle?: string,
+    forcedHeaderIndex?: number
+  ) => {
+    setSourceMatrix(matrix);
+    setRawSourceSheetRows(matrix);
 
-    if (allJsonRows.length < 2) {
+    if (!matrix || matrix.length < 2) {
       setErrorMessage('Bảng tính không có dữ liệu hoặc chỉ có 1 dòng.');
       setIsLoading(false);
       return;
     }
 
+    // 1. Xác định ứng viên dòng tiêu đề (Việc 2)
+    const candidate =
+      forcedHeaderIndex !== undefined
+        ? scoreHeaderRow(matrix[forcedHeaderIndex], forcedHeaderIndex, matrix)
+        : findBestHeaderRow(matrix);
+
+    const validHeaderIdx = forcedHeaderIndex !== undefined ? forcedHeaderIndex : candidate.rowIndex;
+    setHeaderRowIndex(validHeaderIdx);
+    setHeaderCandidate(candidate);
+
+    // 2. Tạo fileHeaders với tọa độ chữ cái (Việc 3 & Việc 2: ô trống đặt tên Cột X — trống)
+    const rawHeaderRow = (matrix[validHeaderIdx] as CellData[]) || [];
+    const headers = rawHeaderRow.map((c, i) => {
+      const str = c?.value ? String(c.value).trim() : '';
+      return str || `Cột ${getColumnLetter(i)} — trống`;
+    });
+    setFileHeaders(headers);
+
+    // 3. Nhận diện cột theo chỉ số 0-based bằng thuật toán quy tắc (Việc 3 & Việc 7)
+    let newMapping = smartDetectColumnsIndexed(headers, matrix, validHeaderIdx);
+    const notes: Record<string, { lyDo: string; confidence: string }> = {};
+
+    // 4. Thử phân tích bổ trợ bằng AI quanh cửa sổ dòng tiêu đề (Việc 2)
     setIsAiAnalyzing(true);
-
-    // Lấy tối đa 12 dòng đầu thô
-    const sampleRows = allJsonRows
-      .slice(0, 12)
-      .map((row: any) =>
-        Array.isArray(row)
-          ? row.map((c: any) => (c !== null && c !== undefined ? String(c).trim() : ''))
-          : []
-      );
-
-    const fieldsPayload = KOL_FIELD_DEFINITIONS.map((f) => ({
-      key: f.key,
-      label: f.label,
-    }));
-
     let aiSucceeded = false;
-
     try {
+      const windowRows = matrix
+        .slice(validHeaderIdx, validHeaderIdx + 30)
+        .map((r) => r.map((c) => (c?.value ? String(c.value).trim() : '')));
+
+      const fieldsPayload = KOL_FIELD_DEFINITIONS.map((f) => ({
+        key: f.key,
+        label: f.label,
+      }));
+
       const res = await fetch('/api/import/classify-columns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          rows: sampleRows,
+          rows: windowRows,
           fields: fieldsPayload,
         }),
       });
 
       if (res.ok) {
         const json = await res.json();
-        if (json.success === false) setErrorMessage(friendlyAiMessage(json.message));
-        if (
-          json.success &&
-          json.data &&
-          typeof json.data.headerRowIndex === 'number' &&
-          Array.isArray(json.data.columns)
-        ) {
-          const { headerRowIndex, columns } = json.data;
-
-          // Xác thực headerRowIndex (0-based)
-          const validHeaderIdx =
-            headerRowIndex >= 0 && headerRowIndex < allJsonRows.length - 1
-              ? headerRowIndex
-              : 0;
-
-          const rawHeaderRow = (allJsonRows[validHeaderIdx] as any[]) || [];
-          const headers = rawHeaderRow.map((h: any, i: number) => {
-            const str = String(h || '').trim();
-            return str || `Cột ${i + 1}`;
-          });
-
-          const dataRows = allJsonRows
-            .slice(validHeaderIdx + 1)
-            .filter((row: any) =>
-              Array.isArray(row) &&
-              row.some((cell: any) => cell !== '' && cell !== null && cell !== undefined)
-            );
-
-          const newMapping: Record<string, string> = {};
-          const notes: Record<string, { lyDo: string; confidence: string }> = {};
-
+        if (json.success && json.data && Array.isArray(json.data.columns)) {
+          const { columns } = json.data;
           columns.forEach((col: any) => {
-            const headerName = headers[col.columnIndex];
-            if (!headerName || col.field === 'ignore') return;
-
-            if (typeof col.field === 'string' && col.field.startsWith('platform:')) {
-              const platform = col.field.split(':')[1]?.trim();
-              if (platform) {
-                const linkKey = `link${platform}`;
-                const followerKey = `follower${platform}`;
-                newMapping[linkKey] = headerName;
-                notes[linkKey] = { lyDo: col.lyDo, confidence: col.confidence };
-
-                // Chỉ map followerKey nếu cột này thực sự chứa thông tin follower (dạng gộp 'Kênh | Follower' hoặc các ô là số)
-                const colIdx = col.columnIndex;
-                const samples = (dataRows || [])
-                  .map((r: any) => r[colIdx])
-                  .filter((v: any) => v !== null && v !== undefined && String(v).trim() !== '')
-                  .slice(0, 10);
-                const hasPipe = samples.some((s: any) => String(s).includes('|'));
-                const validNumbers = samples.filter((s: any) => parseNumberWithSuffix(s) !== undefined);
-                const hasNumbers = validNumbers.length >= Math.max(1, Math.floor(samples.length * 0.4));
-
-                if (hasPipe || hasNumbers) {
-                  newMapping[followerKey] = headerName;
-                  notes[followerKey] = { lyDo: col.lyDo, confidence: col.confidence };
+            if (typeof col.columnIndex === 'number' && col.field && col.field !== 'ignore') {
+              if (typeof col.field === 'string' && col.field.startsWith('platform:')) {
+                const platform = col.field.split(':')[1]?.trim();
+                if (platform) {
+                  const linkKey = `link${platform}`;
+                  newMapping[linkKey] = col.columnIndex;
+                  notes[linkKey] = { lyDo: col.lyDo, confidence: col.confidence };
                 }
+              } else {
+                newMapping[col.field] = col.columnIndex;
+                notes[col.field] = { lyDo: col.lyDo, confidence: col.confidence };
               }
-            } else {
-              newMapping[col.field] = headerName;
-              notes[col.field] = { lyDo: col.lyDo, confidence: col.confidence };
             }
           });
-
-          // Nếu trường bắt buộc 'ten' chưa được map, fallback tìm bằng smartDetectColumns
-          if (!newMapping['ten']) {
-            const fallbackMap = smartDetectColumns(headers, dataRows);
-            if (fallbackMap['ten']) newMapping['ten'] = fallbackMap['ten'];
-          }
-
-          setFileHeaders(headers);
-          setRawRows(dataRows);
-          setColumnMapping(newMapping);
-          setAiColumnNotes(notes);
-          setSelectedRowIndices(dataRows.map((_, i) => i));
           aiSucceeded = true;
-          showToast(
-            `AI đã nhận diện dòng tiêu đề (Dòng ${validHeaderIdx + 1}) và khớp ${Object.keys(newMapping).length} trường!`
-          );
         }
       }
-    } catch (err) {
-      setErrorMessage('Không thể phân tích bằng AI lúc này. Hệ thống sẽ nhận diện cục bộ.');
+    } catch {
+      // AI không khả dụng -> tiếp tục dùng heuristic
     } finally {
       setIsAiAnalyzing(false);
     }
 
-    // Fallback: nếu AI thất bại hoặc không có API key
-    if (!aiSucceeded) {
-      const rawHeaderRow = (allJsonRows[0] as any[]) || [];
-      const headers = rawHeaderRow.map((h: any, i: number) => {
-        const str = String(h || '').trim();
-        return str || `Cột ${i + 1}`;
-      });
-      const dataRows = allJsonRows
-        .slice(1)
-        .filter((row: any) =>
-          Array.isArray(row) &&
-          row.some((cell: any) => cell !== '' && cell !== null && cell !== undefined)
-        );
-
-      setFileHeaders(headers);
-      setRawRows(dataRows);
-      const detected = smartDetectColumns(headers, dataRows);
-      setColumnMapping(detected);
-      setAiColumnNotes({});
-      setSelectedRowIndices(dataRows.map((_, i) => i));
-      showToast(`Đã nhận diện các cột từ ${dataRows.length} dòng dữ liệu (Heuristic)!`);
+    // Đảm bảo cột Tên luôn có nếu quy tắc tìm được
+    if (newMapping['ten'] === undefined) {
+      const fallbackTen = smartDetectColumnsIndexed(headers, matrix, validHeaderIdx)['ten'];
+      if (fallbackTen !== undefined) newMapping['ten'] = fallbackTen;
     }
+
+    // 5. Loại các dòng không phải creator (Việc 6: SECTION, TOTAL/VAT, dòng trống tên)
+    const colTenIdx = newMapping['ten'] ?? -1;
+    const excluded: ExcludedRowInfo[] = [];
+    const validDataRows: CellData[][] = [];
+
+    for (let r = validHeaderIdx + 1; r < matrix.length; r++) {
+      const row = matrix[r];
+      if (!row || row.length === 0) continue;
+      // Bỏ qua dòng hoàn toàn trống
+      if (row.every((c) => !c?.value && !c?.link)) continue;
+
+      const check = checkNonCreatorRow(row, r, colTenIdx);
+      if (check.isNonCreator) {
+        excluded.push({
+          rowIndex: r,
+          rowNumber: r + 1,
+          reason: check.reason || 'section',
+          reasonText: check.reasonText || 'Dòng không phải creator',
+          sampleText: row.map((c) => c?.value || '').filter(Boolean).slice(0, 3).join(' | '),
+        });
+      } else {
+        validDataRows.push(row);
+      }
+    }
+
+    setRawRows(validDataRows);
+    setExcludedRows(excluded);
+    setColumnMapping(newMapping);
+    setAiColumnNotes(notes);
+    setSelectedRowIndices(validDataRows.map((_, i) => i));
+
+    const mappedCount = Object.values(newMapping).filter((v) => v !== null && v !== undefined && v >= 0).length;
+    showToast(
+      aiSucceeded
+        ? `AI & Quy tắc đã nhận diện dòng tiêu đề (Dòng ${validHeaderIdx + 1}) và khớp ${mappedCount} cột!`
+        : `Đã nhận diện dòng tiêu đề (Dòng ${validHeaderIdx + 1}) và khớp ${mappedCount} cột!`
+    );
   };
 
-  // Đọc file Excel từ máy tính
+  // Adapter tương thích ngược nếu nơi nào còn gọi processLoadedSheet
+  const processLoadedSheet = async (allJsonRows: any[]) => {
+    const matrix: CellData[][] = (allJsonRows || []).map((row) =>
+      Array.isArray(row)
+        ? row.map((cell) =>
+            typeof cell === 'object' && cell !== null && 'value' in cell
+              ? (cell as CellData)
+              : { value: cell !== null && cell !== undefined ? String(cell).trim() : '' }
+          )
+        : []
+    );
+    await processMatrix(matrix);
+  };
+
+  // Chuyển tab trong file bảng tính (Việc 1)
+  const handleSwitchSheet = async (newSheetName: string) => {
+    if (!workbookSheets[newSheetName]) return;
+    setActiveSheetName(newSheetName);
+    await processMatrix(workbookSheets[newSheetName].rows, newSheetName);
+    showToast(`Đã chuyển sang tab "${newSheetName}" và nhận diện lại cột!`);
+  };
+
+  // Người dùng đổi số dòng tiêu đề (Việc 2)
+  const handleHeaderRowChange = async (newRowNumber: number) => {
+    if (newRowNumber < 1 || newRowNumber > sourceMatrix.length) return;
+    const newHeaderIdx = newRowNumber - 1;
+    await processMatrix(sourceMatrix, activeSheetName, newHeaderIdx);
+    showToast(`Đã chuyển dòng tiêu đề sang Dòng ${newRowNumber} và chạy lại mapping!`);
+  };
+
+  // Nút Quét lại chạy từ ma trận nguồn đầy đủ (Việc 5)
+  const handleRescanFromSource = () => {
+    if (sourceMatrix.length === 0) return;
+    const detected = smartDetectColumnsIndexed(fileHeaders, sourceMatrix, headerRowIndex);
+    setColumnMapping(detected);
+    showToast('Đã quét lại toàn bộ dữ liệu nguồn và cập nhật nhận diện cột!');
+  };
+
+  // Đọc file Excel từ máy tính (Việc 1: trích xuất cả hyperlink và danh sách tab)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     setErrorMessage(null);
     setImportResult(null);
@@ -864,12 +911,43 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     reader.onload = async (event) => {
       try {
         const data = new Uint8Array(event.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array', raw: true });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
+        const workbook = XLSX.read(data, { type: 'array', cellFormula: true, cellHTML: true, cellStyles: true });
+        if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+          throw new Error('File Excel không có sheet nào.');
+        }
 
-        const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: false });
-        await processLoadedSheet(jsonRows);
+        const extractedSheets: Record<string, { name: string; rows: CellData[][] }> = {};
+        for (const name of workbook.SheetNames) {
+          const ws = workbook.Sheets[name];
+          if (!ws || !ws['!ref']) {
+            extractedSheets[name] = { name, rows: [] };
+            continue;
+          }
+          const range = XLSX.utils.decode_range(ws['!ref']);
+          const sheetRows: CellData[][] = [];
+          for (let R = range.s.r; R <= range.e.r; ++R) {
+            const rowCells: CellData[] = [];
+            for (let C = range.s.c; C <= range.e.c; ++C) {
+              const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+              const cell = ws[cellAddress];
+              let val = '';
+              if (cell) {
+                if (cell.w !== undefined && cell.w !== null) val = String(cell.w).trim();
+                else if (cell.v !== undefined && cell.v !== null) val = String(cell.v).trim();
+              }
+              const link = cell?.l?.Target ? String(cell.l.Target).trim() : (cell?.l?.target ? String(cell.l.target).trim() : undefined);
+              rowCells.push({ value: val, ...(link ? { link } : {}) });
+            }
+            sheetRows.push(rowCells);
+          }
+          extractedSheets[name] = { name, rows: sheetRows };
+        }
+
+        setWorkbookSheets(extractedSheets);
+        setSheetNames(workbook.SheetNames);
+        const firstTab = workbook.SheetNames[0];
+        setActiveSheetName(firstTab);
+        await processMatrix(extractedSheets[firstTab].rows, firstTab);
       } catch (err: any) {
         setErrorMessage(`Lỗi đọc file Excel: ${err.message || 'File không hợp lệ'}`);
       } finally {
@@ -881,7 +959,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     e.target.value = '';
   };
 
-  // Đọc Google Sheet qua Share Link
+  // Đọc Google Sheet qua Share Link (Việc 1: endpoint fetch-workbook trích xuất XLSX và giữ hyperlink)
   const handleLoadGoogleSheet = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -895,44 +973,63 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
 
     setSourceName(trimmed);
 
-    // Tách Sheet ID bằng Regex
-    const match = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-    if (!match || !match[1]) {
+    // Tách Sheet ID và gid bằng Regex
+    const matchId = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]{10,120})/);
+    if (!matchId || !matchId[1]) {
       setErrorMessage('Đường link không đúng định dạng Google Sheet (cần có dạng https://docs.google.com/spreadsheets/d/{ID}/...)');
       return;
     }
+    const sheetId = matchId[1];
 
-    const sheetId = match[1];
+    // Tách gid nếu có
+    const matchGid = trimmed.match(/[#&?]gid=([0-9]+)/);
+    const gid = matchGid ? matchGid[1] : null;
+
     setIsLoading(true);
 
     try {
-      // Thử gọi qua proxy server-side trước để tránh lỗi CORS
-      let csvText = '';
-      try {
-        const proxyRes = await fetch(`/api/sheets/fetch-csv?sheetId=${encodeURIComponent(sheetId)}`);
-        if (proxyRes.ok) {
-          csvText = await proxyRes.text();
-        } else {
-          const errJson = await proxyRes.json();
-          throw new Error(errJson.error || 'Lỗi server tải Google Sheet');
-        }
-      } catch {
-        // Fallback fetch trực tiếp
-        const directUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
-        const directRes = await fetch(directUrl);
-        if (!directRes.ok) {
-          throw new Error(`Mã phản hồi ${directRes.status}. Hãy đảm bảo bảng tính đã chia sẻ quyền "Bất kỳ ai có đường liên kết đều có thể xem" (Anyone with the link can view).`);
-        }
-        csvText = await directRes.text();
+      const res = await fetch(`/api/sheets/fetch-workbook?sheetId=${encodeURIComponent(sheetId)}`);
+      if (!res.ok) {
+        let msg = 'Không đọc được bảng tính, hãy kiểm tra quyền chia sẻ link (cần ở chế độ Bất kỳ ai có liên kết đều có thể xem).';
+        try {
+          const errJson = await res.json();
+          if (errJson.error) msg = errJson.error;
+        } catch {}
+        throw new Error(msg);
       }
 
-      // Parse CSV bằng XLSX
-      const workbook = XLSX.read(csvText, { type: 'string', raw: true });
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonRows: any[] = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '', raw: false });
-      await processLoadedSheet(jsonRows);
+      const data = await res.json();
+      if (!data.success || !data.sheets || !data.sheetNames || data.sheetNames.length === 0) {
+        throw new Error('Bảng tính không có dữ liệu tab hợp lệ.');
+      }
+
+      setWorkbookSheets(data.sheets);
+      setSheetNames(data.sheetNames);
+
+      let targetSheetName = data.sheetNames[0];
+
+      // Nếu link có gid, đối chiếu dấu vân tay qua endpoint fetch-csv
+      if (gid) {
+        try {
+          const csvRes = await fetch(`/api/sheets/fetch-csv?sheetId=${encodeURIComponent(sheetId)}&gid=${encodeURIComponent(gid)}`);
+          if (csvRes.ok) {
+            const csvText = await csvRes.text();
+            const matchedName = findSheetByGidCsvFingerprint(data.sheets, csvText);
+            if (matchedName) {
+              targetSheetName = matchedName;
+            } else {
+              showToast(`Không khớp được tab theo gid=${gid}. Đang mở tab đầu tiên: ${targetSheetName}. Bạn có thể chọn tab khác.`);
+            }
+          }
+        } catch {
+          // Bỏ qua nếu fetch-csv không khả dụng
+        }
+      }
+
+      setActiveSheetName(targetSheetName);
+      await processMatrix(data.sheets[targetSheetName].rows, targetSheetName);
     } catch (err: any) {
-      setErrorMessage(`Không thể nạp Google Sheet: ${err.message}`);
+      setErrorMessage(err.message || 'Không thể nạp Google Sheet');
     } finally {
       setIsLoading(false);
     }
@@ -952,26 +1049,21 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     setIsLoading(true);
 
     try {
-      // Thử parse qua XLSX (hỗ trợ TSV / CSV và dòng ngắt tự động)
-      const workbook = XLSX.read(trimmed, { type: 'string', raw: true });
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[firstSheetName];
-      const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: false });
-
-      if (!jsonRows || jsonRows.length < 2) {
-        // Fallback tách thủ công theo dòng và tab
-        const manualRows = trimmed
-          .split(/\r?\n/)
-          .map((line) => line.split('\t').map((c) => c.trim()))
-          .filter((row) => row.some((c) => c.length > 0));
-
-        if (manualRows.length < 2) {
-          throw new Error('Dữ liệu dán cần có ít nhất 1 dòng tiêu đề và 1 dòng dữ liệu.');
-        }
-        await processLoadedSheet(manualRows);
-      } else {
-        await processLoadedSheet(jsonRows);
+      const lines = trimmed.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (lines.length < 2) {
+        throw new Error('Dữ liệu dán cần có ít nhất 1 dòng tiêu đề và 1 dòng dữ liệu.');
       }
+
+      const pasteMatrix: CellData[][] = lines.map((line) => {
+        const parts = line.includes('\t') ? line.split('\t') : line.split(',');
+        return parts.map((p) => ({ value: p.trim() }));
+      });
+
+      const sheets = { 'Dữ liệu dán': { name: 'Dữ liệu dán', rows: pasteMatrix } };
+      setWorkbookSheets(sheets);
+      setSheetNames(['Dữ liệu dán']);
+      setActiveSheetName('Dữ liệu dán');
+      await processMatrix(pasteMatrix, 'Dữ liệu dán');
     } catch (err: any) {
       setErrorMessage(`Lỗi đọc dữ liệu dán: ${err.message || 'Dữ liệu không đúng định dạng bảng tính'}`);
     } finally {
@@ -991,31 +1083,48 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       .split('#')[0]
       .replace(/\/+$/, '');
 
-  // Phân tích trạng thái từng dòng (Tạo mới, Cập nhật, hoặc Lỗi) - Hỗ trợ nhiều nền tảng
+  // Phân tích trạng thái từng dòng (Tạo mới, Cập nhật, hoặc Lỗi) - Hỗ trợ nhiều nền tảng và 1 ô chứa link + follower
   const parsedPreviewRows = useMemo(() => {
     if (rawRows.length === 0 || fileHeaders.length === 0) return [];
 
     return rawRows.map((row, index) => {
-      // Lấy giá trị từng trường theo columnMapping
-      const getVal = (fieldKey: string): any => {
-        const headerName = columnMapping[fieldKey];
-        if (!headerName) return '';
-        const colIdx = fileHeaders.indexOf(headerName);
-        return colIdx >= 0 ? row[colIdx] : '';
+      const getCell = (fieldKey: string): CellData | undefined => {
+        const colIdx = columnMapping[fieldKey];
+        if (colIdx === undefined || colIdx === null || colIdx < 0) return undefined;
+        const cell = row[colIdx];
+        if (!cell) return undefined;
+        if (typeof cell === 'object' && 'value' in cell) return cell as CellData;
+        return { value: String(cell) };
       };
 
-      const ten = String(getVal('ten') || '').trim();
+      const getVal = (fieldKey: string): string => {
+        return getCell(fieldKey)?.value ? String(getCell(fieldKey)!.value).trim() : '';
+      };
 
-      const linhVucRaw = String(getVal('linhVuc') || '');
+      const ten = getVal('ten');
+
+      const linhVucRaw = getVal('linhVuc');
       const linhVuc = linhVucRaw
         ? linhVucRaw.split(/[;,]+/).map((s) => s.trim()).filter(Boolean)
         : [];
 
-      // Giá các format với parseNumberWithSuffix
+      const rowWarnings: string[] = [];
+      let rowNeedsReview = false;
+
+      // Giá các format với parseNumberWithSuffix (Việc 7: giá gói/SOW thì để trống & gắn cờ Cần kiểm tra)
       const parsePrice = (fieldKey: string): number | null => {
-        const raw = getVal(fieldKey);
-        if (raw === '' || raw === null || raw === undefined) return null;
-        const num = parseNumberWithSuffix(raw);
+        const colIdx = columnMapping[fieldKey];
+        if (colIdx !== undefined && colIdx !== null && colIdx >= 0) {
+          const headerName = fileHeaders[colIdx] || '';
+          if (isPackagePriceColumn(headerName, [])) {
+            rowNeedsReview = true;
+            rowWarnings.push(`Cột ${getColumnLetter(colIdx)} (${headerName}) là giá gói/SOW, không tự quy đổi sang format`);
+            return null;
+          }
+        }
+        const cell = getCell(fieldKey);
+        if (!cell || !cell.value) return null;
+        const num = parseNumberWithSuffix(cell.value);
         return num !== undefined && num > 0 ? num : null;
       };
 
@@ -1028,114 +1137,91 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         sdha: parsePrice('giaSdha'),
       };
 
-      const tenNguoiLienHe = String(getVal('tenNguoiLienHe') || '').trim() || undefined;
-      const soDienThoai = String(getVal('soDienThoai') || '').trim() || undefined;
-      const emailZalo = String(getVal('emailZalo') || '').trim() || undefined;
+      const tenNguoiLienHe = getVal('tenNguoiLienHe') || undefined;
+      const soDienThoai = getVal('soDienThoai') || undefined;
+      const emailZalo = getVal('emailZalo') || undefined;
 
-      // THU THẬP TẤT CẢ CÁC KÊNH MẠNG XÃ HỘI TRÊN CÙNG MỘT DÒNG
+      // THU THẬP TẤT CẢ CÁC KÊNH MẠNG XÃ HỘI TRÊN CÙNG MỘT DÒNG (Việc 4: Link kênh + Follower)
       const channels: Array<{
         tenNenTang: 'TikTok' | 'YouTube' | 'Facebook' | 'Instagram' | 'Khác';
         linkProfile: string;
         soFollower?: number;
+        warning?: string;
       }> = [];
 
-      // 1. TikTok
-      const rawLinkTT = getVal('linkTikTok');
-      const rawFlTT = getVal('followerTikTok');
-      const parsedLinkTT = parseChannelCell(rawLinkTT);
-      const parsedFlTT = parseChannelCell(rawFlTT);
-      const linkTT = parsedLinkTT.linkOrName;
-      const flTT = parseNumberWithSuffix(rawFlTT) ?? parsedLinkTT.followers ?? parsedFlTT.followers;
-      if (linkTT || flTT) {
-        channels.push({
-          tenNenTang: 'TikTok',
-          linkProfile: linkTT,
-          soFollower: flTT,
-        });
-      }
+      const addSocialChannel = (
+        platform: 'TikTok' | 'YouTube' | 'Facebook' | 'Instagram',
+        linkKey: string,
+        followerKey: string
+      ) => {
+        const linkCell = getCell(linkKey);
+        const followerCell = getCell(followerKey);
 
-      // 2. YouTube
-      const rawLinkYT = getVal('linkYouTube');
-      const rawFlYT = getVal('followerYouTube');
-      const parsedLinkYT = parseChannelCell(rawLinkYT);
-      const parsedFlYT = parseChannelCell(rawFlYT);
-      const linkYT = parsedLinkYT.linkOrName;
-      const flYT = parseNumberWithSuffix(rawFlYT) ?? parsedLinkYT.followers ?? parsedFlYT.followers;
-      if (linkYT || flYT) {
-        channels.push({
-          tenNenTang: 'YouTube',
-          linkProfile: linkYT,
-          soFollower: flYT,
-        });
-      }
+        const extracted = parseCellDoubleInfo(linkCell, platform);
+        const followerFromCol = followerCell?.value ? parseNumberWithSuffix(followerCell.value) : undefined;
+        const finalFollower = followerFromCol ?? extracted.follower;
 
-      // 3. Facebook
-      const rawLinkFB = getVal('linkFacebook');
-      const rawFlFB = getVal('followerFacebook');
-      const parsedLinkFB = parseChannelCell(rawLinkFB);
-      const parsedFlFB = parseChannelCell(rawFlFB);
-      const linkFB = parsedLinkFB.linkOrName;
-      const flFB = parseNumberWithSuffix(rawFlFB) ?? parsedLinkFB.followers ?? parsedFlFB.followers;
-      if (linkFB || flFB) {
-        channels.push({
-          tenNenTang: 'Facebook',
-          linkProfile: linkFB,
-          soFollower: flFB,
-        });
-      }
+        if (extracted.platformWarning) {
+          rowWarnings.push(extracted.platformWarning);
+        }
 
-      // 4. Instagram
-      const rawLinkIG = getVal('linkInstagram');
-      const rawFlIG = getVal('followerInstagram');
-      const parsedLinkIG = parseChannelCell(rawLinkIG);
-      const parsedFlIG = parseChannelCell(rawFlIG);
-      const linkIG = parsedLinkIG.linkOrName;
-      const flIG = parseNumberWithSuffix(rawFlIG) ?? parsedLinkIG.followers ?? parsedFlIG.followers;
-      if (linkIG || flIG) {
-        channels.push({
-          tenNenTang: 'Instagram',
-          linkProfile: linkIG,
-          soFollower: flIG,
-        });
-      }
+        const link = extracted.link;
+        const follower = finalFollower;
+        const targetPlatform = extracted.finalPlatform;
+
+        if (link || follower !== undefined) {
+          const existIdx = channels.findIndex((ch) => ch.tenNenTang === targetPlatform);
+          if (existIdx >= 0) {
+            if (!channels[existIdx].linkProfile && link) channels[existIdx].linkProfile = link;
+            if (channels[existIdx].soFollower === undefined && follower !== undefined) {
+              channels[existIdx].soFollower = follower;
+            }
+            if (extracted.platformWarning) channels[existIdx].warning = extracted.platformWarning;
+          } else {
+            channels.push({
+              tenNenTang: targetPlatform,
+              linkProfile: link,
+              soFollower: follower,
+              warning: extracted.platformWarning,
+            });
+          }
+        }
+      };
+
+      addSocialChannel('TikTok', 'linkTikTok', 'followerTikTok');
+      addSocialChannel('YouTube', 'linkYouTube', 'followerYouTube');
+      addSocialChannel('Facebook', 'linkFacebook', 'followerFacebook');
+      addSocialChannel('Instagram', 'linkInstagram', 'followerInstagram');
 
       // 5. Kênh chung (linkProfile / soFollower / nenTang)
-      const rawGenericLink = getVal('linkProfile');
-      const rawGenericFollower = getVal('soFollower');
-      const genericPlatform = String(getVal('nenTang') || '').trim();
+      const genericLinkCell = getCell('linkProfile');
+      const genericFlCell = getCell('soFollower');
+      const genericPlatform = getVal('nenTang');
 
-      const parsedGenLink = parseChannelCell(rawGenericLink);
-      const parsedGenFl = parseChannelCell(rawGenericFollower);
-      const genericLink = parsedGenLink.linkOrName;
-      const genericFollower =
-        parseNumberWithSuffix(rawGenericFollower) ?? parsedGenLink.followers ?? parsedGenFl.followers;
-
-      if (genericLink || genericFollower || genericPlatform) {
+      if (genericLinkCell || genericFlCell || genericPlatform) {
+        const extracted = parseCellDoubleInfo(genericLinkCell, null);
+        const fl = genericFlCell?.value ? parseNumberWithSuffix(genericFlCell.value) : extracted.follower;
+        const link = extracted.link;
         let pName: 'TikTok' | 'YouTube' | 'Facebook' | 'Instagram' | 'Khác' = 'TikTok';
-        if (genericLink) {
-          const detected = detectPlatformFromUrl(genericLink);
-          if (detected) pName = detected;
-        }
-        if (genericPlatform && ['TikTok', 'YouTube', 'Facebook', 'Instagram'].includes(genericPlatform)) {
+
+        if (extracted.finalPlatform && extracted.finalPlatform !== 'Khác') {
+          pName = extracted.finalPlatform;
+        } else if (genericPlatform && ['TikTok', 'YouTube', 'Facebook', 'Instagram'].includes(genericPlatform)) {
           pName = genericPlatform as any;
         }
 
-        const existingChIdx = channels.findIndex(
-          (c) => c.tenNenTang.toLowerCase() === pName.toLowerCase()
-        );
-        if (existingChIdx >= 0) {
-          if (!channels[existingChIdx].linkProfile && genericLink) {
-            channels[existingChIdx].linkProfile = genericLink;
+        if (link || fl !== undefined) {
+          const existIdx = channels.findIndex((ch) => ch.tenNenTang === pName);
+          if (existIdx >= 0) {
+            if (!channels[existIdx].linkProfile && link) channels[existIdx].linkProfile = link;
+            if (channels[existIdx].soFollower === undefined && fl !== undefined) channels[existIdx].soFollower = fl;
+          } else {
+            channels.push({
+              tenNenTang: pName,
+              linkProfile: link,
+              soFollower: fl,
+            });
           }
-          if (!channels[existingChIdx].soFollower && genericFollower) {
-            channels[existingChIdx].soFollower = genericFollower;
-          }
-        } else {
-          channels.push({
-            tenNenTang: pName,
-            linkProfile: genericLink,
-            soFollower: genericFollower,
-          });
         }
       }
 
@@ -1143,11 +1229,11 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       const totalFollowers =
         channels.length > 0
           ? channels.reduce((sum, c) => sum + (c.soFollower || 0), 0)
-          : genericFollower;
+          : undefined;
 
       const primaryChannel = channels[0];
       const primaryPlatform = primaryChannel?.tenNenTang || genericPlatform || 'TikTok';
-      const primaryLink = primaryChannel?.linkProfile || genericLink || '';
+      const primaryLink = primaryChannel?.linkProfile || '';
 
       // 1. Kiểm tra LỖI
       if (!ten) {
@@ -1158,6 +1244,8 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
           kolData: null,
           matchedKol: null,
           isFuzzy: false,
+          warnings: rowWarnings,
+          needsReview: true,
         };
       }
 
@@ -1175,7 +1263,6 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         .map(normalizeUrl);
 
       if (matchKey === 'link') {
-        // Khi chọn khớp theo link (matchKey === 'link') thì TUYỆT ĐỐI không so khớp theo tên nữa (PHẦN A)
         if (allRowLinks.length > 0) {
           matchedKol =
             kols.find((k) =>
@@ -1185,19 +1272,14 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
             ) || null;
         }
 
-        // Dòng nào không khớp link với hồ sơ nào -> tạo mới; dòng không có link nào -> cũng tạo mới.
-        // Nếu tên của dòng trùng chính xác với một hồ sơ có sẵn nhưng link khác:
         if (!matchedKol) {
           const normTen = normalizeName(ten);
           sameNameDifferentLinkKol = kols.find((k) => normalizeName(k.ten) === normTen) || null;
         }
       } else {
-        // matchKey === 'name': giữ nguyên hành vi hiện tại (khớp chính xác, khớp mờ)
         const normTen = normalizeName(ten);
-        // Khớp chính xác tên
         matchedKol = kols.find((k) => normalizeName(k.ten) === normTen) || null;
 
-        // Khớp mờ tên nếu chưa khớp chính xác
         if (!matchedKol) {
           matchedKol =
             kols.find((k) => {
@@ -1222,7 +1304,6 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       };
 
       if (matchedKol) {
-        // Đếm số trường sẽ cập nhật
         let changedCount = 0;
         if (channels.length > 0) changedCount += channels.length;
         else if (totalFollowers !== undefined) changedCount++;
@@ -1238,6 +1319,8 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
           kolData,
           matchedKol,
           isFuzzy,
+          warnings: rowWarnings,
+          needsReview: rowNeedsReview,
         };
       }
 
@@ -1257,6 +1340,8 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         kolData,
         matchedKol: null,
         isFuzzy: false,
+        warnings: rowWarnings,
+        needsReview: rowNeedsReview,
       };
     });
   }, [rawRows, fileHeaders, columnMapping, matchKey, kols]);
@@ -1638,8 +1723,12 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     // Lọc danh sách dòng lỗi từ parsedPreviewRows
     const errorRows = parsedPreviewRows.filter((r) => r.status === 'error');
     const chiTietLoi = errorRows.map((r) => {
-      const colIdx = columnMapping['ten'] ? fileHeaders.indexOf(columnMapping['ten']) : -1;
-      const rawTen = colIdx >= 0 && rawRows[r.index] ? String(rawRows[r.index][colIdx] || '').trim() : '';
+      const colIdx = typeof columnMapping['ten'] === 'number' ? columnMapping['ten'] : -1;
+      const rawRow = rawRows[r.index];
+      const cellVal = colIdx >= 0 && rawRow && rawRow[colIdx]
+        ? (typeof rawRow[colIdx] === 'object' && 'value' in rawRow[colIdx] ? (rawRow[colIdx] as any).value : String(rawRow[colIdx]))
+        : '';
+      const rawTen = String(cellVal || '').trim();
       return {
         ten: rawTen || `Dòng ${r.index + 1}`,
         lyDo: r.reason || 'Lỗi không xác định',
@@ -1843,8 +1932,12 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     // 4. Cập nhật kết quả & ghi lịch sử import
     const errorRows = parsedPreviewRows.filter((r) => r.status === 'error');
     const chiTietLoi = errorRows.map((r) => {
-      const colIdx = columnMapping['ten'] ? fileHeaders.indexOf(columnMapping['ten']) : -1;
-      const rawTen = colIdx >= 0 && rawRows[r.index] ? String(rawRows[r.index][colIdx] || '').trim() : '';
+      const colIdx = typeof columnMapping['ten'] === 'number' ? columnMapping['ten'] : -1;
+      const rawRow = rawRows[r.index];
+      const cellVal = colIdx >= 0 && rawRow && rawRow[colIdx]
+        ? (typeof rawRow[colIdx] === 'object' && 'value' in rawRow[colIdx] ? (rawRow[colIdx] as any).value : String(rawRow[colIdx]))
+        : '';
+      const rawTen = String(cellVal || '').trim();
       return {
         ten: rawTen || `Dòng ${r.index + 1}`,
         lyDo: r.reason || 'Lỗi không xác định',
@@ -2213,6 +2306,7 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
       {/* Vùng Cấu Hình Khóa Khớp & Map Cột (Chỉ hiện khi đã đọc được file) */}
       {fileHeaders.length > 0 && (
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6 animate-in fade-in">
+          {/* Header thanh công cụ cấu hình */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
             <div>
               <div className="flex items-center gap-2">
@@ -2222,21 +2316,17 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
                 </h2>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Đã nhận diện {fileHeaders.length} cột và {rawRows.length} dòng dữ liệu từ file.
+                Đã nhận diện {fileHeaders.length} cột và {rawRows.length} dòng dữ liệu hợp lệ từ bảng tính.
               </p>
             </div>
 
             <div className="flex items-center gap-3 flex-wrap">
-              {/* Nút Nhận Diện Lại Cột */}
+              {/* Nút Nhận Diện Lại Cột từ ma trận nguồn đầy đủ (Việc 5) */}
               <button
                 type="button"
-                onClick={() => {
-                  const detected = smartDetectColumns(fileHeaders, rawRows);
-                  setColumnMapping(detected);
-                  showToast('Đã quét nội dung và tự động nhận diện lại các cột!');
-                }}
+                onClick={handleRescanFromSource}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold border border-indigo-200 transition-colors cursor-pointer"
-                title="Quét lại nội dung 10 dòng đầu của các cột để tự động nhận diện chuẩn xác"
+                title="Quét lại toàn bộ dữ liệu nguồn từ ma trận đầy đủ (mọi dòng, gồm hyperlink)"
               >
                 <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
                 <span>Quét & Tự Nhận Diện Lại Cột</span>
@@ -2272,6 +2362,104 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
             </div>
           </div>
 
+          {/* Dải công cụ Tab & Dòng tiêu đề (Việc 1 & Việc 2) */}
+          <div className="p-3.5 bg-indigo-50/60 border border-indigo-200/80 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-3 flex-wrap">
+              {sheetNames.length > 1 ? (
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-700">Đang nhập tab:</span>
+                  <select
+                    value={activeSheetName}
+                    onChange={(e) => handleSwitchSheet(e.target.value)}
+                    className="px-2.5 py-1 bg-white border border-indigo-300 rounded-lg font-bold text-indigo-900 focus:outline-hidden"
+                  >
+                    {sheetNames.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 font-bold text-slate-700">
+                  <span>Đang nhập tab:</span>
+                  <span className="text-indigo-950 font-bold bg-white px-2 py-0.5 rounded border border-indigo-200">
+                    {activeSheetName || sourceName || 'Dữ liệu'}
+                  </span>
+                </div>
+              )}
+
+              {/* Dòng tiêu đề người dùng sửa được (Việc 2) */}
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-700">Dòng tiêu đề:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={sourceMatrix.length || 100}
+                  value={headerRowIndex + 1}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    if (!isNaN(val) && val >= 1) {
+                      handleHeaderRowChange(val);
+                    }
+                  }}
+                  className="w-16 px-2 py-1 bg-white border border-slate-300 rounded-lg text-center font-bold text-slate-900 focus:outline-hidden focus:border-indigo-500"
+                  title="Nhập số thứ tự dòng chứa tiêu đề cột (1-based)"
+                />
+                {headerCandidate && (
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      headerCandidate.confidence === 'cao'
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                        : headerCandidate.confidence === 'trung bình'
+                        ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                        : 'bg-red-100 text-red-800 border border-red-300'
+                    }`}
+                  >
+                    {headerCandidate.confidence === 'cao'
+                      ? 'Độ tin cậy cao'
+                      : headerCandidate.confidence === 'trung bình'
+                      ? 'Độ tin cậy trung bình'
+                      : 'Cần kiểm tra'}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <span className="text-[11px] text-indigo-700 font-medium">
+              Tọa độ tiêu đề: {getColumnLetter(0)}1 → {getColumnLetter(fileHeaders.length - 1)}{headerRowIndex + 1}
+            </span>
+          </div>
+
+          {/* Cảnh báo Cần kiểm tra dòng tiêu đề nếu độ tin cậy thấp (Việc 2) */}
+          {headerCandidate?.confidence === 'thấp' && (
+            <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+              <span>
+                <strong>Cần kiểm tra:</strong> Hệ thống chưa chắc chắn dòng tiêu đề của bảng tính này. Vui lòng kiểm tra ô <strong>Dòng tiêu đề</strong> phía trên và chỉnh đúng dòng tiêu đề trước khi tiếp tục.
+              </span>
+            </div>
+          )}
+
+          {/* Dải thông báo loại dòng không phải creator (Việc 6) */}
+          {excludedRows.length > 0 && (
+            <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-slate-500 shrink-0" />
+                <span>
+                  Đã tự động loại <strong>{excludedRows.length}</strong> dòng không phải creator (dòng phân mục SECTION, dòng tổng kết TOTAL / VAT / chi phí, hoặc dòng trống tên).
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowExcludedModal(true)}
+                className="text-indigo-600 hover:text-indigo-800 font-bold underline cursor-pointer shrink-0"
+              >
+                Xem chi tiết dòng đã loại ({excludedRows.length})
+              </button>
+            </div>
+          )}
+
           {/* Tùy chọn ghi đè ô trống */}
           <div className="flex items-center gap-2 text-xs text-slate-600 bg-amber-50/60 p-3 rounded-xl border border-amber-200/80">
             <input
@@ -2286,26 +2474,27 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
             </label>
           </div>
 
-          {/* Bảng Map Cột */}
+          {/* Bảng Map Cột (Việc 3: Lưu mapping theo chỉ số 0-based, hiển thị chữ cái cột) */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                 Ghép Cột Trong File Với Trường Thông Tin Của KOL (Hỗ trợ nhiều nền tảng trên cùng 1 dòng):
               </h3>
               <span className="text-[11px] text-slate-400">
-                Đã ghép: {Object.values(columnMapping).filter(Boolean).length} / {fileHeaders.length} cột
+                Đã ghép: {Object.values(columnMapping).filter((v) => v !== null && v !== undefined && v >= 0).length} / {fileHeaders.length} cột
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {KOL_FIELD_DEFINITIONS.map((field) => {
-                const mappedCol = columnMapping[field.key] || '';
+                const mappedColIdx = columnMapping[field.key];
+                const isMapped = mappedColIdx !== undefined && mappedColIdx !== null && mappedColIdx >= 0;
 
                 return (
                   <div
                     key={field.key}
                     className={`p-3 rounded-xl border space-y-1.5 transition-colors ${
-                      mappedCol
+                      isMapped
                         ? 'bg-emerald-50/40 border-emerald-200'
                         : 'bg-slate-50 border-slate-200'
                     }`}
@@ -2315,9 +2504,9 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
                         <span>{field.label}</span>
                         {field.required && <span className="text-red-500">*</span>}
                       </label>
-                      {mappedCol ? (
+                      {isMapped ? (
                         <span className="text-[10px] text-emerald-700 font-bold bg-emerald-100 px-1.5 py-0.5 rounded-sm shrink-0">
-                          Đã map
+                          Đã map ({getColumnLetter(mappedColIdx)})
                         </span>
                       ) : (
                         <span className="text-[10px] text-slate-400 shrink-0">Chưa map</span>
@@ -2325,22 +2514,25 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
                     </div>
 
                     <select
-                      value={mappedCol}
+                      value={isMapped ? String(mappedColIdx) : ''}
                       onChange={(e) =>
-                        setColumnMapping({ ...columnMapping, [field.key]: e.target.value })
+                        setColumnMapping({
+                          ...columnMapping,
+                          [field.key]: e.target.value === '' ? null : Number(e.target.value),
+                        })
                       }
                       className={`w-full px-2.5 py-1.5 text-xs bg-white rounded-lg border focus:outline-hidden ${
-                        field.required && !mappedCol
+                        field.required && !isMapped
                           ? 'border-red-300 ring-1 ring-red-100'
-                          : mappedCol
+                          : isMapped
                           ? 'border-emerald-300 text-emerald-950 font-medium'
                           : 'border-slate-300'
                       }`}
                     >
                       <option value="">-- Bỏ qua trường này --</option>
-                      {fileHeaders.map((h) => (
-                        <option key={h} value={h}>
-                          Cột: {h}
+                      {fileHeaders.map((h, i) => (
+                        <option key={i} value={String(i)}>
+                          {getColumnLetter(i)} — {h}
                         </option>
                       ))}
                     </select>
@@ -2436,45 +2628,56 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
                         {r.kolData?.ten || <span className="text-red-500">(Trống)</span>}
                       </td>
 
-                      {/* Kênh & Link (Hỗ trợ nhiều nền tảng) */}
+                      {/* Kênh & Link (Hỗ trợ nhiều nền tảng, hiển thị cả Link và Follower) */}
                       <td className="px-3 py-3">
                         {r.kolData?.channels && r.kolData.channels.length > 0 ? (
                           <div className="space-y-1.5">
                             {r.kolData.channels.map((ch, chIdx) => (
-                              <div key={chIdx} className="flex items-center gap-1.5 text-[11px] flex-wrap">
-                                <span
-                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                    ch.tenNenTang === 'TikTok'
-                                      ? 'bg-slate-900 text-white'
-                                      : ch.tenNenTang === 'YouTube'
-                                      ? 'bg-red-600 text-white'
-                                      : ch.tenNenTang === 'Facebook'
-                                      ? 'bg-blue-600 text-white'
-                                      : ch.tenNenTang === 'Instagram'
-                                      ? 'bg-pink-600 text-white'
-                                      : 'bg-slate-700 text-white'
-                                  }`}
-                                >
-                                  {ch.tenNenTang}
-                                </span>
-                                {ch.linkProfile ? (
+                              <div key={chIdx} className="space-y-0.5">
+                                <div className="flex items-center gap-1.5 text-[11px] flex-wrap">
                                   <span
-                                    className="text-slate-600 truncate max-w-[130px] font-mono text-[10px]"
-                                    title={ch.linkProfile}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                      ch.tenNenTang === 'TikTok'
+                                        ? 'bg-slate-900 text-white'
+                                        : ch.tenNenTang === 'YouTube'
+                                        ? 'bg-red-600 text-white'
+                                        : ch.tenNenTang === 'Facebook'
+                                        ? 'bg-blue-600 text-white'
+                                        : ch.tenNenTang === 'Instagram'
+                                        ? 'bg-pink-600 text-white'
+                                        : 'bg-slate-700 text-white'
+                                    }`}
                                   >
-                                    {ch.linkProfile.replace(/^https?:\/\/(www\.)?/, '')}
+                                    {ch.tenNenTang}
                                   </span>
-                                ) : (
-                                  <span className="text-slate-400 italic text-[10px]">Chưa có link</span>
-                                )}
-                                {ch.soFollower !== undefined && ch.soFollower > 0 && (
-                                  <span className="text-slate-500 text-[10px] font-semibold">
-                                    ({ch.soFollower >= 1000000
-                                      ? `${(ch.soFollower / 1000000).toFixed(1)}M`
-                                      : ch.soFollower >= 1000
-                                      ? `${Math.round(ch.soFollower / 1000)}K`
-                                      : ch.soFollower})
-                                  </span>
+                                  {ch.linkProfile ? (
+                                    <a
+                                      href={ch.linkProfile.startsWith('http') ? ch.linkProfile : `https://${ch.linkProfile}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-indigo-600 hover:underline truncate max-w-[150px] font-mono text-[10px] inline-flex items-center gap-0.5"
+                                      title={ch.linkProfile}
+                                    >
+                                      <LinkIcon className="w-2.5 h-2.5 shrink-0" />
+                                      <span>{ch.linkProfile.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                                    </a>
+                                  ) : (
+                                    <span className="text-slate-400 italic text-[10px]">Chưa có link</span>
+                                  )}
+                                  {ch.soFollower !== undefined && ch.soFollower > 0 && (
+                                    <span className="text-slate-600 text-[10px] font-semibold">
+                                      ({ch.soFollower >= 1000000
+                                        ? `${(ch.soFollower / 1000000).toFixed(1)}M`
+                                        : ch.soFollower >= 1000
+                                        ? `${Math.round(ch.soFollower / 1000)}K`
+                                        : ch.soFollower} fl)
+                                    </span>
+                                  )}
+                                </div>
+                                {ch.warning && (
+                                  <div className="text-[10px] text-amber-800 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">
+                                    ⚠️ {ch.warning}
+                                  </div>
                                 )}
                               </div>
                             ))}
@@ -2534,6 +2737,11 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
                             !r.kolData?.bangGia?.sdha && (
                               <span className="text-slate-400 italic">Chưa có cột giá</span>
                             )}
+                          {(r as any).needsReview && (
+                            <div className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-1 mt-1 font-medium">
+                              ⚠️ Cần kiểm tra: Giá trong file là giá gói / SOW — để trống để cập nhật sau
+                            </div>
+                          )}
                         </div>
                       </td>
 
@@ -2545,15 +2753,29 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
                             <span>Lỗi: {r.reason}</span>
                           </span>
                         ) : r.status === 'update' ? (
-                          <span className="px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded-md font-bold text-[11px] inline-flex items-center gap-1">
-                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                            <span>{r.reason}</span>
-                          </span>
+                          <div className="space-y-1 inline-block text-left">
+                            <span className="px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded-md font-bold text-[11px] inline-flex items-center gap-1">
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                              <span>{r.reason}</span>
+                            </span>
+                            {(r as any).warnings?.length > 0 && (
+                              <div className="text-[10px] text-amber-800 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">
+                                ⚠️ {(r as any).warnings[0]}
+                              </div>
+                            )}
+                          </div>
                         ) : (
-                          <span className="px-2.5 py-1 bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-md font-bold text-[11px] inline-flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>{r.reason}</span>
-                          </span>
+                          <div className="space-y-1 inline-block text-left">
+                            <span className="px-2.5 py-1 bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-md font-bold text-[11px] inline-flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>{r.reason}</span>
+                            </span>
+                            {(r as any).warnings?.length > 0 && (
+                              <div className="text-[10px] text-amber-800 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">
+                                ⚠️ {(r as any).warnings[0]}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -2561,6 +2783,64 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Xem Các Dòng Đã Tự Động Loại (Việc 6) */}
+      {showExcludedModal && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-xl border border-slate-200 animate-in fade-in max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-bold text-slate-900 text-sm">
+                  Danh Sách Dòng Đã Tự Động Loại ({excludedRows.length} dòng)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowExcludedModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              Các dòng sau đây được xác định là dòng phân mục (SECTION), dòng tổng kết chi phí (TOTAL / VAT), hoặc dòng trống tên KOL nên hệ thống tự động loại bỏ để không ghi vào kho đối tác.
+            </p>
+
+            <div className="overflow-y-auto flex-1 divide-y divide-slate-100 text-xs border border-slate-200 rounded-xl">
+              {excludedRows.map((item, idx) => (
+                <div key={idx} className="p-2.5 flex items-start justify-between gap-3 bg-slate-50/50 hover:bg-slate-50">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2 font-bold text-slate-800">
+                      <span className="px-1.5 py-0.2 bg-slate-200 rounded text-[11px] font-mono">Dòng {item.rowNumber}</span>
+                      <span className="text-amber-800 font-semibold">{item.reasonText}</span>
+                    </div>
+                    {item.sampleText && (
+                      <p className="text-[11px] text-slate-500 font-mono truncate max-w-md">
+                        {item.sampleText}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-medium px-2 py-0.5 bg-slate-100 rounded-sm shrink-0">
+                    Đã bỏ qua
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowExcludedModal(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
           </div>
         </div>
       )}

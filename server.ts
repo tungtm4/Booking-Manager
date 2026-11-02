@@ -12,6 +12,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
+import * as XLSX from 'xlsx';
 
 dotenv.config();
 
@@ -809,6 +810,117 @@ app.get('/api/sheets/fetch-csv', async (req, res) => {
     return res.status(500).json({
       error: `Lỗi kết nối Google Sheet: ${err.message}`,
     });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// API: Tải Google Sheet dạng XLSX và phân tích ma trận ô kèm hyperlink (Import-1)
+// ----------------------------------------------------------------------------
+app.get('/api/sheets/fetch-workbook', async (req, res) => {
+  try {
+    const rawSheetId = req.query.sheetId as string | undefined;
+    const directUrl = req.query.url as string | undefined;
+
+    let targetSheetId: string | null = null;
+    if (rawSheetId && typeof rawSheetId === 'string' && rawSheetId.trim()) {
+      const trimmed = rawSheetId.trim();
+      if (/^[a-zA-Z0-9-_]{10,120}$/.test(trimmed)) {
+        targetSheetId = trimmed;
+      } else {
+        return res.status(400).json({ error: 'Mã Google Sheet (sheetId) không đúng định dạng hợp lệ.' });
+      }
+    } else if (directUrl && typeof directUrl === 'string' && directUrl.trim()) {
+      try {
+        const parsed = new URL(directUrl.trim());
+        if (parsed.protocol !== 'https:' || parsed.hostname !== 'docs.google.com') {
+          return res.status(400).json({ error: 'URL không hợp lệ. Chỉ chấp nhận đường liên kết Google Sheet từ https://docs.google.com.' });
+        }
+        const match = parsed.pathname.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]{10,120})/);
+        if (!match || !match[1]) {
+          return res.status(400).json({ error: 'Đường dẫn URL không đúng định dạng bảng tính Google Sheet (/spreadsheets/d/{id}).' });
+        }
+        targetSheetId = match[1];
+      } catch {
+        return res.status(400).json({ error: 'URL Google Sheet không hợp lệ hoặc sai định dạng.' });
+      }
+    } else {
+      return res.status(400).json({ error: 'Thiếu tham số sheetId hoặc URL Google Sheet hợp lệ.' });
+    }
+
+    const targetUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(targetSheetId)}/export?format=xlsx`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    let response: Response;
+    try {
+      response = await fetch(targetUrl, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: `Không đọc được bảng tính, hãy kiểm tra quyền chia sẻ link (Mã lỗi ${response.status}). Cần chia sẻ 'Bất kỳ ai có đường liên kết đều có thể xem'.`,
+      });
+    }
+
+    const MAX_BYTES = 15 * 1024 * 1024; // 15MB
+    const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength > MAX_BYTES) {
+      return res.status(413).json({ error: 'File bảng tính quá lớn (vượt quá 15MB).' });
+    }
+
+    const buffer = Buffer.from(arrayBuffer);
+    const workbook = XLSX.read(buffer, { type: 'buffer', cellFormula: true, cellHTML: true, cellStyles: true });
+
+    if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+      return res.status(400).json({ error: 'Bảng tính không có tab dữ liệu nào.' });
+    }
+
+    const sheets: Record<string, { name: string; rows: Array<Array<{ value: string; link?: string }>> }> = {};
+
+    for (const sheetName of workbook.SheetNames) {
+      const ws = workbook.Sheets[sheetName];
+      if (!ws || !ws['!ref']) {
+        sheets[sheetName] = { name: sheetName, rows: [] };
+        continue;
+      }
+
+      const range = XLSX.utils.decode_range(ws['!ref']);
+      const sheetRows: Array<Array<{ value: string; link?: string }>> = [];
+
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        const rowCells: Array<{ value: string; link?: string }> = [];
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+          const cell = ws[cellAddress];
+          let val = '';
+          if (cell) {
+            if (cell.w !== undefined && cell.w !== null) {
+              val = String(cell.w).trim();
+            } else if (cell.v !== undefined && cell.v !== null) {
+              val = String(cell.v).trim();
+            }
+          }
+          const link = cell?.l?.Target ? String(cell.l.Target).trim() : (cell?.l?.target ? String(cell.l.target).trim() : undefined);
+          rowCells.push({ value: val, ...(link ? { link } : {}) });
+        }
+        sheetRows.push(rowCells);
+      }
+      sheets[sheetName] = { name: sheetName, rows: sheetRows };
+    }
+
+    return res.json({
+      success: true,
+      sheetNames: workbook.SheetNames,
+      sheets,
+    });
+  } catch (err: any) {
+    if (err.name === 'AbortError' || err.name === 'TimeoutError' || err.message?.includes('aborted') || err.message?.includes('timeout')) {
+      return res.status(408).json({ error: 'Tải Google Sheet quá thời gian chờ (15s).' });
+    }
+    return res.status(500).json({ error: `Không đọc được bảng tính, hãy kiểm tra quyền chia sẻ link: ${err.message}` });
   }
 });
 
