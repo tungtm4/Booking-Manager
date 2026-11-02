@@ -63,6 +63,7 @@ export interface KolDiff {
 interface DataImportViewProps {
   kols: KolProfile[];
   onDataImported: () => void;
+  initialSourceType?: 'excel' | 'google_sheet' | 'paste';
 }
 
 // Danh sách các trường dữ liệu của KOL (hỗ trợ đầy đủ nhiều nền tảng trên cùng 1 dòng)
@@ -544,10 +545,11 @@ export const smartDetectColumns = (headers: string[], rawRows: any[]): Record<st
   return mapping;
 };
 
-export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImported }) => {
-  const [sourceType, setSourceType] = useState<'excel' | 'google_sheet'>('excel');
+export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImported, initialSourceType }) => {
+  const [sourceType, setSourceType] = useState<'excel' | 'google_sheet' | 'paste'>(initialSourceType || 'excel');
   const [sourceName, setSourceName] = useState('');
   const [googleSheetUrl, setGoogleSheetUrl] = useState('');
+  const [pasteText, setPasteText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
   const [aiColumnNotes, setAiColumnNotes] = useState<Record<string, { lyDo: string; confidence: string }>>({});
@@ -931,6 +933,47 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       await processLoadedSheet(jsonRows);
     } catch (err: any) {
       setErrorMessage(`Không thể nạp Google Sheet: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Đọc dữ liệu dán từ clipboard (tab/comma separated)
+  const handleParsePasteText = async () => {
+    setErrorMessage(null);
+    setImportResult(null);
+    const trimmed = pasteText.trim();
+    if (!trimmed) {
+      setErrorMessage('Vui lòng dán dữ liệu bảng tính vào khung nhập.');
+      return;
+    }
+
+    setSourceName('Dán từ bảng tính (Clipboard)');
+    setIsLoading(true);
+
+    try {
+      // Thử parse qua XLSX (hỗ trợ TSV / CSV và dòng ngắt tự động)
+      const workbook = XLSX.read(trimmed, { type: 'string', raw: true });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: false });
+
+      if (!jsonRows || jsonRows.length < 2) {
+        // Fallback tách thủ công theo dòng và tab
+        const manualRows = trimmed
+          .split(/\r?\n/)
+          .map((line) => line.split('\t').map((c) => c.trim()))
+          .filter((row) => row.some((c) => c.length > 0));
+
+        if (manualRows.length < 2) {
+          throw new Error('Dữ liệu dán cần có ít nhất 1 dòng tiêu đề và 1 dòng dữ liệu.');
+        }
+        await processLoadedSheet(manualRows);
+      } else {
+        await processLoadedSheet(jsonRows);
+      }
+    } catch (err: any) {
+      setErrorMessage(`Lỗi đọc dữ liệu dán: ${err.message || 'Dữ liệu không đúng định dạng bảng tính'}`);
     } finally {
       setIsLoading(false);
     }
@@ -1618,8 +1661,8 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     const historyEntry: ImportHistoryEntry = {
       id: `import-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       thoiGian: new Date().toISOString(),
-      nguon: sourceType === 'google_sheet' ? 'Google Sheet' : 'Excel',
-      tenNguon: sourceName || (sourceType === 'google_sheet' ? 'Google Sheet' : 'File Excel'),
+      nguon: sourceType === 'google_sheet' ? 'Google Sheet' : (sourceType === 'paste' ? 'Dán dữ liệu' : 'Excel'),
+      tenNguon: sourceName || (sourceType === 'google_sheet' ? 'Google Sheet' : (sourceType === 'paste' ? 'Dán dữ liệu' : 'File Excel')),
       tongDong: rawRows.length,
       taoMoi: result.created,
       capNhat: result.updated,
@@ -1823,8 +1866,8 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     const historyEntry: ImportHistoryEntry = {
       id: `import-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       thoiGian: new Date().toISOString(),
-      nguon: sourceType === 'google_sheet' ? 'Google Sheet' : 'Excel',
-      tenNguon: sourceName || (sourceType === 'google_sheet' ? 'Google Sheet' : 'File Excel'),
+      nguon: sourceType === 'google_sheet' ? 'Google Sheet' : (sourceType === 'paste' ? 'Dán dữ liệu' : 'Excel'),
+      tenNguon: sourceName || (sourceType === 'google_sheet' ? 'Google Sheet' : (sourceType === 'paste' ? 'Dán dữ liệu' : 'File Excel')),
       tongDong: rawRows.length,
       taoMoi: totalCreated,
       capNhat: totalUpdated,
@@ -2012,27 +2055,40 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
             <span>1. Chọn Nguồn Dữ Liệu Đầu Vào</span>
           </h2>
 
-          {/* Switcher Tab Con */}
+          {/* Switcher Tab Con — 3 cách đưa dữ liệu vào */}
           <div className="flex bg-slate-100 p-1 rounded-xl">
             <button
+              type="button"
               onClick={() => setSourceType('excel')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 sourceType === 'excel'
                   ? 'bg-white text-emerald-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Upload Excel (.xlsx)
+              Tải file Excel
             </button>
             <button
+              type="button"
               onClick={() => setSourceType('google_sheet')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 sourceType === 'google_sheet'
                   ? 'bg-white text-emerald-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Link Google Sheet
+            </button>
+            <button
+              type="button"
+              onClick={() => setSourceType('paste')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                sourceType === 'paste'
+                  ? 'bg-white text-emerald-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Dán dữ liệu
             </button>
           </div>
         </div>
@@ -2044,7 +2100,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
           </div>
         )}
 
-        {sourceType === 'excel' ? (
+        {sourceType === 'excel' && (
           /* Nguồn 1: Upload File Excel */
           <div
             onClick={() => fileInputRef.current?.click()}
@@ -2067,7 +2123,9 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
               className="hidden"
             />
           </div>
-        ) : (
+        )}
+
+        {sourceType === 'google_sheet' && (
           /* Nguồn 2: Link Google Sheet */
           <form onSubmit={handleLoadGoogleSheet} className="space-y-3">
             <label className="block text-xs font-bold text-slate-700">
@@ -2106,6 +2164,49 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
               Lưu ý: Bảng tính Google Sheet cần bật quyền <strong>"Bất kỳ ai có đường liên kết đều có thể xem" (Anyone with the link can view)</strong>.
             </p>
           </form>
+        )}
+
+        {sourceType === 'paste' && (
+          /* Nguồn 3: Dán Dữ Liệu Bảng Tính (Clipboard) */
+          <div className="space-y-3">
+            <label className="block text-xs font-bold text-slate-700">
+              Dán Vùng Dữ Liệu Bảng Tính (Sao chép từ Excel hoặc Google Sheets):
+            </label>
+            <textarea
+              rows={7}
+              placeholder={`Sao chép các dòng cột từ file Excel hoặc Google Sheet rồi dán vào đây (Ctrl+V hoặc Cmd+V)...
+Ví dụ:
+Tên KOL	Nền tảng	Followers	Lĩnh vực	Giá Video
+Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
+Đạt Tech Review	YouTube	850.000	Công nghệ	28.000.000`}
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:bg-white focus:border-emerald-500 focus:outline-hidden"
+            />
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <p className="text-[11px] text-slate-400">
+                Hệ thống tự động phát hiện tab/phẩy giữa các cột và đọc dòng tiêu đề để phân tích đối chiếu.
+              </p>
+              <button
+                type="button"
+                disabled={isLoading || !pasteText.trim()}
+                onClick={handleParsePasteText}
+                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-200 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 shrink-0"
+              >
+                {isLoading ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>Đang phân tích...</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowRight className="w-4 h-4" />
+                    <span>Phân Tích Dữ Liệu Dán</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         )}
       </div>
 

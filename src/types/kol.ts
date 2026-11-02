@@ -167,7 +167,7 @@ export interface ImportHistoryErrorDetail {
 export interface ImportHistoryEntry {
   id: string;
   thoiGian: string; // ISO string
-  nguon: 'Google Sheet' | 'Excel';
+  nguon: 'Google Sheet' | 'Excel' | 'Dán dữ liệu';
   tenNguon: string; // đường link sheet hoặc tên file Excel
   tongDong: number;
   taoMoi: number;

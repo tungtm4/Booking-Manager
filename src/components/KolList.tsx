@@ -28,7 +28,9 @@ import {
   Check,
   AlertTriangle,
   CheckCircle2,
-  Scale
+  Scale,
+  Upload,
+  Plus
 } from 'lucide-react';
 import { 
   KolProfile, 
@@ -56,6 +58,9 @@ interface KolListProps {
   onAddToSow?: (kol: KolProfile) => void;
   initialSearch?: string;
   canEdit?: boolean;
+  onOpenImport?: () => void;
+  hideHeaderTitle?: boolean;
+  hideAddButton?: boolean;
 }
 
 type SortOption = 'followers_desc' | 'followers_asc' | 'price_asc' | 'price_desc' | 'newest';
@@ -70,6 +75,9 @@ export const KolList: React.FC<KolListProps> = ({
   onAddToSow,
   initialSearch = '',
   canEdit = true,
+  onOpenImport,
+  hideHeaderTitle = false,
+  hideAddButton = false,
 }) => {
   // State Bộ lọc
   const [keyword, setKeyword] = useState(initialSearch);
@@ -444,16 +452,22 @@ export const KolList: React.FC<KolListProps> = ({
       {/* Top Header & Search Bar */}
       <div className="bg-white p-4 sm:p-6 rounded-xl border border-slate-200 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-              Danh Sách KOL ({sortedKols.length} / {kols.length})
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-              Tra cứu hồ sơ, năng lực truyền thông và bảng giá chi tiết
-            </p>
-          </div>
+          {!hideHeaderTitle ? (
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+                Danh Sách KOL ({sortedKols.length} / {kols.length})
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+                Tra cứu hồ sơ, năng lực truyền thông và bảng giá chi tiết
+              </p>
+            </div>
+          ) : (
+            <div className="text-xs text-slate-500 font-medium">
+              <span>{sortedKols.length.toLocaleString('vi-VN')} Creator / KOL đang hiển thị</span>
+            </div>
+          )}
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
             <button
               onClick={() => setShowFiltersMobile(!showFiltersMobile)}
               className={`sm:hidden flex-1 flex items-center justify-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium ${
@@ -518,13 +532,27 @@ export const KolList: React.FC<KolListProps> = ({
               )}
             </button>
 
-            {canEdit && (
+            {/* Nút Nhập dữ liệu (đồng nhất với Community, chỉ hiện khi canEdit) */}
+            {canEdit && onOpenImport && (
               <button
-                onClick={onOpenAddKol}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium shadow-xs shadow-indigo-200 transition-all active:scale-95 shrink-0 cursor-pointer"
+                type="button"
+                onClick={onOpenImport}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-purple-200 bg-purple-50/70 hover:bg-purple-100/70 text-purple-700 font-bold text-xs transition-colors cursor-pointer shadow-xs shrink-0"
               >
-                <PlusCircle className="w-4 h-4" />
-                <span className="hidden sm:inline">Thêm KOL</span>
+                <Upload className="w-3.5 h-3.5 text-purple-600" />
+                <span>Nhập dữ liệu</span>
+              </button>
+            )}
+
+            {/* Nút Thêm KOL (chỉ hiện khi canEdit và !hideAddButton) */}
+            {canEdit && !hideAddButton && (
+              <button
+                type="button"
+                onClick={onOpenAddKol}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#7C3AED] hover:bg-purple-700 text-white font-bold text-xs transition-colors cursor-pointer shadow-xs shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Thêm Creator / KOL</span>
                 <span className="sm:hidden">Thêm</span>
               </button>
             )}

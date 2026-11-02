@@ -27,6 +27,7 @@ import { CommunityManager } from './CommunityManager';
 import { CommunityImportModal } from './CommunityImportModal';
 import { DataImportView } from './DataImportView';
 import { AiPriceExtractor } from './AiPriceExtractor';
+import { CommunityService as CommunityApi } from '../services/communityService';
 import { BulkPriceUpdate } from './BulkPriceUpdate';
 
 interface PartnerCatalogManagerProps {
@@ -39,6 +40,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
 
   // Core KOL Data State
   const [kols, setKols] = useState<CatalogKol[]>([]);
+  const [communityCount, setCommunityCount] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
   const [notice, setNotice] = useState<string>('');
@@ -51,10 +53,17 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
   const [kolToDelete, setKolToDelete] = useState<CatalogKol | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState<boolean>(false);
 
-  // M12: Entry Point Gom 4 Đường Nhập / Cập nhật Dữ liệu
+  // M12: Entry Point Gom các Đường Nhập / Cập nhật Dữ liệu
   const [showEntryModal, setShowEntryModal] = useState<boolean>(false);
-  const [activeTool, setActiveTool] = useState<'excel' | 'paste' | 'ai' | 'bulk_price' | null>(null);
+  const [activeTool, setActiveTool] = useState<'spreadsheet' | 'excel' | 'paste' | 'ai' | 'bulk_price' | null>(null);
   const [showCommunityImport, setShowCommunityImport] = useState<boolean>(false);
+
+  // Tải số lượng Community ban đầu
+  useEffect(() => {
+    CommunityApi.list()
+      .then((items) => setCommunityCount(items.length))
+      .catch(() => {});
+  }, []);
 
   // Gương của selectedKolForDetail để loadKols đọc mà không thành dependency —
   // nếu loadKols phụ thuộc state này, mỗi lần đồng bộ chi tiết đang mở sẽ tạo object mới,
@@ -243,8 +252,8 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
 
   return (
     <div className="space-y-6">
-      {/* Top Banner & Header */}
-      <div className="bg-white p-6 rounded-3xl border border-purple-100 shadow-xs flex flex-wrap items-center justify-between gap-4">
+      {/* Top Banner & Header (Gọn gàng, không còn nút bấm trên header) */}
+      <div className="bg-white p-6 rounded-3xl border border-purple-100 shadow-xs">
         <div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-purple-700 bg-purple-100 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
@@ -257,49 +266,23 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
             Tra cứu hồ sơ Creator / KOL và Community (Fanpage / Group) với bảng giá và hồ sơ ký kết chính thức trên máy chủ.
           </p>
         </div>
-
-        {/* Action Controls */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* M12: Nút gom 4 đường nhập liệu kho */}
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => setShowEntryModal(true)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-purple-200 bg-purple-50/70 hover:bg-purple-100/70 text-purple-700 font-bold text-xs transition-colors cursor-pointer shadow-xs"
-            >
-              <Upload className="w-4 h-4 text-purple-600" />
-              <span>Nhập / Cập nhật dữ liệu</span>
-            </button>
-          )}
-
-          {isAdmin && tab === 'kol' && (
-            <button
-              type="button"
-              onClick={handleOpenAddKol}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#7C3AED] hover:bg-purple-700 text-white font-bold text-xs transition-colors cursor-pointer shadow-xs"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Thêm Creator / KOL</span>
-            </button>
-          )}
-        </div>
       </div>
 
       {/* Thông báo lỗi / thành công */}
       {error && (
         <div role="alert" className="p-3 bg-red-50 border border-red-200 text-red-700 text-sm font-medium rounded-2xl flex items-center justify-between">
           <span>{error}</span>
-          <button type="button" onClick={() => setError('')} className="text-red-400 hover:text-red-700 font-bold ml-2">✕</button>
+          <button type="button" onClick={() => setError('')} className="text-red-400 hover:text-red-700 font-bold ml-2 cursor-pointer">✕</button>
         </div>
       )}
       {notice && (
         <div role="status" className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-medium rounded-2xl flex items-center justify-between">
           <span>{notice}</span>
-          <button type="button" onClick={() => setNotice('')} className="text-emerald-500 hover:text-emerald-800 font-bold ml-2">✕</button>
+          <button type="button" onClick={() => setNotice('')} className="text-emerald-500 hover:text-emerald-800 font-bold ml-2 cursor-pointer">✕</button>
         </div>
       )}
 
-      {/* Sub Tabs Switching: Creator / KOL vs Community */}
+      {/* Sub Tabs Switching: Creator / KOL vs Community (Cả 2 đều có số đếm) */}
       <div className="flex items-center justify-between gap-3 border-b border-purple-100 pb-2">
         <div className="flex items-center gap-2 bg-purple-50/60 p-1.5 rounded-2xl border border-purple-100/60">
           <button
@@ -325,7 +308,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
             }`}
           >
             <Share2 className="w-4 h-4" />
-            <span>Community (Fanpage / Group)</span>
+            <span>Community ({communityCount})</span>
           </button>
         </div>
 
@@ -333,7 +316,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
           {tab === 'kol' ? (
             <span>Quyền hạn: {isAdmin ? 'Quản trị viên (Thêm/Sửa/Xoá)' : 'Xem tra cứu & hồ sơ ký kết (Chỉ đọc)'}</span>
           ) : (
-            <span>Bảng giá dịch vụ riêng & hồ sơ ký kết Community</span>
+            <span>Quyền hạn: {isAdmin ? 'Quản trị viên (Thêm/Sửa/Xoá)' : 'Xem tra cứu & hồ sơ ký kết (Chỉ đọc)'}</span>
           )}
         </div>
       </div>
@@ -354,6 +337,8 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
               onDeleteKol={handleRequestDeleteKol}
               onDeleteMultiple={handleDeleteMultipleKols}
               onOpenAddKol={handleOpenAddKol}
+              onOpenImport={() => setShowEntryModal(true)}
+              hideHeaderTitle={true}
             />
           )}
         </div>
@@ -362,18 +347,27 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
       {/* Tab 2: Community */}
       {tab === 'community' && (
         <div className="bg-white p-6 rounded-3xl border border-purple-100 shadow-xs">
-          <CommunityManager isAdmin={isAdmin} />
+          <CommunityManager
+            isAdmin={isAdmin}
+            hideTopHeader={true}
+            onCountChange={(cnt) => setCommunityCount(cnt)}
+            onOpenImport={() => setShowEntryModal(true)}
+          />
         </div>
       )}
 
-      {/* M12: DIALOG CHỌN ĐƯỜNG NHẬP LIỆU (≤ 2 lần click) */}
+      {/* M12: DIALOG CHỌN ĐƯỜNG NHẬP LIỆU (Gồm 3 mục, ≤ 2 lần click) */}
       {showEntryModal && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-xl max-w-xl w-full p-6 space-y-5 border border-purple-100">
+          <div className="bg-white rounded-3xl shadow-xl max-w-2xl w-full p-6 space-y-5 border border-purple-100">
             <div className="flex items-center justify-between border-b pb-3">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Nhập / Cập nhật dữ liệu vào kho</h3>
-                <p className="text-xs text-slate-500">Chọn 1 trong 4 phương thức nhập liệu để xử lý nhanh</p>
+                <p className="text-xs text-slate-500">
+                  {tab === 'kol'
+                    ? 'Chọn phương thức nhập liệu hoặc cập nhật giá cho Creator / KOL'
+                    : 'Nhập dữ liệu bảng tính cho Community (Fanpage / Group)'}
+                </p>
               </div>
               <button
                 type="button"
@@ -384,8 +378,9 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
               </button>
             </div>
 
-            <div className="grid sm:grid-cols-2 gap-3">
-              {/* Đường 1: Import Excel / Sheet */}
+            {/* M12 Gom 4 đường nhập liệu: 1. Import Excel / Sheet và 2. Dán dữ liệu đã được gộp thành: 1. Nhập từ bảng tính; 3. AI Bóc Tách; 4. Cập nhật giá hàng loạt */}
+            <div className={`grid gap-3 ${tab === 'kol' ? 'sm:grid-cols-3' : 'grid-cols-1'}`}>
+              {/* Mục 1: Nhập từ bảng tính (Tải file Excel · Link Google Sheet · Dán dữ liệu) */}
               <button
                 type="button"
                 onClick={() => {
@@ -393,73 +388,69 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
                   if (tab === 'community') {
                     setShowCommunityImport(true);
                   } else {
-                    setActiveTool('excel');
+                    setActiveTool('spreadsheet');
                   }
                 }}
                 className="p-4 rounded-2xl border border-purple-100 bg-purple-50/40 hover:bg-purple-50 hover:border-purple-300 text-left transition-all cursor-pointer space-y-1.5 group"
               >
                 <div className="flex items-center gap-2 text-[#7C3AED] font-bold text-sm">
                   <FileSpreadsheet className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                  <span>1. Import Excel / Sheet</span>
+                  <span>1. Nhập từ bảng tính</span>
                 </div>
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  Tải file bảng tính Excel (.xlsx) hoặc dán link Google Sheet để nhập hàng loạt hồ sơ và bảng giá.
+                  {/* 1. Import Excel / Sheet và 2. Dán dữ liệu */}
+                  Tải file Excel (.xlsx), dán link Google Sheet hoặc dán trực tiếp vùng ô dữ liệu từ clipboard để phân tích và xem trước tự động.
                 </p>
+                <div className="flex items-center gap-1.5 pt-1 text-[10px] font-semibold text-purple-700 flex-wrap">
+                  <span className="px-1.5 py-0.5 rounded-md bg-purple-100/70">Tải file Excel</span>
+                  <span className="text-purple-300">•</span>
+                  <span className="px-1.5 py-0.5 rounded-md bg-purple-100/70">Link Google Sheet</span>
+                  <span className="text-purple-300">•</span>
+                  <span className="px-1.5 py-0.5 rounded-md bg-purple-100/70">Dán dữ liệu</span>
+                </div>
               </button>
 
-              {/* Đường 2: Dán dữ liệu (Clipboard) */}
-              <button
-                type="button"
-                onClick={() => {
-                  setShowEntryModal(false);
-                  setActiveTool('paste');
-                }}
-                className="p-4 rounded-2xl border border-purple-100 bg-purple-50/40 hover:bg-purple-50 hover:border-purple-300 text-left transition-all cursor-pointer space-y-1.5 group"
-              >
-                <div className="flex items-center gap-2 text-[#7C3AED] font-bold text-sm">
-                  <ClipboardList className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                  <span>2. Dán dữ liệu bảng tính</span>
-                </div>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  Sao chép và dán trực tiếp vùng ô dữ liệu từ Excel / Google Sheets vào bảng để phân tích tự động.
-                </p>
-              </button>
+              {tab === 'kol' && (
+                <>
+                  {/* Mục 2: AI Bóc Tách Bảng Giá */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEntryModal(false);
+                      setActiveTool('ai');
+                    }}
+                    className="p-4 rounded-2xl border border-purple-100 bg-purple-50/40 hover:bg-purple-50 hover:border-purple-300 text-left transition-all cursor-pointer space-y-1.5 group"
+                  >
+                    <div className="flex items-center gap-2 text-indigo-700 font-bold text-sm">
+                      <Sparkles className="w-5 h-5 text-indigo-600 group-hover:scale-110 transition-transform" />
+                      <span>2. AI Bóc Tách Giá</span>
+                    </div>
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      {/* 3. AI Bóc Tách */}
+                      Trích xuất bảng giá tự động từ hình ảnh rate card, file ảnh chụp báo giá hoặc tin nhắn của đối tác.
+                    </p>
+                  </button>
 
-              {/* Đường 3: AI Bóc Tách Bảng Giá */}
-              <button
-                type="button"
-                onClick={() => {
-                  setShowEntryModal(false);
-                  setActiveTool('ai');
-                }}
-                className="p-4 rounded-2xl border border-purple-100 bg-purple-50/40 hover:bg-purple-50 hover:border-purple-300 text-left transition-all cursor-pointer space-y-1.5 group"
-              >
-                <div className="flex items-center gap-2 text-indigo-700 font-bold text-sm">
-                  <Sparkles className="w-5 h-5 text-indigo-600 group-hover:scale-110 transition-transform" />
-                  <span>3. AI Bóc Tách Giá</span>
-                </div>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  Trích xuất bảng giá tự động từ hình ảnh rate card, file ảnh chụp báo giá hoặc tin nhắn của đối tác.
-                </p>
-              </button>
-
-              {/* Đường 4: Cập Nhật Giá Hàng Loạt */}
-              <button
-                type="button"
-                onClick={() => {
-                  setShowEntryModal(false);
-                  setActiveTool('bulk_price');
-                }}
-                className="p-4 rounded-2xl border border-purple-100 bg-purple-50/40 hover:bg-purple-50 hover:border-purple-300 text-left transition-all cursor-pointer space-y-1.5 group"
-              >
-                <div className="flex items-center gap-2 text-emerald-700 font-bold text-sm">
-                  <DollarSign className="w-5 h-5 text-emerald-600 group-hover:scale-110 transition-transform" />
-                  <span>4. Cập nhật giá hàng loạt</span>
-                </div>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  Điều chỉnh hoặc áp dụng tỷ lệ chiết khấu, tăng giảm giá cho nhiều đối tác cùng lúc trên toàn kho.
-                </p>
-              </button>
+                  {/* Mục 3: Cập Nhật Giá Hàng Loạt */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEntryModal(false);
+                      setActiveTool('bulk_price');
+                    }}
+                    className="p-4 rounded-2xl border border-purple-100 bg-purple-50/40 hover:bg-purple-50 hover:border-purple-300 text-left transition-all cursor-pointer space-y-1.5 group"
+                  >
+                    <div className="flex items-center gap-2 text-emerald-700 font-bold text-sm">
+                      <DollarSign className="w-5 h-5 text-emerald-600 group-hover:scale-110 transition-transform" />
+                      <span>3. Cập nhật giá hàng loạt</span>
+                    </div>
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      {/* 4. Cập nhật giá hàng loạt */}
+                      Điều chỉnh hoặc áp dụng tỷ lệ chiết khấu, tăng giảm giá cho nhiều đối tác cùng lúc trên toàn kho.
+                    </p>
+                  </button>
+                </>
+              )}
             </div>
 
             <div className="flex justify-end pt-2 border-t">
@@ -475,15 +466,15 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
         </div>
       )}
 
-      {/* Modal Tool: 1. Excel / 2. Paste Dữ liệu qua DataImportView */}
-      {(activeTool === 'excel' || activeTool === 'paste') && (
+      {/* Modal Tool: 1. Nhập từ bảng tính qua DataImportView (hỗ trợ cả Excel, Sheet, Paste) */}
+      {(activeTool === 'spreadsheet' || activeTool === 'excel' || activeTool === 'paste') && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl shadow-2xl max-w-5xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-purple-100">
             <div className="p-4 bg-purple-50/50 border-b flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <FileSpreadsheet className="w-5 h-5 text-[#7C3AED]" />
                 <h3 className="font-bold text-slate-900 text-sm">
-                  {activeTool === 'excel' ? 'Import dữ liệu Excel / Google Sheet vào kho' : 'Dán dữ liệu từ bảng tính vào kho'}
+                  Nhập dữ liệu từ bảng tính vào kho (Excel · Google Sheet · Dán dữ liệu)
                 </h3>
               </div>
               <button
@@ -497,6 +488,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
             <div className="p-4 overflow-y-auto flex-1">
               <DataImportView
                 kols={kols}
+                initialSourceType={activeTool === 'paste' ? 'paste' : 'excel'}
                 onDataImported={async () => {
                   await loadKols();
                   setActiveTool(null);

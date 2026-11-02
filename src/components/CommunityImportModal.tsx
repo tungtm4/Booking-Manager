@@ -33,7 +33,9 @@ type Step = 'source' | 'mapping' | 'preview' | 'result';
 
 export function CommunityImportModal({ isOpen, onClose, onApplied }: { isOpen: boolean; onClose: () => void; onApplied: () => void }) {
   const [step, setStep] = useState<Step>('source');
+  const [sourceMode, setSourceMode] = useState<'excel' | 'sheet' | 'paste'>('excel');
   const [sheetUrl, setSheetUrl] = useState('');
+  const [pasteText, setPasteText] = useState('');
   const [rows, setRows] = useState<unknown[][]>([]);
   const [headerRowIndex, setHeaderRowIndex] = useState(0);
   const [mapping, setMapping] = useState<CommunityColumnMapping>({ ten: -1, link: -1, quyMo: -1, loai: -1, chuDe: -1, insight: -1, gia: -1 });
@@ -106,6 +108,26 @@ export function CommunityImportModal({ isOpen, onClose, onApplied }: { isOpen: b
       acceptRows(jsonRows, file.name);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không đọc được file.');
+    } finally { setBusy(false); }
+  }
+
+  async function loadPaste() {
+    setBusy(true); setError('');
+    try {
+      const trimmed = pasteText.trim();
+      if (!trimmed) throw new Error('Vui lòng dán dữ liệu bảng tính vào khung.');
+      const wb = XLSX.read(trimmed, { type: 'string', raw: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const jsonRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false }) as unknown[][];
+      if (!jsonRows || !jsonRows.length) {
+        const lines = trimmed.split(/\r?\n/).map(l => l.split('\t').map(c => c.trim())).filter(r => r.some(c => c.length > 0));
+        if (lines.length < 2) throw new Error('Dữ liệu dán cần có ít nhất 1 dòng tiêu đề và 1 dòng dữ liệu.');
+        acceptRows(lines, 'Dán từ clipboard');
+      } else {
+        acceptRows(jsonRows, 'Dán từ clipboard');
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Không đọc được dữ liệu dán.');
     } finally { setBusy(false); }
   }
 
@@ -192,16 +214,112 @@ export function CommunityImportModal({ isOpen, onClose, onApplied }: { isOpen: b
 
         {step === 'source' && (
           <div className="space-y-4">
-            <label className="block text-sm">Link Google Sheet
-              <input className={field} value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…#gid=…" />
-            </label>
-            <button type="button" className={button} disabled={busy || !sheetUrl.trim()} onClick={loadSheet}>{busy ? 'Đang tải…' : 'Tải bảng từ Google Sheet'}</button>
-            <div className="border-t pt-3">
-              <label className="block text-sm">Hoặc tải file Excel/CSV
-                <input type="file" accept=".xlsx,.xls,.csv" className="mt-1 block text-sm" onChange={e => { const f = e.target.files?.[0]; if (f) loadFile(f); }} />
-              </label>
+            {/* 3 Cách đưa dữ liệu vào */}
+            <div className="flex bg-slate-100 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setSourceMode('excel')}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  sourceMode === 'excel'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Tải file Excel / CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => setSourceMode('sheet')}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  sourceMode === 'sheet'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Link Google Sheet
+              </button>
+              <button
+                type="button"
+                onClick={() => setSourceMode('paste')}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  sourceMode === 'paste'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Dán dữ liệu
+              </button>
             </div>
-            <p className="text-xs text-slate-500">Bảng tham chiếu gồm: tên, link, followers, loại, chủ đề, insight và giá bài đăng ảnh/video do khách hàng cung cấp. Các dòng tiêu đề nhóm, dòng trống và dòng liên hệ sẽ bị bỏ qua ở bước chuyển đổi.</p>
+
+            {sourceMode === 'excel' && (
+              <div className="p-4 border-2 border-dashed border-slate-300 rounded-xl space-y-2 text-center bg-slate-50/50">
+                <label className="block text-sm font-semibold text-slate-800 cursor-pointer">
+                  <span>Chọn file Excel (.xlsx, .xls) hoặc file .csv từ máy</span>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="mt-2 block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) loadFile(f);
+                    }}
+                  />
+                </label>
+              </div>
+            )}
+
+            {sourceMode === 'sheet' && (
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-slate-700">
+                  Đường link Google Sheet:
+                  <input
+                    className={field + ' mt-1'}
+                    value={sheetUrl}
+                    onChange={(e) => setSheetUrl(e.target.value)}
+                    placeholder="https://docs.google.com/spreadsheets/d/…#gid=…"
+                  />
+                </label>
+                <button
+                  type="button"
+                  className={button + ' cursor-pointer'}
+                  disabled={busy || !sheetUrl.trim()}
+                  onClick={loadSheet}
+                >
+                  {busy ? 'Đang tải bảng…' : 'Tải bảng từ Google Sheet'}
+                </button>
+              </div>
+            )}
+
+            {sourceMode === 'paste' && (
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-slate-700">
+                  Dán vùng dữ liệu từ Excel / Google Sheets:
+                  <textarea
+                    rows={6}
+                    className={field + ' mt-1 font-mono text-xs'}
+                    value={pasteText}
+                    onChange={(e) => setPasteText(e.target.value)}
+                    placeholder={`Sao chép các dòng cột từ bảng tính rồi dán vào đây...
+Ví dụ:
+Tên Fanpage/Group	Loại	Followers	Chủ đề	Giá bài đăng
+Hội Yêu Bếp	Group	850.000	Ẩm thực	5.000.000
+Gia Đình Trẻ	Fanpage	1.200.000	Gia đình	7.500.000`}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className={button + ' cursor-pointer'}
+                  disabled={busy || !pasteText.trim()}
+                  onClick={loadPaste}
+                >
+                  {busy ? 'Đang phân tích…' : 'Phân tích dữ liệu vừa dán'}
+                </button>
+              </div>
+            )}
+
+            <p className="text-xs text-slate-500">
+              Bảng tham chiếu gồm: tên, link, followers, loại, chủ đề, insight và giá bài đăng ảnh/video do khách hàng cung cấp. Các dòng tiêu đề nhóm, dòng trống và dòng liên hệ sẽ bị bỏ qua ở bước chuyển đổi.
+            </p>
           </div>
         )}
 
