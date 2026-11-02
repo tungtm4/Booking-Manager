@@ -46,6 +46,13 @@ import {
   findSheetByGidCsvFingerprint,
   isPackagePriceColumn,
 } from '../utils/spreadsheetImport';
+import { matchImportRow, normalizeChannelLink } from '../utils/importMatching';
+
+// Cách xử lý một dòng import do người dùng quyết trên bảng xem trước (Import-2)
+export type RowAction =
+  | { type: 'update'; kolId: string }
+  | { type: 'create' }
+  | { type: 'skip' };
 
 export interface ConflictItem {
   id: string;
@@ -610,8 +617,9 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
   const [excludedRows, setExcludedRows] = useState<ExcludedRowInfo[]>([]);
   const [showExcludedModal, setShowExcludedModal] = useState<boolean>(false);
 
-  // Khóa khớp: "name" (Tên KOL) hoặc "link" (Link kênh)
-  const [matchKey, setMatchKey] = useState<'name' | 'link'>('name');
+  // Import-2: khớp hồ sơ theo LINK kênh làm khóa chính (không còn chế độ khớp theo tên).
+  // Quyết định riêng của người dùng cho từng dòng trên bảng xem trước (Cần xác nhận / ghi đè mặc định).
+  const [rowActions, setRowActions] = useState<Record<number, RowAction>>({});
   const [overwriteEmpty, setOverwriteEmpty] = useState<boolean>(false);
 
   // Trạng thái từng dòng preview: checked
@@ -851,6 +859,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     setExcludedRows(excluded);
     setColumnMapping(newMapping);
     setAiColumnNotes(notes);
+    setRowActions({});
     setSelectedRowIndices(validDataRows.map((_, i) => i));
 
     const mappedCount = Object.values(newMapping).filter((v) => v !== null && v !== undefined && v >= 0).length;
@@ -1080,17 +1089,8 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     }
   };
 
-  // Helper chuẩn hóa so khớp
-  const normalizeName = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
-  const normalizeUrl = (s: string) =>
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/^https?:\/\//, '')
-      .replace(/^www\./, '')
-      .split('?')[0]
-      .split('#')[0]
-      .replace(/\/+$/, '');
+  // Helper chuẩn hóa link (dùng chung bộ quy tắc Import-2)
+  const normalizeUrl = (s: string) => normalizeChannelLink(s);
 
   // Phân tích trạng thái từng dòng (Tạo mới, Cập nhật, hoặc Lỗi) - Hỗ trợ nhiều nền tảng và 1 ô chứa link + follower
   const parsedPreviewRows = useMemo(() => {
@@ -1253,51 +1253,25 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
           kolData: null,
           matchedKol: null,
           isFuzzy: false,
+          matchKind: 'new' as const,
+          candidates: [] as KolProfile[],
+          conflictKol: null as KolProfile | null,
+          resemblesKol: null as KolProfile | null,
           warnings: rowWarnings,
           needsReview: true,
         };
       }
 
-      // 2. Tìm kiếm so khớp
-      let matchedKol: KolProfile | null = null;
-      let isFuzzy = false;
-      let sameNameDifferentLinkKol: KolProfile | null = null;
-
-      // Danh sách tất cả các link của dòng này
-      const allRowLinks = [
-        primaryLink,
-        ...channels.map((c) => c.linkProfile),
-      ]
-        .filter((l): l is string => Boolean(l && l.trim()))
-        .map(normalizeUrl);
-
-      if (matchKey === 'link') {
-        if (allRowLinks.length > 0) {
-          matchedKol =
-            kols.find((k) =>
-              k.nenTang?.some(
-                (nt) => nt.linkProfile && allRowLinks.includes(normalizeUrl(nt.linkProfile))
-              )
-            ) || null;
-        }
-
-        if (!matchedKol) {
-          const normTen = normalizeName(ten);
-          sameNameDifferentLinkKol = kols.find((k) => normalizeName(k.ten) === normTen) || null;
-        }
-      } else {
-        const normTen = normalizeName(ten);
-        matchedKol = kols.find((k) => normalizeName(k.ten) === normTen) || null;
-
-        if (!matchedKol) {
-          matchedKol =
-            kols.find((k) => {
-              const kName = normalizeName(k.ten);
-              return kName.includes(normTen) || normTen.includes(kName);
-            }) || null;
-          if (matchedKol) isFuzzy = true;
-        }
-      }
+      // 2. Đối chiếu hồ sơ (Import-2): LINK kênh là khóa chính; tên chỉ để cảnh báo, tuyệt đối không tự gộp
+      const match = matchImportRow(
+        {
+          ten,
+          channels: channels.map((c) => ({ platform: c.tenNenTang, link: c.linkProfile || '' })),
+        },
+        kols
+      );
+      const matchedKol: KolProfile | null =
+        match.kind === 'link_match' ? (match.kol as KolProfile) : null;
 
       const kolData = {
         ten,
@@ -1312,48 +1286,144 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
         emailZalo,
       };
 
-      if (matchedKol) {
-        let changedCount = 0;
-        if (channels.length > 0) changedCount += channels.length;
-        else if (totalFollowers !== undefined) changedCount++;
-        if (linhVuc.length > 0) changedCount++;
-        Object.values(bangGia).forEach((v) => {
-          if (v !== null) changedCount++;
-        });
+      let changedCount = 0;
+      if (channels.length > 0) changedCount += channels.length;
+      else if (totalFollowers !== undefined) changedCount++;
+      if (linhVuc.length > 0) changedCount++;
+      Object.values(bangGia).forEach((v) => {
+        if (v !== null) changedCount++;
+      });
 
+      // Khớp chắc chắn theo link -> cập nhật hồ sơ đó
+      if (match.kind === 'link_match' && matchedKol) {
         return {
           index,
           status: 'update' as const,
-          reason: `Khớp với ${matchedKol.ten}${isFuzzy ? ' (Khớp mờ)' : ''} • Cập nhật ~${changedCount} trường`,
+          reason: `Khớp link kênh với ${matchedKol.ten} • Cập nhật ~${changedCount} trường`,
           kolData,
           matchedKol,
-          isFuzzy,
+          isFuzzy: false,
+          matchKind: match.kind,
+          candidates: [] as KolProfile[],
+          conflictKol: null as KolProfile | null,
+          resemblesKol: null as KolProfile | null,
           warnings: rowWarnings,
           needsReview: rowNeedsReview,
         };
       }
 
-      let createReason =
-        channels.length > 1
-          ? `KOL mới (${channels.length} nền tảng)`
-          : 'KOL mới hoàn toàn';
-
-      if (matchKey === 'link' && sameNameDifferentLinkKol) {
-        createReason = `Tên trùng với ${sameNameDifferentLinkKol.ten} nhưng link khác — tạo mới theo chế độ khớp link`;
+      // Chưa đủ bằng chứng -> CẦN XÁC NHẬN: người dùng tự chọn Cập nhật hồ sơ nào / Tạo mới / Bỏ qua ngay trên dòng này
+      if (match.kind === 'link_multi' || match.kind === 'name_only') {
+        const candidates = match.candidates as KolProfile[];
+        const candidateNames = candidates.map((c) => c.ten).join(', ');
+        return {
+          index,
+          status: 'review' as const,
+          reason:
+            match.kind === 'link_multi'
+              ? `Link khớp với ${candidates.length} hồ sơ khác nhau (${candidateNames}) — cần xác nhận`
+              : `Trùng tên với ${candidateNames} nhưng không có link để đối chiếu — cần xác nhận`,
+          kolData,
+          matchedKol: null,
+          isFuzzy: false,
+          matchKind: match.kind,
+          candidates,
+          conflictKol: null as KolProfile | null,
+          resemblesKol: null as KolProfile | null,
+          warnings: rowWarnings,
+          needsReview: true,
+        };
       }
 
+      // Trùng/gần trùng tên nhưng link khác -> mặc định TẠO MỚI (có thể đổi sang Cập nhật trên dòng)
+      if (match.kind === 'name_conflict') {
+        const conflictKol = match.candidates[0] as KolProfile;
+        return {
+          index,
+          status: 'create' as const,
+          reason: `Tên ${match.via === 'exact' ? 'trùng' : 'gần giống'} "${conflictKol.ten}" nhưng link khác — mặc định tạo mới`,
+          kolData,
+          matchedKol: null,
+          isFuzzy: false,
+          matchKind: match.kind,
+          candidates: match.candidates as KolProfile[],
+          conflictKol,
+          resemblesKol: null as KolProfile | null,
+          warnings: [
+            ...rowWarnings,
+            `Link khác với hồ sơ "${conflictKol.ten}" — nếu đây là cùng một người, hãy đổi cách xử lý sang Cập nhật hồ sơ đó.`,
+          ],
+          needsReview: rowNeedsReview,
+        };
+      }
+
+      // Hồ sơ mới hoàn toàn (kèm cảnh báo nếu tên gần giống một hồ sơ sẵn có dạng chuỗi con)
+      const createWarnings = [...rowWarnings];
+      const resemblesKol = (match.resemblesKol as KolProfile) || null;
+      if (resemblesKol) {
+        createWarnings.push(
+          `Tên gần giống hồ sơ "${resemblesKol.ten}" — nếu là cùng một người, hãy đổi cách xử lý sang Cập nhật hồ sơ đó.`
+        );
+      }
       return {
         index,
         status: 'create' as const,
-        reason: createReason,
+        reason:
+          channels.length > 1 ? `KOL mới (${channels.length} nền tảng)` : 'KOL mới hoàn toàn',
         kolData,
         matchedKol: null,
         isFuzzy: false,
-        warnings: rowWarnings,
+        matchKind: match.kind,
+        candidates: [] as KolProfile[],
+        conflictKol: null as KolProfile | null,
+        resemblesKol,
+        warnings: createWarnings,
         needsReview: rowNeedsReview,
       };
     });
-  }, [rawRows, fileHeaders, columnMapping, matchKey, kols]);
+  }, [rawRows, fileHeaders, columnMapping, kols]);
+
+  // ---- Import-2: Lớp quyết định xử lý từng dòng ----
+  // Ưu tiên lựa chọn của người dùng trên bảng xem trước; chưa chọn thì dùng mặc định theo đối chiếu.
+  // Dòng 'review' (Cần xác nhận) chưa chọn = CHƯA quyết định -> không được ghi.
+  const resolveRowAction = (r: (typeof parsedPreviewRows)[number]): RowAction | null => {
+    const chosen = rowActions[r.index];
+    if (chosen) return chosen;
+    if (r.status === 'update' && r.matchedKol) return { type: 'update', kolId: r.matchedKol.id };
+    if (r.status === 'create') return { type: 'create' };
+    return null;
+  };
+
+  // Gắn quyết định vào dòng: dòng cập nhật mang theo đúng hồ sơ đích (kể cả hồ sơ người dùng chọn ở nhóm Cần xác nhận)
+  const toEffectiveRow = (r: (typeof parsedPreviewRows)[number], action: RowAction) => {
+    if (action.type === 'update') {
+      const target = kols.find((k) => k.id === action.kolId) || null;
+      return { ...r, status: 'update' as const, matchedKol: target } as (typeof parsedPreviewRows)[number];
+    }
+    return { ...r, status: 'create' as const, matchedKol: null } as (typeof parsedPreviewRows)[number];
+  };
+
+  // Danh sách dòng THỰC SỰ sẽ ghi: đã tick chọn + không lỗi + đã có quyết định + không bị bỏ qua
+  const effectiveSelectedRows = useMemo(() => {
+    const out: Array<ReturnType<typeof toEffectiveRow>> = [];
+    parsedPreviewRows.forEach((r) => {
+      if (!selectedRowIndices.includes(r.index) || r.status === 'error' || !r.kolData) return;
+      const action = resolveRowAction(r);
+      if (!action || action.type === 'skip') return;
+      out.push(toEffectiveRow(r, action));
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parsedPreviewRows, selectedRowIndices, rowActions, kols]);
+
+  // Số dòng đã tick nhưng thuộc nhóm Cần xác nhận và chưa được xử lý (sẽ bị bỏ qua khi import)
+  const unresolvedSelectedCount = useMemo(
+    () =>
+      parsedPreviewRows.filter(
+        (r) => selectedRowIndices.includes(r.index) && r.status === 'review' && !rowActions[r.index]
+      ).length,
+    [parsedPreviewRows, selectedRowIndices, rowActions]
+  );
 
   // Xử lý Checkbox
   const handleToggleSelectAll = (checked: boolean) => {
@@ -1561,30 +1631,17 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     };
   };
 
-  // Tính số lượng tạo mới và cập nhật trong bảng xác minh (tính động theo các KOL bị bỏ qua và lựa chọn khớp mờ)
+  // Tính số lượng tạo mới và cập nhật trong bảng xác minh — dựa trên QUYẾT ĐỊNH hiệu lực của từng dòng (Import-2)
   const verificationCounts = useMemo(() => {
-    const validSelected = parsedPreviewRows.filter(
-      (r) => selectedRowIndices.includes(r.index) && r.status !== 'error' && r.kolData
-    );
+    // Tạo mới: các dòng hiệu lực là tạo mới (không nằm trong bảng xác minh — bảng đó chỉ chứa dòng cập nhật)
+    const createCount = effectiveSelectedRows.filter((r) => r.status === 'create').length;
 
-    // 1. Số lượng tạo mới ban đầu (các dòng có status === 'create')
-    let createCount = validSelected.filter((r) => r.status === 'create').length;
-
-    // Cộng thêm các dòng khớp mờ trong verificationDiffs được chọn "Tạo hồ sơ mới" (mặc định) và không bị bỏ qua
-    verificationDiffs.forEach((d) => {
-      const res = kolResolutions[d.rowIndex];
-      if (!res?.skipped && d.isFuzzy && (res?.fuzzyAction === 'create_new' || !res?.fuzzyAction)) {
-        createCount++;
-      }
-    });
-
-    // 2. Số lượng cập nhật:
-    // Các dòng cập nhật không nằm trong verificationDiffs (khớp chính xác, không có xung đột)
-    const nonVerificationUpdateCount = validSelected.filter(
+    // Cập nhật ngoài bảng xác minh (không có xung đột dữ liệu)
+    const nonVerificationUpdateCount = effectiveSelectedRows.filter(
       (r) => r.status === 'update' && !verificationDiffs.some((d) => d.rowIndex === r.index)
     ).length;
 
-    // Các dòng cập nhật trong verificationDiffs (không bị bỏ qua, và nếu khớp mờ thì phải được chọn 'merge_existing')
+    // Cập nhật trong bảng xác minh (không bị bỏ qua)
     const activeVerifiedUpdateCount = verificationDiffs.filter((d) => {
       const res = kolResolutions[d.rowIndex];
       if (res?.skipped) return false;
@@ -1592,21 +1649,16 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       return true;
     }).length;
 
-    const totalUpdateCount = nonVerificationUpdateCount + activeVerifiedUpdateCount;
-
     return {
       createCount,
-      updateCount: totalUpdateCount,
+      updateCount: nonVerificationUpdateCount + activeVerifiedUpdateCount,
     };
-  }, [parsedPreviewRows, selectedRowIndices, verificationDiffs, kolResolutions]);
+  }, [effectiveSelectedRows, verificationDiffs, kolResolutions]);
 
   // Gom toàn bộ danh sách tự bổ sung của các KOL được cập nhật
   const allAutoAdditions = useMemo(() => {
-    const validSelected = parsedPreviewRows.filter(
-      (r) => selectedRowIndices.includes(r.index) && r.status !== 'error' && r.kolData
-    );
     const items: AutoAddItem[] = [];
-    validSelected.forEach((r) => {
+    effectiveSelectedRows.forEach((r) => {
       if (r.status === 'update') {
         const diff = computeKolDiff(r);
         if (diff && diff.autoAdditions.length > 0) {
@@ -1615,7 +1667,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       }
     });
     return items;
-  }, [parsedPreviewRows, selectedRowIndices]);
+  }, [effectiveSelectedRows]);
 
   // Xử lý chọn nhanh toàn cục: "Tất cả giữ cũ" hoặc "Tất cả lấy mới"
   const handleSetAllGlobal = (choice: 'keep_old' | 'take_new') => {
@@ -1711,10 +1763,16 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
   // Thực thi Import trực tiếp khi KHÔNG có xung đột nào — tính gộp trên danh sách hiện tại
   // rồi ghi các hồ sơ thay đổi lên kho server
   const executeDirectImport = async (validSelected: typeof parsedPreviewRows) => {
-    const payload = validSelected.map((r) => r.kolData!);
+    // Mọi dòng đều mang quyết định tường minh từ preview (Import-2): cập nhật đúng hồ sơ đích / ép tạo mới.
+    // Bước ghi KHÔNG khớp lại theo tên — tránh lệch quyết định giữa xem trước và lúc ghi.
+    const payload = validSelected.map((r) =>
+      r.status === 'update' && r.matchedKol
+        ? { ...r.kolData!, targetKolId: r.matchedKol.id }
+        : { ...r.kolData!, forceCreate: true }
+    );
     let result: { created: number; updated: number };
     try {
-      const merged = applyImportBatchToList(kols, payload, matchKey, overwriteEmpty);
+      const merged = applyImportBatchToList(kols, payload, 'link', overwriteEmpty);
       if (merged.changed.length) {
         const res = await CatalogService.bulkUpdateProfiles(merged.changed);
         result = { created: res.added.length, updated: res.updated.length };
@@ -1776,13 +1834,22 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
 
   // Khi bấm nút Import trên giao diện (Yêu cầu 1 & 2 & Phần C)
   const handleExecuteImport = () => {
-    const validSelected = parsedPreviewRows.filter(
-      (r) => selectedRowIndices.includes(r.index) && r.status !== 'error' && r.kolData
-    );
+    // Chỉ ghi các dòng ĐÃ CÓ QUYẾT ĐỊNH (Import-2): dòng Cần xác nhận chưa xử lý sẽ bị bỏ qua
+    const validSelected = effectiveSelectedRows;
 
     if (validSelected.length === 0) {
-      showToast('Vui lòng chọn ít nhất 1 dòng hợp lệ để import!');
+      showToast(
+        unresolvedSelectedCount > 0
+          ? `Có ${unresolvedSelectedCount} dòng Cần xác nhận chưa được xử lý — hãy chọn cách xử lý cho từng dòng trước khi import!`
+          : 'Vui lòng chọn ít nhất 1 dòng hợp lệ để import!'
+      );
       return;
+    }
+
+    if (unresolvedSelectedCount > 0) {
+      showToast(
+        `Lưu ý: ${unresolvedSelectedCount} dòng Cần xác nhận chưa xử lý sẽ KHÔNG được import trong lần này.`
+      );
     }
 
     // Tính toán chênh lệch cho các dòng update
@@ -1830,9 +1897,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
 
   // Áp dụng lựa chọn khi bấm "Xác nhận import" trong bảng xác minh (Yêu cầu 3 & Phần C)
   const handleConfirmVerification = async () => {
-    const validSelected = parsedPreviewRows.filter(
-      (r) => selectedRowIndices.includes(r.index) && r.status !== 'error' && r.kolData
-    );
+    const validSelected = effectiveSelectedRows;
 
     // 1. Dựng payload đã xử lý cho các dòng đã qua xác minh
     const verifiedUpdatePayload: any[] = [];
@@ -1904,7 +1969,12 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       return !isHandledInDiffs;
     });
 
-    const remainingPayload = remainingSelected.map((r) => r.kolData!);
+    // Quyết định tường minh từ preview (Import-2) — giống hệt nhánh import trực tiếp
+    const remainingPayload = remainingSelected.map((r) =>
+      r.status === 'update' && r.matchedKol
+        ? { ...r.kolData!, targetKolId: r.matchedKol.id }
+        : { ...r.kolData!, forceCreate: true }
+    );
 
     // 3. Thực thi import lên kho server: chạy cùng thuật toán gộp theo từng nhóm trên danh sách
     // đang tiến triển (nhóm sau thấy kết quả của nhóm trước như trước đây), rồi ghi một lần lên server.
@@ -1912,7 +1982,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
     const changedById = new Map<string, KolProfile>();
     const runGroup = (payload: any[], ow: boolean) => {
       if (!payload.length) return { created: 0, updated: 0 };
-      const r = applyImportBatchToList(evolving, payload, matchKey, ow);
+      const r = applyImportBatchToList(evolving, payload, 'link', ow);
       evolving = r.kols;
       r.changed.forEach((prof) => changedById.set(prof.id, prof));
       return r;
@@ -2341,32 +2411,12 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
                 <span>Quét & Tự Nhận Diện Lại Cột</span>
               </button>
 
-              {/* Chọn Khóa Khớp */}
-              <div className="flex items-center gap-3 bg-slate-50 p-1.5 rounded-xl border border-slate-200 text-xs">
-                <span className="font-bold text-slate-700">Khóa khớp:</span>
-                <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-800">
-                  <input
-                    type="radio"
-                    name="matchKey"
-                    value="name"
-                    checked={matchKey === 'name'}
-                    onChange={() => setMatchKey('name')}
-                    className="text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span>Tên KOL</span>
-                </label>
-
-                <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-800">
-                  <input
-                    type="radio"
-                    name="matchKey"
-                    value="link"
-                    checked={matchKey === 'link'}
-                    onChange={() => setMatchKey('link')}
-                    className="text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span>Link Kênh</span>
-                </label>
+              {/* Import-2: khóa khớp cố định theo link kênh */}
+              <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-600">
+                <LinkIcon className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                <span>
+                  <strong className="text-slate-800">Khớp hồ sơ theo link kênh</strong> — tên chỉ dùng để cảnh báo trùng/gần giống, không tự gộp.
+                </span>
               </div>
             </div>
           </div>
@@ -2590,7 +2640,7 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
                 <span>3. Bảng Xem Trước Kết Quả Import ({parsedPreviewRows.length} dòng)</span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Kiểm tra trạng thái Tạo Mới / Cập Nhật và tick chọn những dòng bạn muốn nạp vào hệ thống.
+                Kiểm tra trạng thái Tạo Mới / Cập Nhật và tick chọn những dòng bạn muốn nạp vào hệ thống. Dòng <strong className="text-violet-700">Cần xác nhận</strong> phải được chọn cách xử lý ngay trên dòng đó mới được nạp.
               </p>
             </div>
 
@@ -2784,36 +2834,127 @@ Phạm Quỳnh Anh	TikTok	1.850.000	Ẩm thực	25.000.000
 
                       {/* Trạng thái */}
                       <td className="px-3 py-3 text-center">
-                        {r.status === 'error' ? (
-                          <span className="px-2.5 py-1 bg-red-100 text-red-800 border border-red-300 rounded-md font-bold text-[11px] inline-flex items-center gap-1">
-                            <AlertCircle className="w-3.5 h-3.5" />
-                            <span>Lỗi: {r.reason}</span>
-                          </span>
-                        ) : r.status === 'update' ? (
-                          <div className="space-y-1 inline-block text-left">
-                            <span className="px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded-md font-bold text-[11px] inline-flex items-center gap-1">
-                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                              <span>{r.reason}</span>
-                            </span>
-                            {(r as any).warnings?.length > 0 && (
-                              <div className="text-[10px] text-amber-800 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">
-                                ⚠️ {(r as any).warnings[0]}
+                        {(() => {
+                          const chosen = rowActions[r.index];
+                          const relatedKol =
+                            r.status === 'create' ? r.conflictKol || r.resemblesKol : null;
+                          const showActionSelect = r.status === 'review' || Boolean(relatedKol);
+                          const selectValue = !chosen
+                            ? ''
+                            : chosen.type === 'update'
+                            ? `update:${chosen.kolId}`
+                            : chosen.type;
+                          const actionSelect = showActionSelect ? (
+                            <select
+                              value={selectValue}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setRowActions((prev) => {
+                                  const next = { ...prev };
+                                  if (!v) delete next[r.index];
+                                  else if (v === 'create') next[r.index] = { type: 'create' };
+                                  else if (v === 'skip') next[r.index] = { type: 'skip' };
+                                  else if (v.startsWith('update:'))
+                                    next[r.index] = { type: 'update', kolId: v.slice('update:'.length) };
+                                  return next;
+                                });
+                              }}
+                              className="mt-1.5 w-full max-w-[240px] px-2 py-1 text-[11px] bg-white border border-indigo-300 rounded-lg font-semibold text-indigo-900 focus:outline-hidden cursor-pointer"
+                            >
+                              {r.status === 'review' ? (
+                                <>
+                                  <option value="">— Chọn cách xử lý —</option>
+                                  {r.candidates.map((c) => (
+                                    <option key={c.id} value={`update:${c.id}`}>
+                                      Cập nhật hồ sơ: {c.ten}
+                                    </option>
+                                  ))}
+                                  <option value="create">Tạo hồ sơ mới</option>
+                                  <option value="skip">Bỏ qua dòng này</option>
+                                </>
+                              ) : (
+                                <>
+                                  <option value="">Tạo hồ sơ mới (mặc định)</option>
+                                  {relatedKol && (
+                                    <option value={`update:${relatedKol.id}`}>
+                                      Cập nhật hồ sơ: {relatedKol.ten}
+                                    </option>
+                                  )}
+                                  <option value="create">Tạo hồ sơ mới</option>
+                                  <option value="skip">Bỏ qua dòng này</option>
+                                </>
+                              )}
+                            </select>
+                          ) : null;
+
+                          if (r.status === 'error') {
+                            return (
+                              <span className="px-2.5 py-1 bg-red-100 text-red-800 border border-red-300 rounded-md font-bold text-[11px] inline-flex items-center gap-1">
+                                <AlertCircle className="w-3.5 h-3.5" />
+                                <span>Lỗi: {r.reason}</span>
+                              </span>
+                            );
+                          }
+
+                          if (chosen?.type === 'skip') {
+                            return (
+                              <div className="space-y-1 inline-block text-left">
+                                <span className="px-2.5 py-1 bg-slate-100 text-slate-700 border border-slate-300 rounded-md font-bold text-[11px] inline-flex items-center gap-1">
+                                  <span>Bỏ qua dòng này (theo lựa chọn của bạn)</span>
+                                </span>
+                                {actionSelect}
                               </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="space-y-1 inline-block text-left">
-                            <span className="px-2.5 py-1 bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-md font-bold text-[11px] inline-flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>{r.reason}</span>
-                            </span>
-                            {(r as any).warnings?.length > 0 && (
-                              <div className="text-[10px] text-amber-800 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">
-                                ⚠️ {(r as any).warnings[0]}
+                            );
+                          }
+
+                          if (r.status === 'review') {
+                            return (
+                              <div className="space-y-1 inline-block text-left">
+                                <span className="px-2.5 py-1 bg-violet-100 text-violet-900 border border-violet-300 rounded-md font-bold text-[11px] inline-flex items-center gap-1">
+                                  <HelpCircle className="w-3.5 h-3.5 text-violet-600" />
+                                  <span>Cần xác nhận: {r.reason}</span>
+                                </span>
+                                {r.warnings?.length > 0 && (
+                                  <div className="text-[10px] text-amber-800 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">
+                                    ⚠️ {r.warnings[0]}
+                                  </div>
+                                )}
+                                {actionSelect}
                               </div>
-                            )}
-                          </div>
-                        )}
+                            );
+                          }
+
+                          if (r.status === 'update') {
+                            return (
+                              <div className="space-y-1 inline-block text-left">
+                                <span className="px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded-md font-bold text-[11px] inline-flex items-center gap-1">
+                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                                  <span>{r.reason}</span>
+                                </span>
+                                {r.warnings?.length > 0 && (
+                                  <div className="text-[10px] text-amber-800 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">
+                                    ⚠️ {r.warnings[0]}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="space-y-1 inline-block text-left">
+                              <span className="px-2.5 py-1 bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-md font-bold text-[11px] inline-flex items-center gap-1">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>{r.reason}</span>
+                              </span>
+                              {r.warnings?.length > 0 && (
+                                <div className="text-[10px] text-amber-800 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">
+                                  ⚠️ {r.warnings[0]}
+                                </div>
+                              )}
+                              {actionSelect}
+                            </div>
+                          );
+                        })()}
                       </td>
                     </tr>
                   );

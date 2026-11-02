@@ -5,6 +5,7 @@
 
 import { INITIAL_SAMPLE_KOLS } from '../data/sampleData';
 import { CollaborationHistory, KolProfile, RatingReview, SowQuote, ImportHistoryEntry } from '../types/kol';
+import { normalizeChannelLink } from '../utils/importMatching';
 
 const STORAGE_KEYS = {
   KOLS: 'kol_booking_manager_kols_v1',
@@ -66,15 +67,8 @@ export function applyImportBatchToList(
     let updatedCount = 0;
 
     const normalizeName = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
-    const normalizeUrl = (s: string) =>
-      s
-        .toLowerCase()
-        .trim()
-        .replace(/^https?:\/\//, '')
-        .replace(/^www\./, '')
-        .split('?')[0]
-        .split('#')[0]
-        .replace(/\/+$/, '');
+    // Chuẩn hóa link dùng chung với bước xem trước (Import-2): cùng một quy tắc ở cả 2 bước
+    const normalizeUrl = (s: string) => normalizeChannelLink(s);
 
     items.forEach((item) => {
       if (!item.ten || !item.ten.trim()) return;
