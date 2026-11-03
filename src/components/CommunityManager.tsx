@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, Upload, Plus, Eye, Edit2, Trash2, LayoutGrid, List, Scale, Tag, Filter, ChevronUp, ChevronDown, RotateCcw } from 'lucide-react';
+import { Search, Upload, Plus, Eye, Edit2, Trash2, LayoutGrid, List, Scale, Tag, Filter, ChevronUp, ChevronDown, RotateCcw, AlertCircle } from 'lucide-react';
 import type { CommunityProfile, CommunityService } from '../types/community';
 import { COMMUNITY_KIND_LABELS, COMMUNITY_METRIC_LABELS, COMMUNITY_SERVICE_UNIT_SUGGESTIONS } from '../types/community';
 import { CommunityService as CommunityApi, type CatalogCommunity } from '../services/communityService';
@@ -9,7 +9,7 @@ import { CommunityCompareModal } from './CommunityCompareModal';
 import { PartnerSigningPanel, confirmDiscardSigningChanges } from './PartnerSigningPanel';
 import { PartnerContractsList } from './PartnerContractsList';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
-import { formatDateTimeVN, formatVND, formatNumberOnly } from '../utils/formatters';
+import { formatDateTimeVN, formatVND, formatNumberOnly, getCategoryBadgeClass } from '../utils/formatters';
 import { paginateItems, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../utils/pagination';
 
 // Kho Community (Fanpage/Group) — dữ liệu chính thức trên server.
@@ -240,7 +240,7 @@ export function CommunityManager({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6 pb-12">
       {/* Top Banner (Chỉ hiện khi không ẩn top header) */}
       {!hideTopHeader && (
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -575,27 +575,27 @@ export function CommunityManager({
         <p className="text-slate-500 text-sm py-4">Đang tải kho Community…</p>
       ) : (
         <div className="space-y-3">
-          {/* Thanh chọn tất cả + so sánh — gương danh sách KOL */}
-          <div className="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2">
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+          {/* Thanh chọn tất cả + so sánh — đúng khuôn thanh Chọn tất cả bên KOL (khung, cỡ chữ, in đậm) */}
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-white px-4 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-600 shadow-xs">
+            <label className="flex items-center gap-2.5 cursor-pointer font-medium select-none hover:text-slate-900">
               <input
                 type="checkbox"
                 aria-label="Chọn tất cả Community đang hiển thị"
-                className="w-4 h-4 accent-indigo-600"
+                className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
                 checked={allFilteredSelected}
                 onChange={toggleSelectAll}
               />
               <span>
-                Chọn tất cả <strong className="text-slate-900">({filtered.length.toLocaleString('vi-VN')} Community đang hiển thị)</strong>
+                Chọn tất cả <strong className="text-slate-900 font-bold">({filtered.length.toLocaleString('vi-VN')} Community đang hiển thị)</strong>
               </span>
             </label>
-            {selectedIds.length > 0 ? (
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-slate-500">
-                  Đã chọn <strong className="text-slate-900">{selectedIds.length}</strong>
-                  {selectedIds.length > 4 && <span className="text-amber-700"> — so sánh tối đa 4, hãy bỏ bớt {selectedIds.length - 4}</span>}
-                  {selectedIds.length === 1 && <span> — chọn thêm ít nhất 1 để so sánh</span>}
+            {selectedIds.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
+                  Đã chọn {selectedIds.length} Community
                 </span>
+                {selectedIds.length > 4 && <span className="text-[11px] text-amber-700">So sánh tối đa 4 — bỏ bớt {selectedIds.length - 4}</span>}
+                {selectedIds.length === 1 && <span className="text-[11px] text-slate-500">Chọn thêm ít nhất 1 để so sánh</span>}
                 <button
                   type="button"
                   disabled={!canCompare}
@@ -608,8 +608,6 @@ export function CommunityManager({
                   Bỏ chọn
                 </button>
               </div>
-            ) : (
-              <span className="text-[11px] text-slate-400">Tích chọn 2–4 hồ sơ để so sánh giá cạnh nhau</span>
             )}
           </div>
           <div className={viewMode === 'grid' ? 'grid sm:grid-cols-2 xl:grid-cols-3 gap-3 items-start' : 'space-y-3'}>
@@ -620,18 +618,20 @@ export function CommunityManager({
                 (viewMode === 'grid'
                   ? 'bg-white rounded-xl border p-2 flex flex-col gap-3 transition-all hover:border-indigo-300 '
                   : 'bg-white rounded-xl border p-2 flex flex-col md:flex-row md:items-center gap-3 transition-all hover:border-indigo-300 ')
-                + (selectedIds.includes(c.id) ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-slate-200')
+                + (selectedIds.includes(c.id) ? 'border-indigo-500 ring-2 ring-indigo-100 bg-indigo-50/15' : 'border-slate-200')
               }
             >
               {/* Khối trái: Ô chọn so sánh + Avatar + Tên + Nhãn + Quy mô + Tag + Meta */}
               <div className="flex items-start gap-3 min-w-0 flex-1">
-                <input
-                  type="checkbox"
-                  aria-label={'Chọn so sánh ' + c.ten}
-                  className="mt-1 shrink-0 w-4 h-4 accent-indigo-600 cursor-pointer"
-                  checked={selectedIds.includes(c.id)}
-                  onChange={() => toggleSelected(c.id)}
-                />
+                <div className="shrink-0 self-center">
+                  <input
+                    type="checkbox"
+                    aria-label={'Chọn so sánh ' + c.ten}
+                    className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                    checked={selectedIds.includes(c.id)}
+                    onChange={() => toggleSelected(c.id)}
+                  />
+                </div>
                 {/* Avatar chữ cái đầu (w-9 h-9) */}
                 <div className="w-9 h-9 rounded-full overflow-hidden bg-indigo-100 text-indigo-700 font-bold text-xs border border-indigo-200 shrink-0 flex items-center justify-center">
                   {c.ten.slice(0, 2).toUpperCase()}
@@ -679,7 +679,7 @@ export function CommunityManager({
                           {(c.linhVuc ?? []).slice(0, 2).map((cat) => (
                             <span
                               key={cat}
-                              className="text-[10px] px-2 py-0.5 rounded-md font-medium bg-slate-100 text-slate-700 border border-slate-200"
+                              className={`text-[10px] px-2 py-0.5 rounded-md font-medium ${getCategoryBadgeClass(cat)}`}
                             >
                               {cat}
                             </span>
@@ -722,25 +722,25 @@ export function CommunityManager({
                 {/* Bảng chip giá 3 cột x 2 hàng */}
                 <div className="grid grid-cols-3 gap-1 flex-1 self-center">
                   {(c.dichVu ?? []).slice(0, 6).map((s) => {
-                    const hasPrice = s.giaThamKhao != null && s.giaThamKhao > 0;
+                    // Giá 0đ là giá THẬT (đã chốt ở đợt sửa lỗi giá 0) — chỉ "chưa nhập" (null) mới là chưa có giá.
+                    const hasPrice = s.giaThamKhao != null;
                     return (
                       <div
                         key={s.id}
                         title={`${s.ten} (${s.donVi}): ${hasPrice ? formatVND(s.giaThamKhao!) : 'Chưa có giá'}${s.dieuKien ? ` - ${s.dieuKien}` : ''}`}
-                        className={`text-[11px] px-1.5 py-0.5 rounded-md border truncate whitespace-nowrap transition-all ${
+                        className={`flex items-baseline gap-1 text-[11px] px-1.5 py-0.5 rounded-md border transition-all ${
                           hasPrice
                             ? 'bg-purple-50/70 border-purple-200 text-purple-900'
                             : 'bg-slate-50 border-slate-200 text-slate-400'
                         }`}
                       >
-                        {/* Giá đặt TRƯỚC tên dịch vụ và in đậm: tên dài bị cắt ở cuối chip cũng không che mất giá */}
+                        {/* Đúng khuôn chip giá KOL: "Tên: " font-medium TRƯỚC, giá in đậm SAU.
+                            Tên được cắt gọn (truncate) còn giá luôn nguyên vẹn ở cuối chip. */}
+                        <span className={`truncate min-w-0 ${hasPrice ? 'font-medium' : 'font-normal'}`}>{s.ten}:</span>
                         {hasPrice ? (
-                          <>
-                            <span className="font-bold">{formatNumberOnly(s.giaThamKhao!)}đ</span>
-                            <span className="font-medium"> · {s.ten}</span>
-                          </>
+                          <span className="font-bold shrink-0">{formatNumberOnly(s.giaThamKhao!)}đ</span>
                         ) : (
-                          <span className="font-normal">{s.ten}: —</span>
+                          <span className="shrink-0">—</span>
                         )}
                       </div>
                     );
@@ -763,11 +763,11 @@ export function CommunityManager({
                     type="button"
                     onClick={() => toggleSelected(c.id)}
                     aria-pressed={selectedIds.includes(c.id)}
-                    title="Chọn/bỏ chọn hồ sơ này để so sánh"
-                    className={'flex items-center justify-center gap-1 px-1.5 py-1 text-[11px] font-semibold rounded-lg transition-colors w-full cursor-pointer ' + (selectedIds.includes(c.id) ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'text-slate-600 bg-slate-100 hover:bg-slate-200')}
+                    title={selectedIds.includes(c.id) ? 'Bỏ so sánh' : 'Chọn/bỏ chọn hồ sơ này để so sánh'}
+                    className={'flex items-center justify-center gap-1 px-1.5 py-1 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer w-full ' + (selectedIds.includes(c.id) ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs' : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-300')}
                   >
                     <Scale className="w-3.5 h-3.5" />
-                    <span>So sánh</span>
+                    <span>{selectedIds.includes(c.id) ? 'Đã chọn' : 'So sánh'}</span>
                   </button>
 
                   <button
@@ -786,7 +786,7 @@ export function CommunityManager({
                         onClick={() => startEdit(c)}
                         title="Chỉnh sửa hồ sơ"
                         disabled={busy}
-                        className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer flex-1 flex justify-center"
+                        className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
@@ -796,7 +796,7 @@ export function CommunityManager({
                         onClick={() => remove(c)}
                         title="Xóa hồ sơ"
                         disabled={busy}
-                        className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer flex-1 flex justify-center"
+                        className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -807,7 +807,41 @@ export function CommunityManager({
             </article>
           ))}
           </div>
-          {!filtered.length && <p className="border border-dashed rounded-2xl p-8 text-center text-slate-500">Chưa có Community nào khớp. {isAdmin ? 'Thêm thủ công hoặc nhập từ Sheet/Excel.' : ''}</p>}
+          {!filtered.length && items.length === 0 && (
+            <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-xs">
+              <AlertCircle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <h3 className="text-base font-bold text-slate-800">Chưa có Community nào trong kho</h3>
+              <p className="text-sm text-slate-500 mt-1 max-w-md mx-auto">
+                Kho Community trên máy chủ hiện đang trống. {isAdmin ? 'Hãy thêm hồ sơ thủ công hoặc Nhập dữ liệu từ file Excel/Google Sheet.' : 'Quản trị viên (Admin) là người thêm và nhập hồ sơ mới vào kho.'}
+              </p>
+              {isAdmin && (
+                <button type="button" onClick={startNew} className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold cursor-pointer">
+                  Thêm Community thủ công
+                </button>
+              )}
+            </div>
+          )}
+          {!filtered.length && items.length > 0 && (
+            <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-xs">
+              <AlertCircle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <h3 className="text-base font-bold text-slate-800">Không tìm thấy Community phù hợp</h3>
+              <p className="text-sm text-slate-500 mt-1 max-w-md mx-auto">
+                Không có hồ sơ nào khớp với toàn bộ các tiêu chí lọc đã chọn. Hãy thử nới lỏng ngân sách, khoảng quy mô hoặc bỏ bớt tag lĩnh vực.
+              </p>
+              <div className="flex gap-2 justify-center mt-4 flex-wrap">
+                {hasActiveFilters && (
+                  <button type="button" onClick={resetFilters} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold cursor-pointer">
+                    Xóa bộ lọc
+                  </button>
+                )}
+                {isAdmin && (
+                  <button type="button" onClick={startNew} className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold cursor-pointer">
+                    Thêm Community mới
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           {filtered.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600 pt-1">
               <div className="flex items-center gap-2">

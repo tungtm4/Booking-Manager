@@ -27,7 +27,7 @@ test('Community hiển thị giá (a): Giá từ cột giá của bảng vào đ
   assert.equal(profiles[2].dichVu[0].giaThamKhao, null);
 });
 
-test('Community hiển thị giá (b): Mã nguồn — xem trước hiện giá, kết quả báo rõ số thay đổi, thẻ danh sách để giá trước tên', () => {
+test('Community hiển thị giá (b): Mã nguồn — xem trước hiện giá, kết quả báo rõ số thay đổi, chip danh sách theo khuôn KOL (tên trước, giá đậm sau)', () => {
   const modalCode = readFileSync(new URL('../src/components/CommunityImportModal.tsx', import.meta.url), 'utf8');
   const catalogCode = readFileSync(new URL('../src/components/PartnerCatalogManager.tsx', import.meta.url), 'utf8');
   const managerCode = readFileSync(new URL('../src/components/CommunityManager.tsx', import.meta.url), 'utf8');
@@ -49,8 +49,11 @@ test('Community hiển thị giá (b): Mã nguồn — xem trước hiện giá,
     catalogCode.includes('không có thay đổi'),
     'Thông báo phải nói rõ khi toàn bộ hồ sơ đã có sẵn và không đổi'
   );
-  // 4. Thẻ Community ở danh sách: giá in đậm đặt trước tên dịch vụ để không bị cắt mất
+  // 4. Chip giá ở thẻ danh sách — ĐỔI ngày 03/11/2026 theo yêu cầu đồng nhất UI/UX với kho KOL
+  // (thay quy tắc "giá trước tên" cũ): đúng khuôn chip KOL = tên dịch vụ + ": " (font-medium)
+  // TRƯỚC, giá in đậm SAU; tên được truncate còn giá shrink-0 nên vẫn không bao giờ bị cắt mất.
+  const nameIdx = managerCode.indexOf('>{s.ten}:</span>');
   const chipIdx = managerCode.indexOf('formatNumberOnly(s.giaThamKhao!)}đ');
-  const nameIdx = managerCode.indexOf('· {s.ten}', chipIdx);
-  assert.ok(chipIdx > 0 && nameIdx > chipIdx, 'Chip danh sách phải render giá trước tên dịch vụ');
+  assert.ok(nameIdx > 0 && chipIdx > nameIdx, 'Chip danh sách phải render tên dịch vụ trước, giá in đậm sau (khuôn KOL)');
+  assert.ok(managerCode.includes("const hasPrice = s.giaThamKhao != null;"), 'Giá 0đ phải được coi là có giá (chỉ null mới là chưa có giá)');
 });

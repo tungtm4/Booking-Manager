@@ -348,9 +348,10 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
         </div>
       )}
 
-      {/* Tab 2: Community */}
+      {/* Tab 2: Community — KHÔNG bọc thẻ trắng (giống hệt tab KOL): các khối của Community
+          phải nổi tách trên nền trang thì mới thấy khoảng tách khối như bên KOL */}
       {tab === 'community' && (
-        <div className="bg-white p-6 rounded-3xl border border-purple-100 shadow-xs">
+        <div className="space-y-4">
           <CommunityManager
             key={communityReloadKey}
             isAdmin={isAdmin}
