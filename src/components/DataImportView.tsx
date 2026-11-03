@@ -42,6 +42,7 @@ import {
   scoreHeaderRow,
   findBestHeaderRow,
   smartDetectColumnsIndexed,
+  mergeAiColumnMapping,
   parseCellDoubleInfo,
   checkNonCreatorRow,
   findSheetByGidCsvFingerprint,
@@ -800,22 +801,29 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.data && Array.isArray(json.data.columns)) {
-          const { columns } = json.data;
-          columns.forEach((col: any) => {
-            if (typeof col.columnIndex === 'number' && col.field && col.field !== 'ignore') {
-              if (typeof col.field === 'string' && col.field.startsWith('platform:')) {
-                const platform = col.field.split(':')[1]?.trim();
-                if (platform) {
-                  const linkKey = `link${platform}`;
-                  newMapping[linkKey] = col.columnIndex;
-                  notes[linkKey] = { lyDo: col.lyDo, confidence: col.confidence };
-                }
-              } else {
-                newMapping[col.field] = col.columnIndex;
-                notes[col.field] = { lyDo: col.lyDo, confidence: col.confidence };
-              }
-            }
+          // Hợp nhất qua CỔNG VALIDATE dùng chung (mergeAiColumnMapping): AI chỉ điền chỗ
+          // trống hợp lệ — không ghi đè nhận diện cụ thể của quy tắc (vd giaVideo lên cột
+          // "Giá Video ngắn"), không gán giá cho cột giá gói/SOW hay nhãn mơ hồ; xung đột
+          // giữ nguyên map của quy tắc để người dùng tự xác nhận trong wizard.
+          const packageFlags = headers.map((_, ci) => {
+            const samples = matrix
+              .slice(validHeaderIdx + 1)
+              .map((r) => String(r[ci]?.value || '').trim())
+              .filter(Boolean)
+              .slice(0, 15);
+            return isPackagePriceColumn(headers[ci], samples);
           });
+          const merged = mergeAiColumnMapping(
+            newMapping,
+            json.data.columns,
+            headers,
+            packageFlags,
+            new Set(KOL_FIELD_DEFINITIONS.map((f) => f.key)),
+          );
+          newMapping = merged.mapping;
+          for (const acc of merged.accepted) {
+            notes[acc.field] = { lyDo: acc.lyDo || '', confidence: acc.confidence || '' };
+          }
           aiSucceeded = true;
         }
       }

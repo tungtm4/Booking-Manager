@@ -391,7 +391,16 @@ export function isPackagePriceColumn(headerName: string, samples: string[]): boo
  *    người dùng xác nhận; không đoán thành giá một định dạng.
  * Trả về khóa giá (giaVideo/giaShorts/giaPost/giaLivestream/giaThamDuSK/giaSdha) hoặc null.
  */
-export function detectPriceFormatKey(foldedHeader: string): string | null {
+export interface PriceHeaderAnalysis {
+  /** Khóa giá nhận diện được từ nhãn (null = không nhận diện được) */
+  key: string | null;
+  /** Nhãn chứa TÍN HIỆU MÂU THUẪN (nhiều định dạng cụ thể) — không ai được tự gán, kể cả AI */
+  ambiguous: boolean;
+  /** Nhãn có bất kỳ tín hiệu định dạng nào không */
+  hasSignal: boolean;
+}
+
+export function analyzePriceHeader(foldedHeader: string): PriceHeaderAnalysis {
   const h = ' ' + String(foldedHeader || '').replace(/\s+/g, ' ').trim() + ' ';
   const tokens = new Set(h.split(/[^a-z0-9]+/).filter(Boolean));
   const has = (...ws: string[]) => ws.some((w) => tokens.has(w));
@@ -411,17 +420,88 @@ export function detectPriceFormatKey(foldedHeader: string): string | null {
     (has('anh') && !phrase('hinh anh'));
   const isVideoGeneric = has('video', 'videos', 'clip');
 
-  if (isSdha) return 'giaSdha';
+  const hasSignal = isSdha || isShort || isLong || isLive || isEvent || isPost || isVideoGeneric;
+  if (isSdha) return { key: 'giaSdha', ambiguous: false, hasSignal };
   // Mơ hồ: hai họ định dạng cụ thể khác nhau cùng xuất hiện -> không đoán.
-  if (isShort && isLong) return null;
-  if (isPost && (isShort || isLong || isVideoGeneric || isLive || isEvent)) return null;
-  if (isLive && isEvent) return null;
-  if (isShort) return 'giaShorts';
-  if (isLive) return 'giaLivestream';
-  if (isEvent) return 'giaThamDuSK';
-  if (isLong || isVideoGeneric) return 'giaVideo';
-  if (isPost) return 'giaPost';
-  return null;
+  const ambiguous =
+    (isShort && isLong) ||
+    (isPost && (isShort || isLong || isVideoGeneric || isLive || isEvent)) ||
+    (isLive && isEvent);
+  if (ambiguous) return { key: null, ambiguous: true, hasSignal };
+  if (isShort) return { key: 'giaShorts', ambiguous: false, hasSignal };
+  if (isLive) return { key: 'giaLivestream', ambiguous: false, hasSignal };
+  if (isEvent) return { key: 'giaThamDuSK', ambiguous: false, hasSignal };
+  if (isLong || isVideoGeneric) return { key: 'giaVideo', ambiguous: false, hasSignal };
+  if (isPost) return { key: 'giaPost', ambiguous: false, hasSignal };
+  return { key: null, ambiguous: false, hasSignal };
+}
+
+export function detectPriceFormatKey(foldedHeader: string): string | null {
+  return analyzePriceHeader(foldedHeader).key;
+}
+
+export interface AiColumnSuggestion {
+  columnIndex: number;
+  field: string;
+  lyDo?: string;
+  confidence?: string;
+}
+
+const PRICE_FIELD_KEYS = new Set(['giaVideo', 'giaShorts', 'giaPost', 'giaLivestream', 'giaThamDuSK', 'giaSdha']);
+
+/**
+ * Cổng hợp nhất/validate DÙNG CHUNG cho map cột: quy tắc là nền, AI chỉ ĐIỀN CHỖ TRỐNG hợp lệ.
+ * Một đề xuất AI bị loại khi:
+ *  - index cột ngoài biên, field ngoài whitelist, hoặc field = 'ignore';
+ *  - cột đã được quy tắc gán cho trường KHÁC, hoặc trường đã được gán ở cột khác (xung đột ->
+ *    giữ nguyên trạng thái quy tắc để người dùng tự xác nhận trong wizard);
+ *  - là trường GIÁ mà cột thuộc nhóm giá gói/SOW (packageFlags), hoặc nhãn cột có định dạng
+ *    cụ thể đã nhận diện được (không để AI ghi đè sai, vd giaVideo lên cột "Giá Video ngắn"),
+ *    hoặc nhãn MƠ HỒ (nhiều định dạng mâu thuẫn).
+ * AI khớp với quy tắc (cùng trường cùng cột) được ghi nhận để hiển thị ghi chú.
+ */
+export function mergeAiColumnMapping(
+  ruleMapping: Record<string, number>,
+  aiColumns: AiColumnSuggestion[],
+  headers: string[],
+  packageFlags: boolean[],
+  validFields: ReadonlySet<string>,
+): { mapping: Record<string, number>; accepted: AiColumnSuggestion[] } {
+  const mapping: Record<string, number> = { ...ruleMapping };
+  const claimedCols = new Map<number, string>();
+  for (const [f, c] of Object.entries(mapping)) {
+    if (typeof c === 'number') claimedCols.set(c, f);
+  }
+  const accepted: AiColumnSuggestion[] = [];
+  for (const col of aiColumns) {
+    if (!col || typeof col.columnIndex !== 'number' || !Number.isInteger(col.columnIndex)) continue;
+    const colIdx = col.columnIndex;
+    if (colIdx < 0 || colIdx >= headers.length) continue;
+    let field = typeof col.field === 'string' ? col.field : '';
+    if (!field || field === 'ignore') continue;
+    if (field.startsWith('platform:')) {
+      const platform = field.split(':')[1]?.trim();
+      if (!platform) continue;
+      field = 'link' + platform;
+    }
+    if (!validFields.has(field)) continue;
+    const claim = claimedCols.get(colIdx);
+    if (claim !== undefined) {
+      if (claim === field) accepted.push({ ...col, field });
+      continue;
+    }
+    if (mapping[field] !== undefined) continue;
+    if (PRICE_FIELD_KEYS.has(field)) {
+      if (packageFlags[colIdx]) continue;
+      const analysis = analyzePriceHeader(foldText(headers[colIdx]));
+      if (analysis.key !== null) continue;
+      if (analysis.ambiguous) continue;
+    }
+    mapping[field] = colIdx;
+    claimedCols.set(colIdx, field);
+    accepted.push({ ...col, field });
+  }
+  return { mapping, accepted };
 }
 
 // Nhận diện ánh xạ cột ổn định theo chỉ số 0-based (tránh đụng độ khi 2 cột trùng tên tiêu đề)

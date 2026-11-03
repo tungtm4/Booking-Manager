@@ -1,6 +1,23 @@
 import type { CommunityProfile, CommunityService } from '../types/community';
-import { parseMoneyInput } from './moneyInput';
 import { stableHashHex } from '../domain/community';
+
+export type BulkPriceParse = { kind: 'empty' } | { kind: 'value'; value: number } | { kind: 'invalid' };
+
+/**
+ * Validator giá CỤC BỘ cho đường nhập giá hàng loạt Community — kiểm tra chuỗi THÔ trước mọi
+ * bước làm sạch: parseMoneyInput chung của app tự lột ký tự lạ ('-100' -> 100, 'abc100' -> 100)
+ * nên KHÔNG dùng ở đây (và không sửa parser chung để tránh ảnh hưởng scope khác).
+ * Chấp nhận: số nguyên thuần ('5000000'), nhóm nghìn vi-VN ('5.000.000', '5 000 000'), '0'.
+ * Không hợp lệ: số âm, lẫn chữ, thập phân ('1.5'), nhóm nghìn sai ('12.34') -> giữ nguyên giá cũ.
+ */
+export function parseBulkPriceInput(raw: string): BulkPriceParse {
+  const t = String(raw ?? '').trim();
+  if (t === '') return { kind: 'empty' };
+  if (!/^\d+$/.test(t) && !/^\d{1,3}([.\s]\d{3})+$/.test(t)) return { kind: 'invalid' };
+  const value = Number(t.replace(/[.\s]/g, ''));
+  if (!Number.isSafeInteger(value) || value < 0) return { kind: 'invalid' };
+  return { kind: 'value', value };
+}
 
 // Cập nhật giá hàng loạt cho Community — gương tính năng cùng tên của KOL:
 // sửa giá ngay trên bảng (mỗi cột = một dịch vụ), chỉ ghi các hồ sơ thật sự đổi giá.
@@ -71,14 +88,16 @@ export function buildBulkPriceUpdates<T extends CommunityProfile>(
     const dichVu: CommunityService[] = (p.dichVu ?? []).map((s) => ({ ...s }));
     let changedCount = 0;
     for (const [key, raw] of Object.entries(rowEdits)) {
-      const trimmed = raw.trim();
+      // Validate chuỗi thô TRƯỚC khi làm sạch (parseBulkPriceInput): '-100'/'abc100' là
+      // KHÔNG HỢP LỆ -> bỏ qua ô (giữ giá cũ), tuyệt đối không biến thành giá dương.
+      const parsed = parseBulkPriceInput(raw);
       let target: number | null;
-      if (trimmed === '') {
+      if (parsed.kind === 'empty') {
         target = null; // CHỈ ô trống mới xoá giá (thành chưa có giá)
+      } else if (parsed.kind === 'invalid') {
+        continue;
       } else {
-        const parsed = parseMoneyInput(trimmed);
-        if (parsed === '' || parsed < 0) continue; // không hợp lệ/âm -> bỏ qua, KHÔNG âm thầm xoá giá
-        target = parsed; // 0 là giá HỢP LỆ (miễn phí) — phải lưu là 0, không được thành null
+        target = parsed.value; // 0 là giá HỢP LỆ (miễn phí) — lưu là 0, không thành null
       }
       const idx = dichVu.findIndex((s) => foldServiceName(s.ten) === key);
       if (idx >= 0) {

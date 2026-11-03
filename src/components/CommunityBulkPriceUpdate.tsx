@@ -2,10 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import { CommunityService as CommunityApi, type CatalogCommunity } from '../services/communityService';
 import { communityScaleLabel } from '../domain/community';
-import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
+import { formatMoneyInput } from '../utils/moneyInput';
 import { formatNumberOnly } from '../utils/formatters';
 import {
-  communityServiceColumns, communityCellPrice, buildBulkPriceUpdates, foldServiceName,
+  communityServiceColumns, communityCellPrice, buildBulkPriceUpdates, foldServiceName, parseBulkPriceInput,
 } from '../utils/communityBulkPrice';
 
 // Cập nhật giá hàng loạt cho Community — gương tính năng cùng tên bên KOL:
@@ -61,6 +61,16 @@ export function CommunityBulkPriceUpdate({
   );
   const changedPrices = changes.reduce((sum, ch) => sum + ch.changedCount, 0);
 
+  const invalidCells = useMemo(() => {
+    let n = 0;
+    for (const row of Object.values(edits)) {
+      for (const v of Object.values(row)) {
+        if (parseBulkPriceInput(v).kind === 'invalid') n++;
+      }
+    }
+    return n;
+  }, [edits]);
+
   if (!isOpen) return null;
 
   const cellValue = (c: CatalogCommunity, key: string): string => {
@@ -71,8 +81,12 @@ export function CommunityBulkPriceUpdate({
   };
 
   const setCell = (profileId: string, key: string, raw: string) => {
-    const formatted = formatMoneyInput(parseMoneyInput(raw));
-    setEdits((prev) => ({ ...prev, [profileId]: { ...(prev[profileId] ?? {}), [key]: formatted } }));
+    // Validate chuỗi THÔ trước: nhập hợp lệ mới định dạng lại kiểu vi-VN; nhập không hợp lệ
+    // (âm/lẫn chữ) GIỮ NGUYÊN văn bản người dùng gõ để họ thấy và sửa — không lột dấu/ký tự
+    // thành số dương như parser chung (parseMoneyInput) từng làm.
+    const parsed = parseBulkPriceInput(raw);
+    const stored = parsed.kind === 'value' ? formatMoneyInput(parsed.value) : raw;
+    setEdits((prev) => ({ ...prev, [profileId]: { ...(prev[profileId] ?? {}), [key]: stored } }));
   };
 
   const addColumn = () => {
@@ -218,6 +232,11 @@ export function CommunityBulkPriceUpdate({
             {changedPrices > 0
               ? <>Đã sửa <strong className="text-slate-900">{changedPrices} giá</strong> trên <strong className="text-slate-900">{changes.length} hồ sơ</strong> — bấm lưu để áp dụng.</>
               : 'Chưa có thay đổi giá nào.'}
+            {invalidCells > 0 && (
+              <span className="block text-red-700 font-medium pt-1">
+                Có {invalidCells} ô giá không hợp lệ (số âm hoặc lẫn chữ) — các ô này sẽ giữ nguyên giá cũ khi lưu.
+              </span>
+            )}
           </p>
           <div className="flex gap-2">
             <button type="button" className="border rounded-lg px-3 py-2 text-sm cursor-pointer" onClick={onClose}>Đóng</button>
