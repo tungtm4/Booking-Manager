@@ -28,6 +28,7 @@ import { CommunityImportModal } from './CommunityImportModal';
 import { CommunityBulkPriceUpdate } from './CommunityBulkPriceUpdate';
 import { DataImportView } from './DataImportView';
 import { AiPriceExtractor } from './AiPriceExtractor';
+import { CommunityAiPriceExtractor } from './CommunityAiPriceExtractor';
 import { CommunityService as CommunityApi } from '../services/communityService';
 import { BulkPriceUpdate } from './BulkPriceUpdate';
 
@@ -59,6 +60,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
   const [activeTool, setActiveTool] = useState<'spreadsheet' | 'excel' | 'paste' | 'ai' | 'bulk_price' | null>(null);
   const [showCommunityImport, setShowCommunityImport] = useState<boolean>(false);
   const [showCommunityBulkPrice, setShowCommunityBulkPrice] = useState<boolean>(false);
+  const [showCommunityAiExtract, setShowCommunityAiExtract] = useState<boolean>(false);
   // Tăng key để danh sách Community nhúng bên dưới tải lại sau khi nhập áp dụng xong
   const [communityReloadKey, setCommunityReloadKey] = useState<number>(0);
 
@@ -372,7 +374,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
                 <p className="text-xs text-slate-500">
                   {tab === 'kol'
                     ? 'Chọn phương thức nhập liệu hoặc cập nhật giá cho Creator / KOL'
-                    : 'Nhập dữ liệu bảng tính hoặc cập nhật giá hàng loạt cho Community (Fanpage / Group)'}
+                    : 'Chọn phương thức nhập liệu hoặc cập nhật giá cho Community (Fanpage / Group)'}
                 </p>
               </div>
               <button
@@ -385,7 +387,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
             </div>
 
             {/* M12 Gom 4 đường nhập liệu: 1. Import Excel / Sheet và 2. Dán dữ liệu đã được gộp thành: 1. Nhập từ bảng tính; 3. AI Bóc Tách; 4. Cập nhật giá hàng loạt */}
-            <div className={`grid gap-3 ${tab === 'kol' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+            <div className="grid gap-3 sm:grid-cols-3">
               {/* Mục 1: Nhập từ bảng tính (Tải file Excel · Link Google Sheet · Dán dữ liệu) */}
               <button
                 type="button"
@@ -404,15 +406,15 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
                   <span>1. Nhập từ bảng tính</span>
                 </div>
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  {/* 1. Import Excel / Sheet và 2. Dán dữ liệu */}
-                  Tải file Excel (.xlsx), dán link Google Sheet hoặc dán trực tiếp vùng ô dữ liệu từ clipboard để phân tích và xem trước tự động.
+                  {/* Phân biệt rõ với AI Bóc Tách: mục này dành cho dữ liệu ĐÃ CÓ dạng bảng */}
+                  Dữ liệu đã có sẵn dạng bảng (hàng/cột rõ ràng): tải file Excel, dán link Google Sheet hoặc dán vùng ô copy từ Excel/Sheet. Hệ thống đọc đúng theo từng ô — nhập cả hồ sơ + giá cho nhiều đối tác cùng lúc, xem trước từng dòng rồi mới lưu.
                 </p>
                 <div className="flex items-center gap-1.5 pt-1 text-[10px] font-semibold text-purple-700 flex-wrap">
                   <span className="px-1.5 py-0.5 rounded-md bg-purple-100/70">Tải file Excel</span>
                   <span className="text-purple-300">•</span>
                   <span className="px-1.5 py-0.5 rounded-md bg-purple-100/70">Link Google Sheet</span>
                   <span className="text-purple-300">•</span>
-                  <span className="px-1.5 py-0.5 rounded-md bg-purple-100/70">Dán dữ liệu</span>
+                  <span className="px-1.5 py-0.5 rounded-md bg-purple-100/70">Dán vùng ô</span>
                 </div>
               </button>
 
@@ -432,8 +434,8 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
                       <span>2. AI Bóc Tách Giá</span>
                     </div>
                     <p className="text-xs text-slate-500 leading-relaxed">
-                      {/* 3. AI Bóc Tách */}
-                      Trích xuất bảng giá tự động từ hình ảnh rate card, file ảnh chụp báo giá hoặc tin nhắn của đối tác.
+                      {/* Phân biệt rõ với Nhập từ bảng tính: mục này dành cho dữ liệu TỰ DO chưa thành bảng */}
+                      Chưa có bảng — chỉ có tin nhắn hoặc ảnh báo giá: dán đoạn chat Zalo/Messenger hoặc tải ảnh rate card, ảnh chụp màn hình. AI tự đọc, tách giá theo từng format và quy đổi tiền — bạn duyệt lại từng mục trước khi lưu.
                     </p>
                   </button>
 
@@ -459,7 +461,28 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
               )}
 
               {tab === 'community' && (
-                /* Mục 2: Cập nhật giá hàng loạt cho Community — sửa giá trên bảng, mỗi cột một dịch vụ */
+                /* Mục 2: AI Bóc Tách Giá cho Community — ngang tính năng với bên KOL:
+                   giá Community theo từng dịch vụ tự do (đăng bài, ghim bài, share bài...) */
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEntryModal(false);
+                    setShowCommunityAiExtract(true);
+                  }}
+                  className="p-4 rounded-2xl border border-purple-100 bg-purple-50/40 hover:bg-purple-50 hover:border-purple-300 text-left transition-all cursor-pointer space-y-1.5 group"
+                >
+                  <div className="flex items-center gap-2 text-indigo-700 font-bold text-sm">
+                    <Sparkles className="w-5 h-5 text-indigo-600 group-hover:scale-110 transition-transform" />
+                    <span>2. AI Bóc Tách Giá</span>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Chưa có bảng — chỉ có tin nhắn hoặc ảnh báo giá: dán đoạn chat Zalo/Messenger hoặc tải ảnh rate card, ảnh chụp màn hình. AI tự đọc, tách giá theo từng dịch vụ (đăng bài, ghim bài, share bài...) — bạn duyệt lại từng mục trước khi lưu.
+                  </p>
+                </button>
+              )}
+
+              {tab === 'community' && (
+                /* Mục 3: Cập nhật giá hàng loạt cho Community — sửa giá trên bảng, mỗi cột một dịch vụ */
                 <button
                   type="button"
                   onClick={() => {
@@ -470,7 +493,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
                 >
                   <div className="flex items-center gap-2 text-emerald-700 font-bold text-sm">
                     <DollarSign className="w-5 h-5 text-emerald-600 group-hover:scale-110 transition-transform" />
-                    <span>2. Cập nhật giá hàng loạt</span>
+                    <span>3. Cập nhật giá hàng loạt</span>
                   </div>
                   <p className="text-xs text-slate-500 leading-relaxed">
                     Sửa giá dịch vụ cho nhiều Community cùng lúc ngay trên bảng — mỗi cột là một dịch vụ, có thể thêm cột dịch vụ mới.
@@ -500,7 +523,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
               <div className="flex items-center gap-2">
                 <FileSpreadsheet className="w-5 h-5 text-[#7C3AED]" />
                 <h3 className="font-bold text-slate-900 text-sm">
-                  Nhập dữ liệu từ bảng tính vào kho (Excel · Google Sheet · Dán dữ liệu)
+                  Nhập dữ liệu từ bảng tính vào kho (Excel · Google Sheet · Dán vùng ô)
                 </h3>
               </div>
               <button
@@ -551,6 +574,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
                   setActiveTool(null);
                   setNotice('Đã trích xuất và cập nhật giá vào kho thành công.');
                 }}
+                onSwitchToSpreadsheet={() => setActiveTool('spreadsheet')}
               />
             </div>
           </div>
@@ -602,6 +626,40 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
           );
         }}
       />
+
+      {/* AI Bóc Tách Giá Community — bóc giá dịch vụ từ tin nhắn/ảnh, duyệt rồi mới ghi vào kho */}
+      {showCommunityAiExtract && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-purple-100">
+            <div className="p-4 bg-purple-50/50 border-b flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-bold text-slate-900 text-sm">AI trích xuất bảng giá Community từ ảnh / báo giá</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCommunityAiExtract(false)}
+                className="p-1 text-slate-400 hover:text-slate-700 font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              <CommunityAiPriceExtractor
+                onDataSaved={(summary) => {
+                  setCommunityReloadKey((k) => k + 1);
+                  setShowCommunityAiExtract(false);
+                  setNotice(summary);
+                }}
+                onSwitchToSpreadsheet={() => {
+                  setShowCommunityAiExtract(false);
+                  setShowCommunityImport(true);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Cập nhật giá hàng loạt Community */}
       <CommunityBulkPriceUpdate

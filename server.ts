@@ -233,6 +233,138 @@ Hãy trích xuất danh sách các mục báo giá theo cấu trúc JSON.`;
 });
 
 // ----------------------------------------------------------------------------
+// API: Trích xuất báo giá COMMUNITY (Fanpage/Group) bằng Gemini AI
+// Khác bản KOL: giá của Community theo TỪNG DỊCH VỤ tự do (đăng bài, ghim bài,
+// share bài, cover...) chứ không theo 6 format cố định.
+// ----------------------------------------------------------------------------
+app.post('/api/ai/extract-community-prices', async (req, res) => {
+  try {
+    const { text, imageBase64, imageMimeType } = req.body;
+
+    if (!text && !imageBase64) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng cung cấp đoạn văn bản tin nhắn hoặc ảnh chụp báo giá.',
+      });
+    }
+
+    if (!aiClient) {
+      return res.status(200).json({
+        success: false,
+        useFallback: true,
+        message: 'Chưa cấu hình GEMINI_API_KEY trên môi trường server. Hệ thống sẽ sử dụng bộ phân tích cục bộ.',
+      });
+    }
+
+    const systemInstruction = `Bạn là trợ lý AI chuyên phân tích báo giá COMMUNITY (Fanpage / Group Facebook và các nền tảng tương tự) tại Việt Nam từ tin nhắn trao đổi (Zalo, Messenger, Email) hoặc ảnh chụp màn hình báo giá.
+
+NHIỆM VỤ:
+Trích xuất MỌI Community được nhắc đến cùng bảng giá dịch vụ của chúng, trả về JSON Array. Mỗi Community là 1 object:
+- ten: tên Fanpage/Group.
+- loai: 'group' nếu là Group/nhóm, 'page' nếu là Fanpage/trang, null nếu không rõ.
+- nenTang: nền tảng (Facebook, TikTok...), mặc định 'Facebook' nếu không nói khác.
+- link: link trang/nhóm nếu xuất hiện trong nội dung, không có thì để chuỗi rỗng.
+- quyMo: số thành viên/followers dạng số nguyên nếu có nhắc, không có thì null.
+- dichVu: mảng các dịch vụ có giá, mỗi dịch vụ gồm:
+  + ten: tên dịch vụ NGUYÊN VĂN theo cách gọi trong nội dung (Đăng bài, Ghim bài, Share bài, Đăng cover, Livestream, Đăng story...). KHÔNG ép về format cố định.
+  + donVi: đơn vị tính (bài, lần, buổi, tháng, kỳ, video...), suy ra từ ngữ cảnh, không rõ thì để 'bài'.
+  + giaVND: giá quy đổi sang VND dạng số nguyên.
+  + dieuKien: điều kiện kèm theo nếu có (vd 'ghim 7 ngày', 'tối thiểu 3 bài'), không có thì chuỗi rỗng.
+- trichDan: đoạn văn gốc chứa thông tin báo giá của Community này.
+
+QUY TẮC ĐỔI GIÁ TIỀN (VND):
+- "8tr" / "8 triệu" / "8 củ" -> 8000000; "500k" / "500 ngàn" -> 500000; "15.000.000" -> 15000000; "2,5 triệu" -> 2500000.
+- Chỉ trích xuất dịch vụ CÓ GIÁ rõ ràng; dịch vụ nhắc tên mà không có giá thì bỏ qua.`;
+
+    const contents: any[] = [];
+    if (imageBase64) {
+      const mime = imageMimeType || 'image/png';
+      const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      contents.push({ inlineData: { mimeType: mime, data: cleanBase64 } });
+    }
+    const textPrompt = `Hãy đọc kỹ nội dung sau và trích xuất danh sách các Community cùng bảng giá dịch vụ:
+${text ? `\n--- NỘI DUNG VĂN BẢN ---\n${text}\n----------------------` : '(Nội dung trong ảnh đính kèm)'}
+
+Hãy trích xuất theo cấu trúc JSON đã quy định.`;
+    contents.push({ text: textPrompt });
+
+    const response = await callAiWithRetry(() => aiClient!.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents,
+      config: {
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              ten: { type: Type.STRING, description: 'Tên Fanpage/Group' },
+              loai: { type: Type.STRING, description: "Loại: 'page', 'group' hoặc null" },
+              nenTang: { type: Type.STRING, description: 'Nền tảng, mặc định Facebook' },
+              link: { type: Type.STRING, description: 'Link trang/nhóm nếu có' },
+              quyMo: { type: Type.NUMBER, description: 'Số thành viên/followers nếu có' },
+              dichVu: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    ten: { type: Type.STRING, description: 'Tên dịch vụ nguyên văn' },
+                    donVi: { type: Type.STRING, description: 'Đơn vị tính' },
+                    giaVND: { type: Type.NUMBER, description: 'Giá VND dạng số nguyên' },
+                    dieuKien: { type: Type.STRING, description: 'Điều kiện kèm theo nếu có' },
+                  },
+                  required: ['ten', 'giaVND'],
+                },
+              },
+              trichDan: { type: Type.STRING, description: 'Đoạn văn gốc chứa báo giá' },
+            },
+            required: ['ten', 'dichVu'],
+          },
+        },
+      },
+    }));
+
+    const outputText = response.text || '[]';
+    let parsedData = [];
+    try {
+      parsedData = JSON.parse(outputText);
+    } catch {
+      const cleanJson = outputText.replace(/```json/g, '').replace(/```/g, '').trim();
+      parsedData = JSON.parse(cleanJson);
+    }
+
+    const sanitized = (Array.isArray(parsedData) ? parsedData : [])
+      .map((item: any) => ({
+        ten: String(item.ten || '').trim(),
+        loai: item.loai === 'group' || item.loai === 'page' ? item.loai : null,
+        nenTang: String(item.nenTang || 'Facebook').trim() || 'Facebook',
+        link: String(item.link || '').trim(),
+        quyMo: Number(item.quyMo) > 0 ? Math.round(Number(item.quyMo)) : null,
+        dichVu: (Array.isArray(item.dichVu) ? item.dichVu : [])
+          .map((s: any) => ({
+            ten: String(s.ten || '').trim(),
+            donVi: String(s.donVi || 'bài').trim() || 'bài',
+            gia: Number(s.giaVND) > 0 ? Math.round(Number(s.giaVND)) : null,
+            dieuKien: String(s.dieuKien || '').trim(),
+          }))
+          .filter((s: any) => s.ten),
+        trichDan: String(item.trichDan || '').trim(),
+      }))
+      .filter((c: any) => c.ten);
+
+    return res.json({ success: true, data: sanitized });
+  } catch (err: any) {
+    console.warn('Yêu cầu AI (Community) thất bại', { tamThoi: isTemporaryAiError(err) });
+    return res.json({
+      success: false,
+      useFallback: true,
+      message: aiFailureMessage(err),
+    });
+  }
+});
+
+// ----------------------------------------------------------------------------
 // API: Phân tích mô tả / brief chiến dịch bằng AI (Feature: Parse Brief SOW)
 // ----------------------------------------------------------------------------
 app.post('/api/ai/parse-brief', async (req, res) => {

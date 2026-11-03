@@ -55,11 +55,11 @@ test('Giá hàng loạt Community (b): Chỉ hồ sơ thật sự đổi giá m�
   assert.equal(cleared[0].profile.dichVu.length, 1);
 });
 
-test('Giá hàng loạt Community (c): Mã nguồn — hub Community có mục 2, wizard dùng nhãn cột chữ cái như KOL', () => {
+test('Giá hàng loạt Community (c): Mã nguồn — hub Community có mục 3 (sau khi thêm AI Bóc Tách ở mục 2), wizard dùng nhãn cột chữ cái như KOL', () => {
   const catalog = readFileSync(new URL('../src/components/PartnerCatalogManager.tsx', import.meta.url), 'utf8');
   const wizard = readFileSync(new URL('../src/components/CommunityImportModal.tsx', import.meta.url), 'utf8');
   const bulk = readFileSync(new URL('../src/components/CommunityBulkPriceUpdate.tsx', import.meta.url), 'utf8');
-  assert.ok(catalog.includes('2. Cập nhật giá hàng loạt'), 'Hub Community phải có mục Cập nhật giá hàng loạt');
+  assert.ok(catalog.includes('3. Cập nhật giá hàng loạt'), 'Hub Community phải có mục Cập nhật giá hàng loạt (số 3, sau AI Bóc Tách)');
   assert.ok(catalog.includes('CommunityBulkPriceUpdate'), 'Hub phải mở đúng component cập nhật giá Community');
   assert.ok(bulk.includes('buildBulkPriceUpdates'), 'Component phải dùng helper đã kiểm thử');
   assert.ok(wizard.includes('getColumnLetter'), 'Wizard Community phải gắn nhãn cột theo chữ cái như bên KOL');

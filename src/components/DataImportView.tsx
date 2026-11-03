@@ -2269,7 +2269,7 @@ export const DataImportView: React.FC<DataImportViewProps> = ({ kols, onDataImpo
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Dán dữ liệu
+              Dán vùng ô
             </button>
           </div>
         </div>

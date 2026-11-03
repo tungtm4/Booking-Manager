@@ -24,11 +24,15 @@ import {
 import { KolProfile, PriceFormatKey, PRICE_FORMAT_LABELS } from '../types/kol';
 import { formatVND } from '../utils/formatters';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
+import { looksLikeSpreadsheetText } from '../utils/tablePasteDetect';
 import { CatalogService } from '../services/catalogService';
 
 interface AiPriceExtractorProps {
   kols: KolProfile[];
   onDataSaved: () => void;
+  // Khi người dùng dán nhầm dữ liệu dạng bảng tính: cho phép chuyển thẳng sang
+  // "Nhập từ bảng tính" (nơi đọc đúng theo từng ô) thay vì bóc tách bằng AI.
+  onSwitchToSpreadsheet?: () => void;
 }
 
 export interface ExtractedPriceItem {
@@ -43,7 +47,7 @@ export interface ExtractedPriceItem {
   action: 'update' | 'create_new' | 'skip';
 }
 
-export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onDataSaved }) => {
+export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onDataSaved, onSwitchToSpreadsheet }) => {
   const [inputText, setInputText] = useState('');
   const [uploadedImage, setUploadedImage] = useState<{ base64: string; mimeType: string; name: string } | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -529,6 +533,29 @@ export const AiPriceExtractor: React.FC<AiPriceExtractorProps> = ({ kols, onData
               onChange={(e) => setInputText(e.target.value)}
               className="w-full p-3.5 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:border-indigo-500 focus:outline-hidden leading-relaxed"
             />
+
+            {/* Cảnh báo dán nhầm dữ liệu dạng bảng tính: AI ở đây đọc theo ngữ cảnh tin nhắn,
+                dán cả bảng vào sẽ dễ lẫn giá giữa các dòng và mất link ẩn trong ô */}
+            {looksLikeSpreadsheetText(inputText) && (
+              <div className="p-3 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
+                <div className="space-y-1.5">
+                  <p className="font-semibold leading-relaxed">
+                    Nội dung vừa dán trông giống BẢNG TÍNH (nhiều dòng, nhiều cột) — bóc tách bằng AI ở đây dễ lẫn giá giữa các dòng và mất link trong ô.
+                  </p>
+                  <p className="leading-relaxed">Hãy dùng “Nhập từ bảng tính” để hệ thống đọc đúng theo từng ô, có xem trước từng dòng trước khi lưu.</p>
+                  {onSwitchToSpreadsheet && (
+                    <button
+                      type="button"
+                      onClick={onSwitchToSpreadsheet}
+                      className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer"
+                    >
+                      Chuyển sang Nhập từ bảng tính
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Gợi ý mẫu */}
             <div className="flex items-center gap-1.5 flex-wrap pt-1">
