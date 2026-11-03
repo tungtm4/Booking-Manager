@@ -380,6 +380,50 @@ export function isPackagePriceColumn(headerName: string, samples: string[]): boo
   return hasCompositeDescription;
 }
 
+/**
+ * Nhận diện định dạng giá của MỘT tiêu đề cột (đã gấp không dấu) — dùng từ/cụm từ có ranh giới rõ,
+ * ưu tiên định dạng CỤ THỂ trước định dạng chung:
+ *  - SDHA (sử dụng hình ảnh / hình ảnh / usage) thắng "post" dù tiêu đề có chữ "ảnh"
+ *    ("Giá sử dụng hình ảnh" từng bị map nhầm thành giá Post vì chứa "anh").
+ *  - Video NGẮN (shorts/reels/TikTok/"video ngắn") thắng "video" chung
+ *    ("Giá Video ngắn" từng bị map nhầm thành giá Video dài).
+ *  - Tiêu đề MƠ HỒ (nhiều định dạng cụ thể khác nhau, vd "Video + Post") -> null, để trống chờ
+ *    người dùng xác nhận; không đoán thành giá một định dạng.
+ * Trả về khóa giá (giaVideo/giaShorts/giaPost/giaLivestream/giaThamDuSK/giaSdha) hoặc null.
+ */
+export function detectPriceFormatKey(foldedHeader: string): string | null {
+  const h = ' ' + String(foldedHeader || '').replace(/\s+/g, ' ').trim() + ' ';
+  const tokens = new Set(h.split(/[^a-z0-9]+/).filter(Boolean));
+  const has = (...ws: string[]) => ws.some((w) => tokens.has(w));
+  const phrase = (...ps: string[]) => ps.some((p) => h.includes(' ' + p + ' ') || h.includes(' ' + p) || h.trim() === p);
+
+  const isSdha =
+    has('sdha', 'usage') || phrase('su dung hinh anh', 'hinh anh', 'usage rights', 'quyen su dung');
+  const isShort =
+    has('shorts', 'short', 'reels', 'reel', 'tiktok') || phrase('video ngan', 'clip ngan');
+  const isLong = phrase('video dai', 'clip dai') || has('youtube', 'ytb');
+  const isLive = has('livestream', 'live') || phrase('live stream', 'phat truc tiep', 'truc tiep');
+  const isEvent = has('event') || phrase('su kien', 'tham du');
+  const isPost =
+    has('post') ||
+    phrase('bai dang', 'dang bai', 'bai viet', 'viet bai', 'bai post') ||
+    // "ảnh" đứng riêng (vd "Giá ảnh") là giá Post; nhưng "hình ảnh" thuộc SDHA (đã xét ở isSdha)
+    (has('anh') && !phrase('hinh anh'));
+  const isVideoGeneric = has('video', 'videos', 'clip');
+
+  if (isSdha) return 'giaSdha';
+  // Mơ hồ: hai họ định dạng cụ thể khác nhau cùng xuất hiện -> không đoán.
+  if (isShort && isLong) return null;
+  if (isPost && (isShort || isLong || isVideoGeneric || isLive || isEvent)) return null;
+  if (isLive && isEvent) return null;
+  if (isShort) return 'giaShorts';
+  if (isLive) return 'giaLivestream';
+  if (isEvent) return 'giaThamDuSK';
+  if (isLong || isVideoGeneric) return 'giaVideo';
+  if (isPost) return 'giaPost';
+  return null;
+}
+
 // Nhận diện ánh xạ cột ổn định theo chỉ số 0-based (tránh đụng độ khi 2 cột trùng tên tiêu đề)
 export function smartDetectColumnsIndexed(
   headers: string[],
@@ -479,6 +523,14 @@ export function smartDetectColumnsIndexed(
     const textSamples = cellSamples.map((x) => x.value);
     const linkSamples = cellSamples.map((x) => x.link).filter(Boolean) as string[];
 
+    // Cột GIÁ nhắc tên nền tảng (vd "Giá TikTok", "Giá video YouTube") mà không chứa URL nào
+    // thì KHÔNG phải cột link — để dành cho bước nhận diện cột giá ở dưới.
+    const headerTokens = h.split(/[^a-z0-9]+/).filter(Boolean);
+    const looksLikePriceCol = headerTokens.includes('gia') || headerTokens.includes('phi');
+    const hasUrlSample =
+      linkSamples.length > 0 || textSamples.some((t) => Boolean(t) && (detectPlatformFromUrl(t) !== null || isUrlString(t)));
+    if (looksLikePriceCol && !hasUrlSample) continue;
+
     // Kiểm tra URL trực tiếp hoặc trong hyperlink
     const hasFbUrl = linkSamples.some((l) => detectPlatformFromUrl(l) === 'Facebook') || textSamples.some((t) => detectPlatformFromUrl(t) === 'Facebook');
     const hasTtUrl = linkSamples.some((l) => detectPlatformFromUrl(l) === 'TikTok') || textSamples.some((t) => detectPlatformFromUrl(t) === 'TikTok');
@@ -550,6 +602,7 @@ export function smartDetectColumnsIndexed(
   }
 
   // 4. Nhận diện các cột Báo Giá Định Dạng Cụ Thể (Việc 7: KHÔNG map cột giá gói/SOW)
+  //    Ưu tiên định dạng cụ thể + mơ hồ thì để trống: xem detectPriceFormatKey.
   for (let c = 0; c < headers.length; c++) {
     if (mappedCols.has(c)) continue;
     const h = foldText(headers[c]);
@@ -560,46 +613,10 @@ export function smartDetectColumnsIndexed(
       continue;
     }
 
-    // Video dài
-    if (mapping['giaVideo'] === undefined && h.includes('video') && !h.includes('shorts') && !h.includes('tiktok') && !h.includes('reel')) {
-      mapping['giaVideo'] = c;
+    const priceKey = detectPriceFormatKey(h);
+    if (priceKey && mapping[priceKey] === undefined) {
+      mapping[priceKey] = c;
       mappedCols.add(c);
-      continue;
-    }
-
-    // Video ngắn (Shorts / Reels / TikTok)
-    if (mapping['giaShorts'] === undefined && (h.includes('shorts') || h.includes('reels') || h.includes('video ngan'))) {
-      mapping['giaShorts'] = c;
-      mappedCols.add(c);
-      continue;
-    }
-
-    // Bài đăng / Post
-    if (mapping['giaPost'] === undefined && (h.includes('post') || h.includes('bai dang') || h.includes('bai viet') || h.includes('anh'))) {
-      mapping['giaPost'] = c;
-      mappedCols.add(c);
-      continue;
-    }
-
-    // Livestream
-    if (mapping['giaLivestream'] === undefined && (h.includes('livestream') || h.includes('live'))) {
-      mapping['giaLivestream'] = c;
-      mappedCols.add(c);
-      continue;
-    }
-
-    // Tham dự sự kiện
-    if (mapping['giaThamDuSK'] === undefined && (h.includes('su kien') || h.includes('event'))) {
-      mapping['giaThamDuSK'] = c;
-      mappedCols.add(c);
-      continue;
-    }
-
-    // SDHA
-    if (mapping['giaSdha'] === undefined && (h.includes('sdha') || h.includes('hinh anh') || h.includes('usage rights'))) {
-      mapping['giaSdha'] = c;
-      mappedCols.add(c);
-      continue;
     }
   }
 

@@ -23,7 +23,8 @@ test('Community ngang KOL (a): communityMinPrice = giá dịch vụ thấp nhấ
   assert.equal(communityMinPrice(mk({ dichVu: [svc(7000000), svc(5000000), svc(null)] })), 5000000);
   assert.equal(communityMinPrice(mk({ dichVu: [svc(null)] })), null);
   assert.equal(communityMinPrice(mk({ dichVu: [] })), null);
-  assert.equal(communityMinPrice(mk({ dichVu: [svc(0)] })), null, 'Giá 0 trong dữ liệu cũ không tính là giá đại diện');
+  assert.equal(communityMinPrice(mk({ dichVu: [svc(0)] })), 0, 'Giá 0 là giá thật (miễn phí) — phải tính là giá đại diện (sửa theo ca 3, 03/11/2026; trước đây test này chốt 0 -> null là hành vi làm mất giá 0)');
+  assert.equal(communityMinPrice(mk({ dichVu: [svc(0), svc(5000000)] })), 0, 'Có giá 0 thì giá thấp nhất là 0');
 });
 
 test('Community ngang KOL (b): Lọc tag lĩnh vực khớp BẤT KỲ tag đã chọn, không phân biệt hoa/thường', () => {

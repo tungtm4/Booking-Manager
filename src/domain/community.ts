@@ -196,7 +196,8 @@ export function communityMinPrice(p: { dichVu?: Array<{ giaThamKhao?: number | n
   let min: number | null = null;
   for (const s of p.dichVu ?? []) {
     const v = s.giaThamKhao;
-    if (v != null && v > 0 && (min === null || v < min)) min = v;
+    // 0đ là giá thật (miễn phí) — phải tính vào giá thấp nhất; chỉ null mới là chưa có giá.
+    if (v != null && v >= 0 && (min === null || v < min)) min = v;
   }
   return min;
 }

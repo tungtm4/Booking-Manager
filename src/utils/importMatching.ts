@@ -41,18 +41,92 @@ export interface ImportMatchResult<T extends MatchProfileInput = MatchProfileInp
   resemblesKol?: T;
 }
 
-// Chuẩn hóa link kênh để so khớp: bỏ giao thức/www/m., bỏ query/hash/dấu / cuối,
-// gộp fb.com -> facebook.com. Giữ nguyên phần path (định danh kênh nằm ở đó).
+// Chuẩn hóa link kênh để so khớp — phân tích theo host/path, KHÔNG cắt query một cách mù quáng:
+//  - Query CHỨA ĐỊNH DANH phải được giữ (vd facebook.com/profile.php?id=...: hai id khác nhau là
+//    hai người khác nhau; cắt query từng làm chúng gộp thành một — lỗi đã sửa).
+//  - Query tracking (utm_*, ref, mibextid, __tn__...) bị loại bỏ: cùng định danh khác tracking vẫn khớp.
+//  - Link NỘI DUNG / CHIA SẺ (bài viết, video, link rút gọn chia sẻ, watch...) KHÔNG mang định danh
+//    kênh chắc chắn -> trả '' (không tham gia khớp link; quyết định rơi về tên/người dùng xác nhận).
+//  - www/m/fb.com tương đương facebook.com; bỏ dấu / cuối; không phân biệt hoa thường.
+const FB_NON_PROFILE_HEADS = new Set([
+  'share', 'sharer', 'watch', 'reel', 'reels', 'stories', 'story', 'photo.php', 'video.php',
+  'story.php', 'permalink.php', 'login', 'help', 'marketplace', 'gaming', 'events', 'settings',
+]);
+const IG_NON_PROFILE_HEADS = new Set(['p', 'reel', 'reels', 'stories', 'explore', 'tv', 'direct', 'accounts']);
+
 export function normalizeChannelLink(raw: string): string {
-  let s = String(raw || '').toLowerCase().trim();
-  if (!s) return '';
-  s = s.replace(/^https?:\/\//, '');
-  s = s.replace(/^www\./, '');
-  s = s.replace(/^m\./, '');
-  s = s.split('?')[0].split('#')[0];
-  s = s.replace(/\/+$/, '');
-  if (s.startsWith('fb.com/')) s = 'facebook.com/' + s.slice('fb.com/'.length);
-  return s;
+  const input = String(raw || '').trim();
+  if (!input) return '';
+  let url: URL | null = null;
+  try {
+    url = new URL(/^https?:\/\//i.test(input) ? input : 'https://' + input);
+  } catch {
+    url = null;
+  }
+  if (!url || !url.hostname.includes('.')) {
+    // Không parse được thành URL có host: biến đổi nhẹ như trước nhưng KHÔNG cắt query
+    // (thà giữ nguyên còn hơn làm mất định danh).
+    return input
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/\/+$/, '');
+  }
+  let host = url.hostname.toLowerCase().replace(/^www\./, '').replace(/^m\./, '');
+  if (host === 'fb.com' || host === 'fb.me') host = 'facebook.com';
+  const segments = url.pathname.split('/').filter(Boolean).map((x) => x.toLowerCase());
+  const build = (segs: string[], keepQueryKeys: string[] = []): string => {
+    let qs = '';
+    if (keepQueryKeys.length) {
+      const params = new URLSearchParams();
+      for (const k of keepQueryKeys) {
+        const v = url!.searchParams.get(k);
+        if (v) params.set(k, v.toLowerCase());
+      }
+      const s = params.toString();
+      if (s) qs = '?' + s;
+    }
+    return host + (segs.length ? '/' + segs.join('/') : '') + qs;
+  };
+
+  if (host === 'youtu.be' || host === 'vm.tiktok.com' || host === 'vt.tiktok.com') {
+    return ''; // link rút gọn trỏ tới nội dung, không phải định danh kênh
+  }
+  if (host === 'facebook.com') {
+    if (!segments.length) return '';
+    const [first, second] = segments;
+    if (first === 'profile.php') {
+      // Định danh nằm ở query id — GIỮ id, bỏ mọi tracking; thiếu id thì không có định danh.
+      return url.searchParams.get('id') ? build(['profile.php'], ['id']) : '';
+    }
+    if (FB_NON_PROFILE_HEADS.has(first)) return '';
+    if (first === 'groups') return second ? build(['groups', second]) : '';
+    if (first === 'pages') {
+      // pages/<...>/<id trang>: giữ các đoạn tới hết id số (nếu có), bỏ phần nội dung phía sau.
+      const idIdx = segments.findIndex((x, i) => i > 0 && /^\d{5,}$/.test(x));
+      return build(idIdx > 0 ? segments.slice(0, idIdx + 1) : segments.slice(0, Math.min(segments.length, 3)));
+    }
+    // facebook.com/<username>/... — định danh là đoạn đầu; phần sau là nội dung của chính kênh đó.
+    return build([first]);
+  }
+  if (host === 'youtube.com') {
+    const [first, second] = segments;
+    if (first && first.startsWith('@') && first.length > 1) return build([first]);
+    if ((first === 'channel' || first === 'c' || first === 'user') && second) return build([first, second]);
+    return ''; // watch/shorts/live/clip... là nội dung, không phải kênh
+  }
+  if (host === 'tiktok.com') {
+    const [first] = segments;
+    if (first && first.startsWith('@') && first.length > 1) return build([first]);
+    return '';
+  }
+  if (host === 'instagram.com') {
+    const [first] = segments;
+    if (!first || IG_NON_PROFILE_HEADS.has(first)) return '';
+    return build([first]);
+  }
+  // Host khác: giữ host + path (định danh thường nằm ở path), bỏ toàn bộ query tracking.
+  return build(segments);
 }
 
 // Chuẩn hóa tên để so sánh: bỏ dấu tiếng Việt, thường hóa, gộp khoảng trắng

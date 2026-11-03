@@ -74,11 +74,11 @@ export function buildBulkPriceUpdates<T extends CommunityProfile>(
       const trimmed = raw.trim();
       let target: number | null;
       if (trimmed === '') {
-        target = null;
+        target = null; // CHỈ ô trống mới xoá giá (thành chưa có giá)
       } else {
         const parsed = parseMoneyInput(trimmed);
-        if (parsed === '') continue; // không phải số hợp lệ -> bỏ qua ô này
-        target = parsed > 0 ? parsed : null;
+        if (parsed === '' || parsed < 0) continue; // không hợp lệ/âm -> bỏ qua, KHÔNG âm thầm xoá giá
+        target = parsed; // 0 là giá HỢP LỆ (miễn phí) — phải lưu là 0, không được thành null
       }
       const idx = dichVu.findIndex((s) => foldServiceName(s.ten) === key);
       if (idx >= 0) {
