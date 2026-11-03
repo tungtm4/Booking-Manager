@@ -234,6 +234,8 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
   const [optionId,setOptionId]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[dirty,setDirty]=useState(false);
   const [customer,setCustomer]=useState<any>(null),[legacyId,setLegacyId]=useState('');
   const [phases,setPhases]=useState<any[]>([]),[fromName,setFromName]=useState(''),[fromPhaseIds,setFromPhaseIds]=useState<string[]>([]),[showPrint,setShowPrint]=useState(false);
+  // DG-2 (tinh gọn phần dự án): hai khối tạo phương án mặc định ĐÓNG sau nút bấm.
+  const [showCreateManual,setShowCreateManual]=useState(false),[showCreateFromPhase,setShowCreateFromPhase]=useState(false);
   // Phân bổ do PM chọn (rowId:key -> số lượng) + dòng dịch vụ comment thuê ngoài.
   const [shortlistRows,setShortlistRows]=useState<any[]>([]);
   const [alloc,setAlloc]=useState<Record<string,number>>({});
@@ -322,12 +324,16 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
       <div className="p-4 rounded-xl border bg-indigo-50"><p className="text-xs text-indigo-800">Phương án đã chốt</p><strong>{baseline?data.options.find((o:any)=>o.id===baseline.optionId)?.name+' · V'+baseline.number:'Chưa chốt'}</strong></div>
       {/* UX-4 (M7): doanh thu/lợi nhuận của bản chốt chỉ xem ở tab Tài chính & P&L — không hiển thị số P&L trong tab Báo giá. */}
     </div>}
-    {manage&&<form className="grid sm:grid-cols-3 gap-3 p-4 border rounded-xl" onSubmit={e=>{e.preventDefault();const form=e.currentTarget;const body=Object.fromEntries(new FormData(form));run(async()=>{const result=await request(base+'/options',body);form.reset();await refresh(result.quoteId);setNotice('Đã tạo phương án mới với báo giá V1.');});}}>
+    {manage&&<div className="flex flex-wrap gap-2">
+      <button type="button" className="border rounded-lg px-3 py-2 text-sm bg-white cursor-pointer hover:bg-slate-50" aria-expanded={showCreateManual} onClick={()=>setShowCreateManual(v=>!v)}>{showCreateManual?'Đóng form tạo phương án':'＋ Tạo phương án mới'}</button>
+      {phases.length>0&&<button type="button" className="border rounded-lg px-3 py-2 text-sm bg-white cursor-pointer hover:bg-slate-50" aria-expanded={showCreateFromPhase} onClick={()=>setShowCreateFromPhase(v=>!v)}>{showCreateFromPhase?'Đóng tạo từ phase':'Tạo phương án từ phase'}</button>}
+    </div>}
+    {manage&&showCreateManual&&<form className="grid sm:grid-cols-3 gap-3 p-4 border rounded-xl" onSubmit={e=>{e.preventDefault();const form=e.currentTarget;const body=Object.fromEntries(new FormData(form));run(async()=>{const result=await request(base+'/options',body);form.reset();await refresh(result.quoteId);setNotice('Đã tạo phương án mới với báo giá V1.');});}}>
       <label className="text-sm">Tên phương án<input name="name" required maxLength={200} placeholder="Phương án A — KOL chủ lực" className={field}/></label>
       <label className="text-sm sm:col-span-2">Ghi chú riêng phương án<textarea name="brief" maxLength={10000} placeholder="Hướng lựa chọn KOL của phương án; brief chung nằm ở danh sách dự án" className={field}/></label>
       <button className={button} disabled={busy||dirty}>Tạo phương án KOL</button>
     </form>}
-    {manage&&phases.length>0&&<section className="p-4 border border-indigo-200 bg-indigo-50/50 rounded-xl space-y-3">
+    {manage&&phases.length>0&&(showCreateFromPhase||fromPhaseIds.length>0||commentLines.length>0||Object.keys(alloc).length>0)&&<section className="p-4 border border-indigo-200 bg-indigo-50/50 rounded-xl space-y-3">
       <h3 className="font-semibold">Tạo phương án từ phase — theo phân bổ PM chọn</h3>
       <p className="text-xs text-slate-500">Danh sách sơ bộ chỉ là ỨNG VIÊN: hệ thống không tự đưa toàn bộ ứng viên vào phương án và không tự chia đều SOW. PM chọn đối tác, dịch vụ/hạng mục và số lượng thực tế cho từng dòng; tổng chi phí của phương án lấy từ phân bổ này. KPI của brief (topics/comments/buzz) là mục tiêu đối chiếu — không tự thành dòng chi phí.</p>
       <div className="flex flex-wrap gap-2">

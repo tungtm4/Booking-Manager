@@ -356,6 +356,9 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
   };
   const [newPhase, setNewPhase] = useState<any>({ name: '', kind: 'creator', budget: '' });
   const [aiText, setAiText] = useState(''), [aiDrafts, setAiDrafts] = useState<any[] | null>(null), [aiBusy, setAiBusy] = useState(false), [aiMsg, setAiMsg] = useState('');
+  // DG-1 (tinh gọn phần dự án): khối AI bóc tách phase + form brief của phase mặc định ĐÓNG.
+  const [aiOpen, setAiOpen] = useState(false);
+  const [phaseBriefOpen, setPhaseBriefOpen] = useState(false);
   // Ô AI bóc tách phase TỰ ĐIỀN brief dự án đã lưu (không bắt dán lại) — chỉ khi người dùng
   // tự sửa ô này thì mới ngừng đồng bộ theo brief.
   const aiTouchedRef = useRef(false);
@@ -752,7 +755,11 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
 
         {/* Khối Bóc tách phase bằng AI (AI-1) */}
         <div className="border-t pt-3 space-y-3">
-          <p className="text-sm font-semibold">Bóc tách phase bằng AI (AI-1)</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold">Bóc tách phase bằng AI (AI-1)</p>
+            <button type="button" className="text-sm text-indigo-700 underline cursor-pointer" aria-expanded={aiOpen} onClick={() => setAiOpen(v => !v)}>{aiOpen ? 'Đóng bóc tách AI' : 'Mở bóc tách AI'}</button>
+          </div>
+          <div className={(aiOpen || aiDrafts) ? 'space-y-3' : 'hidden'}>
           <p className="text-xs text-slate-500">AI đọc brief tổng và đề xuất các phase (loại đối tác, số lượng, ngân sách từng phase). Kết quả chỉ là bản nháp — kiểm tra, sửa rồi mới tạo phase ở mục 2.</p>
           <textarea aria-label="Brief tổng để AI bóc tách phase" className={field} rows={3} maxLength={30000} value={aiText} onChange={e => { aiTouchedRef.current = true; setAiText(e.target.value); }} placeholder="Brief dự án đã lưu sẽ tự điền vào đây — sửa trực tiếp nếu muốn bóc tách theo nội dung khác…" />
           <div className="flex gap-2 flex-wrap">
@@ -794,6 +801,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
               )}
             </div>
           )}
+          </div>
         </div>
       </section>
 
@@ -862,7 +870,14 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
               <button type="button" className="text-sm text-red-700 underline disabled:opacity-50" disabled={busy} onClick={() => { if (window.confirm('Xoá phase này?')) run(async () => { await request(base + `/phases/${activePhase.id}/delete`, {}); activePhaseIdRef.current = ''; await refresh(); setNotice('Đã xoá phase.'); }); }}>Xoá phase này</button>
             </div>
             <div className="border-t pt-3 space-y-3">
-              <p className="text-sm font-semibold">Brief của phase — tiêu chí tìm & đề xuất KOL cho phase này</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold">Brief của phase — tiêu chí tìm & đề xuất KOL cho phase này</p>
+                <button type="button" className="text-sm text-indigo-700 underline cursor-pointer disabled:opacity-50" aria-expanded={phaseBriefOpen || phaseBriefDirty} disabled={phaseBriefDirty} onClick={() => setPhaseBriefOpen(v => !v)}>{phaseBriefOpen || phaseBriefDirty ? 'Đóng brief phase' : 'Sửa brief phase'}</button>
+              </div>
+              {!(phaseBriefOpen || phaseBriefDirty) && (
+                <p className="text-xs text-slate-500">Lĩnh vực: <strong className="text-slate-700">{phaseBrief.category || 'Tất cả'}</strong> · Nền tảng: <strong className="text-slate-700">{(phaseBrief.platforms ?? []).join(', ') || 'Tất cả'}</strong> · Follower tối thiểu: <strong className="text-slate-700">{phaseBrief.minFollowers ? phaseBrief.minFollowers.toLocaleString('vi-VN') : 'Không lọc'}</strong> · Hạng mục: <strong className="text-slate-700">{(phaseBrief.deliverables ?? []).map((d: any) => (PRICE_FORMAT_LABELS[d.format as keyof typeof PRICE_FORMAT_LABELS] ?? d.format) + ' ×' + d.quantity).join(', ') || 'chưa đặt'}</strong></p>
+              )}
+              <div className={(phaseBriefOpen || phaseBriefDirty) ? 'space-y-3' : 'hidden'}>
               <label className="block text-sm">Nội dung brief của phase
                 <textarea className={field} rows={3} maxLength={10000} value={phaseBrief.text} onChange={e => changePhaseBrief('text', e.target.value)} />
               </label>
@@ -906,6 +921,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
                 await refresh();
                 setNotice('Đã lưu brief của phase và cập nhật kết quả phù hợp.');
               })}>Lưu brief phase</button>
+              </div>
             </div>
           </div>
         )}
@@ -1216,7 +1232,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
                 )}
               />
               <div className="flex flex-wrap items-center gap-3 text-xs px-1">
-                {phases.length > 0 && (
+                {phases.length > 1 && (
                   <label className="flex items-center gap-1">Phase:
                     <select aria-label="Chuyển phase cho KOL" className="rounded border border-slate-300 px-2 py-1 bg-white" value={row.phaseId ?? phases[0]?.id ?? ''} disabled={busy} onChange={e => {
                       const target = e.target.value;
@@ -1230,6 +1246,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
                     </select>
                   </label>
                 )}
+                {phases.length === 1 && <span className="text-slate-500">Phase: {phases[0].name}</span>}
                 <button type="button" className="text-indigo-700 underline disabled:opacity-50" disabled={busy} onClick={() => setSigningTarget({ type: 'kol', id: row.catalogId, name: row.profile?.ten ?? '' })}>Hồ sơ ký kết</button>
                 <button type="button" className="text-red-700 underline disabled:opacity-50" disabled={busy} onClick={() => { if (window.confirm('Xoá KOL này khỏi danh sách dự án?')) run(async () => { await request(base + `/shortlist/${row.id}/remove`, {}); await refresh(); setNotice('Đã xoá KOL khỏi danh sách dự án.'); }); }}>Xoá khỏi dự án</button>
               </div>
@@ -1273,7 +1290,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
                 }}
               />
               <div className="flex flex-wrap items-center gap-3 text-xs px-1">
-                {phases.length > 0 && (
+                {phases.length > 1 && (
                   <label className="flex items-center gap-1">Phase:
                     <select aria-label="Chuyển phase cho Community" className="rounded border border-slate-300 px-2 py-1 bg-white" value={row.phaseId ?? phases[0]?.id ?? ''} disabled={busy} onChange={e => {
                       const targetPhase = e.target.value;
@@ -1287,6 +1304,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
                     </select>
                   </label>
                 )}
+                {phases.length === 1 && <span className="text-slate-500">Phase: {phases[0].name}</span>}
                 <button type="button" className="text-indigo-700 underline disabled:opacity-50" disabled={busy} onClick={() => setSigningTarget({ type: 'community', id: row.catalogId, name: row.profile?.ten ?? '' })}>Hồ sơ ký kết</button>
                 <button type="button" className="text-red-700 underline disabled:opacity-50" disabled={busy} onClick={() => { if (window.confirm('Xoá Community này khỏi danh sách dự án?')) run(async () => { await request(base + `/shortlist/${row.id}/remove`, {}); await refresh(); setNotice('Đã xoá Community khỏi danh sách dự án.'); }); }}>Xoá khỏi dự án</button>
               </div>
@@ -1308,7 +1326,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
         </div>
       </section>
 
-      {data.canManage && (
+      {data.canManage && selected.length > 0 && (
         <section className="border border-indigo-200 bg-indigo-50 rounded-xl p-4 space-y-3">
           <h4 className="font-semibold">5. Đưa KOL đã chọn vào phương án</h4>
           <p className="text-sm">Mục tiêu brief: {brief.targetCount ?? 'Chưa đặt'} KOL · Đang tích {selected.length} KOL. Có thể dùng một KOL trong nhiều phương án.</p>
@@ -1351,7 +1369,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
               Tải lại dữ liệu
             </button>
           </div>
-          <p className="text-xs text-slate-500">Giá chụp vào phương án kèm trạng thái xác nhận; bản nháp được thiếu giá/chưa xác nhận nhưng cổng giá ở server chặn gửi duyệt tới khi đủ. Không tự tạo phương án, không tự chia đều SOW toàn chiến dịch. Community đưa vào theo từng dịch vụ ở mục 4, hoặc phân bổ hàng loạt khi tạo phương án từ phase trong mục Phương án & Báo giá.</p>
+          <p className="text-xs text-slate-500">Giá chụp vào phương án kèm trạng thái xác nhận; cổng giá ở server chặn gửi duyệt tới khi đủ giá và đã xác nhận. Community đưa vào theo từng dịch vụ ở mục 4.</p>
         </section>
       )}
       {signingTarget && (

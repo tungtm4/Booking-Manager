@@ -44,6 +44,8 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
   const [briefForm, setBriefForm] = useState<any>(null);
   const [briefRevision, setBriefRevision] = useState(0);
   const [briefDirty, setBriefDirty] = useState(false);
+  // DG-2 (tinh gọn phần dự án): form brief tầng dự án mặc định ĐÓNG — chỉ hiện tóm tắt.
+  const [briefOpen, setBriefOpen] = useState(false);
   const [briefSaving, setBriefSaving] = useState(false);
   const [briefNotice, setBriefNotice] = useState('');
   const [briefError, setBriefError] = useState('');
@@ -138,6 +140,7 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
   if (error) return <div className="p-4 bg-red-50 text-red-700 rounded-xl">{error}</div>;
 
   const brief = briefForm || data?.shortlist?.brief || {};
+  const showBriefForm = canEdit && (briefOpen || briefDirty);
   const phases = data?.phases || [];
   const options = data?.options || [];
   const contracts = data?.contracts || [];
@@ -265,6 +268,9 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {canEdit && !briefDirty && (
+              <button type="button" className="text-sm text-indigo-700 underline cursor-pointer" aria-expanded={briefOpen} onClick={() => setBriefOpen(v => !v)}>{briefOpen ? 'Đóng biểu mẫu brief' : 'Chỉnh sửa brief'}</button>
+            )}
             {!canEdit ? (
               <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-600 border border-slate-200">
                 Quyền xem (Booking) — Chỉ PM / Admin được chỉnh sửa
@@ -280,7 +286,20 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
         {briefError && <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl">{briefError}</div>}
         {briefNotice && <div className="p-3 bg-emerald-50 text-emerald-800 text-xs rounded-xl">{briefNotice}</div>}
 
-        {briefForm && (
+        {briefForm && !showBriefForm && (
+          <div className="text-sm space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
+            <p className="text-slate-800 whitespace-pre-wrap">{briefForm.text || 'Chưa nhập nội dung brief tổng.'}</p>
+            <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-slate-200/60 text-xs">
+              <div><span className="text-slate-400 block">Lĩnh vực:</span><strong className="text-slate-700">{briefForm.category || 'Tất cả'}</strong></div>
+              <div><span className="text-slate-400 block">Nền tảng:</span><strong className="text-slate-700">{(briefForm.platforms ?? []).join(', ') || briefForm.platform || 'Tất cả'}</strong></div>
+              <div><span className="text-slate-400 block">Follower tối thiểu:</span><strong className="text-slate-700">{briefForm.minFollowers ? Number(briefForm.minFollowers).toLocaleString('vi-VN') : 'Không lọc'}</strong></div>
+              <div><span className="text-slate-400 block">Số KOL mục tiêu:</span><strong className="text-slate-700">{briefForm.targetCount ?? 'Chưa đặt'}</strong></div>
+            </div>
+            <p className="text-xs text-slate-500">{canEdit ? 'Bấm “Chỉnh sửa brief” ở góc trên để mở toàn bộ biểu mẫu tiêu chí.' : 'Brief do PM/Admin quản lý — Booking xem tóm tắt này để nắm tiêu chí.'}</p>
+          </div>
+        )}
+
+        {briefForm && showBriefForm && (
           <fieldset disabled={!canEdit || briefSaving} className="space-y-4">
             <label className="block text-sm">
               <span className="text-slate-700 font-semibold mb-1 block">Nội dung brief tổng</span>
@@ -568,6 +587,10 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedQuoteId, setSelectedQuoteId] = useState<string>('');
+  // DG-2 (tinh gọn phần dự án): các khối phụ của P&L mặc định ĐÓNG, chỉ khối tổng mở sẵn.
+  const [openCash, setOpenCash] = useState(false);
+  const [openCompare, setOpenCompare] = useState(false);
+  const [openDetail, setOpenDetail] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -637,8 +660,15 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
           </div>
         )}
 
-        {/* Khối tiền theo hợp đồng tách riêng */}
+        {/* Khối tiền theo hợp đồng tách riêng — DG-2: mặc định thu gọn thành 1 thanh tóm tắt */}
         {cash && (
+          <button type="button" className="w-full flex flex-wrap items-center justify-between gap-2 border border-purple-100 rounded-2xl px-5 py-3 bg-white shadow-xs text-sm cursor-pointer hover:bg-purple-50/40" aria-expanded={openCash} onClick={() => setOpenCash(v => !v)}>
+            <span className="font-semibold text-slate-800">Tiền theo hợp đồng của dự án</span>
+            <span className="text-slate-600">Đã trả <strong className="text-emerald-700">{money(cash.totals?.paid)}</strong> · Còn phải trả <strong className="text-amber-700">{money(cash.totals?.remaining)}</strong></span>
+            <span className="text-indigo-700 underline text-xs font-semibold">{openCash ? 'Thu gọn' : 'Xem chi tiết'}</span>
+          </button>
+        )}
+        {cash && openCash && (
           <div className="border border-purple-100 rounded-2xl p-5 bg-white shadow-xs space-y-3">
             <div className="border-b border-purple-100 pb-3">
               <h4 className="font-bold text-slate-900 text-base">
@@ -713,7 +743,9 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
           <p className="text-xs text-slate-500">
             Các phương án là lựa chọn thay thế (không cộng dồn). Bấm vào một phiên bản để xem chi tiết bên dưới.
           </p>
+          <button type="button" className="text-sm text-indigo-700 underline cursor-pointer mt-1" aria-expanded={openCompare} onClick={() => setOpenCompare(v => !v)}>{openCompare ? 'Thu gọn so sánh' : 'Mở bảng so sánh'}</button>
         </div>
+        <div className={openCompare ? '' : 'hidden'}>
         {options.length === 0 ? (
           <p className="text-xs text-slate-500 italic p-3 border rounded-xl">Dự án chưa có phương án nào.</p>
         ) : (
@@ -766,6 +798,7 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
             ))}
           </div>
         )}
+        </div>
       </section>
 
       {/* (c) Xem chi tiết P&L của từng phiên bản báo giá */}
@@ -795,13 +828,18 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
               </select>
             </div>
           )}
+          {currentVersion && (
+            <button type="button" className="text-sm text-indigo-700 underline cursor-pointer" aria-expanded={openDetail} onClick={() => setOpenDetail(v => !v)}>{openDetail ? 'Thu gọn chi tiết' : 'Xem chi tiết'}</button>
+          )}
         </div>
 
         {currentVersion ? (
+          openDetail ? (
           <PnlBlock
             title={`Dashboard P&L theo nguồn chi phí (Giai đoạn C) — ${currentVersion.optionName} / V${currentVersion.number}`}
             pnl={currentVersion.pnl}
           />
+          ) : null
         ) : (
           <p className="text-xs text-slate-500 italic p-4 bg-white border border-dashed rounded-xl">
             Chưa có phiên bản báo giá nào để hiển thị chi tiết P&L.

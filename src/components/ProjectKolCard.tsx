@@ -248,31 +248,29 @@ export function ProjectKolCard({
                 ? PRICE_FORMAT_STYLES[format]
                 : 'bg-slate-50 border-slate-200 text-slate-400';
 
-              const boxClass = `text-[11px] px-1.5 py-0.5 rounded-md ${ringClass} ${baseColor} text-left truncate transition-all ${
+              const boxClass = `text-[11px] px-1.5 py-0.5 rounded-md ${ringClass} ${baseColor} text-left transition-all ${
                 renderPriceEditor ? 'cursor-pointer hover:shadow-xs' : ''
               } ${editing === format ? 'ring-2 ring-indigo-600' : ''}`;
 
               const content = (
                 <>
                   <div className="flex items-center justify-between gap-1">
-                    <span className="truncate">
-                      <span className={hasPrice ? 'font-medium' : 'font-normal'}>
-                        {PRICE_SHORT_LABELS[format]}:{' '}
-                      </span>
-                      <span className={hasPrice ? 'font-bold' : 'text-amber-600 font-medium'}>
-                        {hasPrice ? `${formatNumberOnly(value)}đ` : 'Chưa có giá'}
-                      </span>
-                      {status === 'confirmed' && (
-                        <span title="Đã xác nhận" className="inline-flex items-center">
-                          <Check
-                            size={12}
-                            className="inline text-emerald-600 ml-1 stroke-[3]"
-                          />
-                        </span>
-                      )}
-                    </span>
+                    <span className="truncate font-medium">{PRICE_SHORT_LABELS[format]}</span>
                     {renderPriceEditor && (
                       <ChevronDown size={11} className="text-slate-400 shrink-0 opacity-70" />
+                    )}
+                  </div>
+                  <div className="whitespace-nowrap leading-tight">
+                    <span className={hasPrice ? 'font-bold text-[12px]' : 'text-amber-600 font-medium'}>
+                      {hasPrice ? `${formatNumberOnly(value)}₫` : 'Chưa có giá'}
+                    </span>
+                    {status === 'confirmed' && (
+                      <span title="Đã xác nhận" className="inline-flex items-center">
+                        <Check
+                          size={12}
+                          className="inline text-emerald-600 ml-1 stroke-[3]"
+                        />
+                      </span>
                     )}
                   </div>
                   <div

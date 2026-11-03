@@ -19,7 +19,7 @@ test('lý do dựa trên tiêu chí hồ sơ, follower đúng kênh, không đá
 });
 test('thẻ hiển thị 6 giá gọn, làm nổi bật tổng brief, giá 0 hợp lệ, link an toàn, hiện giờ cập nhật',()=>{
   const html=renderToStaticMarkup(React.createElement(ProjectKolCard,{profile:{...profile,engagementRate:99,ngayCapNhat:'2026-10-22T14:30:00.000Z'},brief,selected:false,disabled:false,selectionLabel:'Giữ KOL'}));
-  assert.match(html,/250.000/);assert.match(html,/12.000.000/);assert.match(html,/>0đ</);
+  assert.match(html,/250.000/);assert.match(html,/12.000.000/);assert.match(html,/>0₫</);
   assert.match(html,/10 toàn chiến dịch/);assert.match(html,/15 toàn chiến dịch/);
   assert.match(html,/Chưa xác nhận/);assert.match(html,/Chưa có giá/);
   assert.match(html,/Cập nhật:/);

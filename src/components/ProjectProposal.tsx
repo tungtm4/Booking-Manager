@@ -891,11 +891,6 @@ export function ProjectProposal({
             )
           )}
         </div>
-        {embedded && (
-          <div className="rounded-lg bg-purple-50/70 border border-purple-200/60 px-3 py-2 text-xs text-purple-800">
-            Tiêu chí được nạp từ brief của phase (sửa tại mục Các Phase hoặc tab Tổng quan). Đề xuất chỉ đọc brief để xếp hạng đối tác phù hợp.
-          </div>
-        )}
         {hasSavedBrief && !embedded && (
           <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800">
             Brief của phase đã được lưu. Bạn có thể tìm đối tác ngay hoặc chỉnh sửa tiêu chí bên dưới.
