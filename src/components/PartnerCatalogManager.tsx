@@ -39,6 +39,18 @@ interface PartnerCatalogManagerProps {
 
 export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCatalogManagerProps) {
   const [tab, setTab] = useState<'kol' | 'community'>(initialTab);
+  // Quyền sửa hồ sơ ký kết của người đang xem (hỏi máy chủ — nguồn sự thật duy nhất):
+  // Admin sửa được toàn kho; PM/Booking đang giữ vai ở ít nhất một dự án cũng sửa được
+  // hồ sơ ký kết; người không giữ vai nào mới đúng là "Chỉ đọc".
+  const [canEditSigning, setCanEditSigning] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch('/api/workspace/partners/signing-permission')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (live && d) setCanEditSigning(Boolean(d.canEdit)); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
 
   // Core KOL Data State
   const [kols, setKols] = useState<CatalogKol[]>([]);
@@ -319,11 +331,7 @@ export function PartnerCatalogManager({ isAdmin, initialTab = 'kol' }: PartnerCa
         </div>
 
         <div className="text-xs text-slate-500 font-medium">
-          {tab === 'kol' ? (
-            <span>Quyền hạn: {isAdmin ? 'Quản trị viên (Thêm/Sửa/Xoá)' : 'Xem tra cứu & hồ sơ ký kết (Chỉ đọc)'}</span>
-          ) : (
-            <span>Quyền hạn: {isAdmin ? 'Quản trị viên (Thêm/Sửa/Xoá)' : 'Xem tra cứu & hồ sơ ký kết (Chỉ đọc)'}</span>
-          )}
+          <span>Quyền hạn: {isAdmin ? 'Quản trị viên (Thêm/Sửa/Xoá)' : canEditSigning ? 'Xem tra cứu kho · Được sửa hồ sơ ký kết' : canEditSigning === false ? 'Xem tra cứu & hồ sơ ký kết (Chỉ đọc)' : 'Xem tra cứu & hồ sơ ký kết'}</span>
         </div>
       </div>
 

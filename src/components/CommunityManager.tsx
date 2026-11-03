@@ -738,7 +738,7 @@ export function CommunityManager({
                             Tên được cắt gọn (truncate) còn giá luôn nguyên vẹn ở cuối chip. */}
                         <span className={`truncate min-w-0 ${hasPrice ? 'font-medium' : 'font-normal'}`}>{s.ten}:</span>
                         {hasPrice ? (
-                          <span className="font-bold shrink-0">{formatNumberOnly(s.giaThamKhao!)}đ</span>
+                          <span className="font-bold shrink-0">{formatNumberOnly(s.giaThamKhao!)}₫</span>
                         ) : (
                           <span className="shrink-0">—</span>
                         )}

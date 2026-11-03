@@ -128,23 +128,23 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
       <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200">
         {/* Modal Header */}
-        <div className="relative bg-slate-900 text-white p-6 sm:p-8 shrink-0">
+        <div className="relative bg-purple-50 text-slate-900 border-b border-purple-100 p-6 sm:p-8 shrink-0">
           {/* Close button */}
           <button
             onClick={guardedClose}
             aria-label="Đóng chi tiết KOL"
-            className="absolute right-4 top-4 p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+            className="absolute right-4 top-4 p-2 text-slate-500 hover:text-slate-800 hover:bg-purple-100 rounded-full transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
 
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
             {/* Avatar */}
-            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-white/10 border-2 border-white/20 shrink-0 shadow-lg">
+            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-white border-2 border-purple-200 shrink-0 shadow-sm">
               {kol.anhDaiDien ? (
                 <img src={kol.anhDaiDien} alt={kol.ten} className="w-full h-full object-cover" />
               ) : (
-                <div className="w-full h-full flex items-center justify-center bg-indigo-600 text-white font-bold text-2xl">
+                <div className="w-full h-full flex items-center justify-center bg-[#7C3AED] text-white font-bold text-2xl">
                   {kol.ten.slice(0, 2).toUpperCase()}
                 </div>
               )}
@@ -153,11 +153,11 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
             {/* Main Info */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
+                <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
                   {kol.ten}
                 </h2>
                 {kol.isSample && (
-                  <span className="text-xs px-2 py-0.5 rounded-md bg-amber-400/20 text-amber-300 border border-amber-400/30 font-medium">
+                  <span className="text-xs px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200 font-medium">
                     Hồ sơ mẫu
                   </span>
                 )}
@@ -168,7 +168,7 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
                 {kol.linhVuc.map((cat) => (
                   <span
                     key={cat}
-                    className="text-xs px-2.5 py-0.5 rounded-md font-medium bg-white/15 text-slate-100 border border-white/10"
+                    className="text-xs px-2.5 py-0.5 rounded-md font-medium bg-white text-slate-700 border border-purple-200"
                   >
                     {cat}
                   </span>
@@ -176,21 +176,21 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
               </div>
 
               {/* Quick stats row */}
-              <div className="flex items-center gap-4 mt-3 text-xs sm:text-sm text-slate-300 flex-wrap">
+              <div className="flex items-center gap-4 mt-3 text-xs sm:text-sm text-slate-600 flex-wrap">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-slate-400">Tổng followers:</span>
-                  <strong className="text-white font-bold">{formatFollowers(totalFollowers)}</strong>
+                  <span className="text-slate-500">Tổng followers:</span>
+                  <strong className="text-slate-900 font-bold">{formatFollowers(totalFollowers)}</strong>
                 </div>
                 <span>•</span>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-slate-400">Đánh giá:</span>
+                  <span className="text-slate-500">Đánh giá:</span>
                   {kol.danhGiaHieuQua?.diem ? (
-                    <span className="flex items-center gap-1 text-amber-400 font-bold">
+                    <span className="flex items-center gap-1 text-amber-600 font-bold">
                       <Star className="w-4 h-4 fill-amber-400" />
                       {kol.danhGiaHieuQua.diem} / 5
                     </span>
                   ) : (
-                    <span className="text-slate-400">Chưa có điểm</span>
+                    <span className="text-slate-500">Chưa có điểm</span>
                   )}
                 </div>
               </div>
@@ -204,7 +204,7 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
                   onAddToSow(kol);
                   onClose();
                 }}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-xl text-sm shadow-md transition-all active:scale-95"
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 bg-[#7C3AED] hover:bg-[#6D28D9] text-white font-semibold rounded-xl text-sm shadow-md transition-all active:scale-95"
               >
                 <FileSpreadsheet className="w-4 h-4" />
                 <span>Lập báo giá SOW</span>
@@ -530,7 +530,7 @@ export const KolDetailModal: React.FC<KolDetailModalProps> = ({
 
             <button
               onClick={guardedClose}
-              className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              className="px-4 py-2 text-xs font-semibold text-white bg-[#7C3AED] hover:bg-[#6D28D9] rounded-lg transition-colors cursor-pointer"
             >
               Đóng
             </button>

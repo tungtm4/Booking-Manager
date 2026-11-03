@@ -71,6 +71,12 @@ test('A1 hồ sơ ký kết: lưu/tải lại cả 2 loại, khoá theo loại, 
   assert.equal(g0.status,200);assert.equal(g0.body.profile.revision,0);assert.equal(g0.body.profile.legalName,'');assert.deepEqual(g0.body.documents,[]);assert.equal(g0.body.canEdit,true);
   const gm=await call(S,undefined,cookies.member);
   assert.equal(gm.status,200);assert.equal(gm.body.canEdit,false); // thành viên không vai trò dự án: xem được, không sửa
+  // Endpoint quyền cho nhãn ở kho: khớp đúng canEdit từng vai (Booking/PM/Admin sửa được, thành viên không vai thì không).
+  assert.equal((await call('/partners/signing-permission')).status,401);
+  assert.equal((await call('/partners/signing-permission',undefined,cookies.booking)).body.canEdit,true);
+  assert.equal((await call('/partners/signing-permission',undefined,cookies.pm)).body.canEdit,true);
+  assert.equal((await call('/partners/signing-permission',undefined,cookies.member)).body.canEdit,false);
+  assert.equal((await call('/partners/signing-permission',undefined,cookies.admin)).body.canEdit,true);
   // Booking cập nhật khối ký kết của KOL (endpoint hẹp).
   const fields={legalName:'Nguyễn Văn Mẫu',signingForm:'hkd',representative:'',taxCode:'0123456789',idNumber:'001234567890',address:'Hà Nội',certEmail:'mau@example.test',bankName:'Vietcombank',bankAccountName:'NGUYEN VAN MAU',bankAccountNumber:'0123456789',bankBranch:'Hoàn Kiếm',customTaxRate:6.5,customTaxMode:'tren_net',note:'Suất riêng theo thỏa thuận'};
   const s1=await call(S,{revision:0,...fields},cookies.booking);

@@ -96,6 +96,13 @@ export function installPartnerSigning(router:Router,db:DatabaseSync,audit:(a:str
   const docOut=(r:any)=>({id:r.id,name:r.display_name,mime:r.mime,size:r.size,sha256:r.sha256,revision:r.revision,createdAt:r.created_at});
   const loadDocs=(orgId:string,type:string,id:string)=>(db.prepare('SELECT * FROM partner_documents WHERE organization_id=? AND partner_type=? AND partner_id=? ORDER BY rowid').all(orgId,type,id) as any[]).map(docOut);
 
+  // Quyền sửa hồ sơ ký kết của chính người đang đăng nhập — để giao diện ghi nhãn quyền đúng
+  // (trước đây nhãn ở kho luôn ghi "Chỉ đọc" dù PM/Booking thực tế sửa được).
+  router.get('/partners/signing-permission',(req,res)=>{
+    const u=res.locals.user;
+    res.json({canEdit:canEdit(u)});
+  });
+
   router.get('/partners/:type/:id/signing',(req,res)=>{
     const u=res.locals.user;const t=parseTarget(req);
     if(!t)return res.status(400).json({message:'Loại đối tác không hợp lệ.'});

@@ -526,12 +526,12 @@ function PnlBlock({ title, pnl }: { title: string; pnl: any }) {
         {rows.map(([label, value]) => (
           <div key={label} className="flex justify-between items-baseline gap-4 py-0.5 border-b border-slate-50">
             <span className="text-slate-600 text-xs sm:text-sm">{label}</span>
-            <strong className="text-slate-900 font-semibold">{money(value)}</strong>
+            <strong className="text-slate-900 font-semibold whitespace-nowrap text-right shrink-0">{money(value)}</strong>
           </div>
         ))}
         <div className="flex justify-between items-baseline gap-4 py-0.5 border-b border-slate-50">
           <span className="text-slate-600 text-xs sm:text-sm">Biên lợi nhuận</span>
-          <strong className="text-slate-900 font-semibold">
+          <strong className="text-slate-900 font-semibold whitespace-nowrap text-right shrink-0">
             {pnl.marginPercent === null || pnl.marginPercent === undefined
               ? 'Chưa xác định'
               : pnl.marginPercent.toLocaleString('vi-VN', { maximumFractionDigits: 2 }) + '%'}
@@ -539,11 +539,11 @@ function PnlBlock({ title, pnl }: { title: string; pnl: any }) {
         </div>
         <div className="flex justify-between items-baseline gap-4 py-0.5 border-b border-slate-50">
           <span className="text-slate-600 text-xs sm:text-sm">Phần đã chốt theo hợp đồng (NET)</span>
-          <strong className="text-slate-900 font-semibold">{money(pnl.committed?.net ?? 0)}</strong>
+          <strong className="text-slate-900 font-semibold whitespace-nowrap text-right shrink-0">{money(pnl.committed?.net ?? 0)}</strong>
         </div>
         <div className="flex justify-between items-baseline gap-4 py-0.5 border-b border-slate-50">
           <span className="text-slate-600 text-xs sm:text-sm">Phần dự kiến từ hồ sơ/tự xác nhận (NET)</span>
-          <strong className="text-slate-900 font-semibold">{money(pnl.estimated?.net ?? 0)}</strong>
+          <strong className="text-slate-900 font-semibold whitespace-nowrap text-right shrink-0">{money(pnl.estimated?.net ?? 0)}</strong>
         </div>
       </div>
       {pnl.unknownTax > 0 && (
@@ -1024,7 +1024,7 @@ export default function WorkspaceShell() {
             <div className="w-9 h-9 rounded-xl bg-[#7C3AED] text-white font-black flex items-center justify-center text-lg shadow-xs">K</div>
             <div>
               <div className="font-extrabold text-base text-[#7C3AED] leading-tight">Booking Manager</div>
-              <p className="text-[10px] text-slate-500 font-medium">UX-1 Project Shell</p>
+              <p className="text-[10px] text-slate-500 font-medium">Quản lý booking KOL & Community</p>
             </div>
           </div>
 
@@ -1433,7 +1433,7 @@ export default function WorkspaceShell() {
                         }`}
                         onClick={() => handleNavigateWithGuard(() => setProjectView('overview'))}
                       >
-                        1. Tổng quan
+                        Tổng quan
                       </button>
                       <button
                         className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
@@ -1441,7 +1441,7 @@ export default function WorkspaceShell() {
                         }`}
                         onClick={() => handleNavigateWithGuard(() => setProjectView('shortlist'))}
                       >
-                        2. Đối tác & Phase
+                        Đối tác & Phase
                       </button>
                       <button
                         className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
@@ -1449,7 +1449,7 @@ export default function WorkspaceShell() {
                         }`}
                         onClick={() => handleNavigateWithGuard(() => setProjectView('quotes'))}
                       >
-                        3. Phương án & Báo giá
+                        Phương án & Báo giá
                       </button>
                       <button
                         className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
@@ -1457,7 +1457,7 @@ export default function WorkspaceShell() {
                         }`}
                         onClick={() => handleNavigateWithGuard(() => setProjectView('contracts'))}
                       >
-                        4. Hợp đồng & Thanh toán
+                        Hợp đồng & Thanh toán
                       </button>
 
                       {/* Tab 5: Financials & P&L - Strictly PM & Admin Scope */}
@@ -1468,7 +1468,7 @@ export default function WorkspaceShell() {
                           }`}
                           onClick={() => handleNavigateWithGuard(() => setProjectView('pnl'))}
                         >
-                          5. Tài chính & P&L (PM/Admin)
+                          Tài chính & P&L
                         </button>
                       )}
                     </nav>
@@ -1519,7 +1519,7 @@ export default function WorkspaceShell() {
 
       {/* Footer */}
       <footer className="border-t border-purple-100 bg-white py-4 text-center text-xs text-slate-500">
-        <p>© 2026 KOL Booking Manager • UX-1 Booking Manager Standard Baseline</p>
+        <p>© 2026 KOL Booking Manager</p>
       </footer>
 
       {showPasswordModal && passwordModal}

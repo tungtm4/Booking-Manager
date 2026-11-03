@@ -356,6 +356,10 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
   };
   const [newPhase, setNewPhase] = useState<any>({ name: '', kind: 'creator', budget: '' });
   const [aiText, setAiText] = useState(''), [aiDrafts, setAiDrafts] = useState<any[] | null>(null), [aiBusy, setAiBusy] = useState(false), [aiMsg, setAiMsg] = useState('');
+  // Ô AI bóc tách phase TỰ ĐIỀN brief dự án đã lưu (không bắt dán lại) — chỉ khi người dùng
+  // tự sửa ô này thì mới ngừng đồng bộ theo brief.
+  const aiTouchedRef = useRef(false);
+  useEffect(() => { if (!aiTouchedRef.current) setAiText(data?.brief?.text || ''); }, [data?.brief?.text]);
   const activePhaseIdRef = useRef(''), syncedPhaseRev = useRef<Record<string, number>>({});
 
   // Phân trang cho cả hai danh sách
@@ -741,7 +745,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
             </div>
             <div>
               <span className="text-slate-400 block">Follower tối thiểu:</span>
-              <strong className="text-slate-700">{formatMoneyInput(data.brief.minFollowers || '') || '0'}</strong>
+              <strong className="text-slate-700">{data.brief.minFollowers ? formatMoneyInput(data.brief.minFollowers) : 'Không lọc'}</strong>
             </div>
           </div>
         </div>
@@ -750,9 +754,9 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
         <div className="border-t pt-3 space-y-3">
           <p className="text-sm font-semibold">Bóc tách phase bằng AI (AI-1)</p>
           <p className="text-xs text-slate-500">AI đọc brief tổng và đề xuất các phase (loại đối tác, số lượng, ngân sách từng phase). Kết quả chỉ là bản nháp — kiểm tra, sửa rồi mới tạo phase ở mục 2.</p>
-          <textarea aria-label="Brief tổng để AI bóc tách phase" className={field} rows={3} maxLength={30000} value={aiText} onChange={e => setAiText(e.target.value)} placeholder="Dán brief tổng của dự án…" />
+          <textarea aria-label="Brief tổng để AI bóc tách phase" className={field} rows={3} maxLength={30000} value={aiText} onChange={e => { aiTouchedRef.current = true; setAiText(e.target.value); }} placeholder="Brief dự án đã lưu sẽ tự điền vào đây — sửa trực tiếp nếu muốn bóc tách theo nội dung khác…" />
           <div className="flex gap-2 flex-wrap">
-            <button type="button" className="border rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-slate-50" disabled={aiBusy} onClick={() => setAiText(data.brief.text || '')}>Dùng nội dung brief chung</button>
+            <button type="button" className="border rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-slate-50" disabled={aiBusy} onClick={() => { aiTouchedRef.current = false; setAiText(data.brief.text || ''); }}>Dùng nội dung brief chung</button>
             <button type="button" className={button} disabled={aiBusy || !aiText.trim()} onClick={runBreakdown}>{aiBusy ? 'Đang bóc tách…' : 'Bóc tách thành phase'}</button>
           </div>
           {aiMsg && <p className="text-sm text-slate-600">{aiMsg}</p>}
@@ -828,7 +832,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
           <div className="rounded-xl bg-slate-50 p-3 space-y-1.5 text-sm text-slate-600">
             <p><span className="font-semibold text-slate-800">{phaseInfo.name}</span> · {PHASE_KIND_LABELS[phaseInfo.kind as keyof typeof PHASE_KIND_LABELS] ?? phaseInfo.kind} · Ngân sách: {phaseInfo.budget === '' || phaseInfo.budget == null ? 'Chưa đặt' : Number(phaseInfo.budget).toLocaleString('vi-VN') + ' ₫'}</p>
             {phaseInfo.description && <p>{phaseInfo.description}</p>}
-            <p className="text-xs text-slate-500">Brief: lĩnh vực {phaseBrief.category || '—'} · follower tối thiểu {(phaseBrief.minFollowers || 0).toLocaleString('vi-VN')} · mục tiêu {phaseBrief.targetCount ?? '—'} đối tác. Phase do PM quản lý — Booking xem brief để scout và xác nhận giá ở các mục dưới.</p>
+            <p className="text-xs text-slate-500">Brief: lĩnh vực {phaseBrief.category || '—'} · follower tối thiểu {phaseBrief.minFollowers ? phaseBrief.minFollowers.toLocaleString('vi-VN') : 'không lọc'} · mục tiêu {phaseBrief.targetCount ?? '—'} đối tác. Phase do PM quản lý — Booking xem brief để scout và xác nhận giá ở các mục dưới.</p>
           </div>
         )}
         {activePhase && phaseBrief && data.canManage && (

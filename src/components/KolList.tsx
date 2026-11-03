@@ -795,12 +795,14 @@ export const KolList: React.FC<KolListProps> = ({
             >
               Xóa bộ lọc
             </button>
-            <button
-              onClick={onOpenAddKol}
-              className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
-            >
-              Thêm KOL mới
-            </button>
+            {canEdit && (
+              <button
+                onClick={onOpenAddKol}
+                className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+              >
+                Thêm KOL mới
+              </button>
+            )}
           </div>
         </div>
       ) : viewMode === 'grid' ? (
@@ -974,19 +976,19 @@ export const KolList: React.FC<KolListProps> = ({
                       return (
                         <div
                           key={fmt}
-                          className={`text-[11px] px-1.5 py-0.5 rounded-md border truncate whitespace-nowrap transition-all ${
+                          className={`px-1.5 py-0.5 rounded-md border transition-all flex flex-col leading-tight ${
                             hasPrice
                               ? `${PRICE_FORMAT_STYLES[fmt]} ${isSelectedFilter ? 'ring-2 ring-slate-700/50' : ''}`
                               : `bg-slate-50 border-slate-200 text-slate-400 ${isSelectedFilter ? 'ring-2 ring-slate-700/50' : ''}`
                           }`}
                         >
-                          <span className={hasPrice ? 'font-medium' : 'font-normal'}>{PRICE_SHORT_LABELS[fmt]}: </span>
+                          <span className={`text-[10px] ${hasPrice ? 'font-medium' : 'font-normal'}`}>{PRICE_SHORT_LABELS[fmt]}</span>
                           {hasPrice ? (
-                            <span className={isSelectedFilter ? 'font-extrabold' : 'font-bold'}>
-                              {formatNumberOnly(val)}đ
+                            <span className={`text-[11px] whitespace-nowrap ${isSelectedFilter ? 'font-extrabold' : 'font-bold'}`}>
+                              {formatNumberOnly(val)}₫
                             </span>
                           ) : (
-                            <span>—</span>
+                            <span className="text-[11px]">—</span>
                           )}
                         </div>
                       );

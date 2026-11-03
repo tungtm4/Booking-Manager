@@ -310,7 +310,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
   }
   const legacyQuotes=isAdmin?StorageService.getQuotes():[];
   return <div className="space-y-6 mt-6 border-t border-slate-200 pt-6">
-    <div><h2 className="text-xl font-bold">Phương án KOL & Báo giá</h2><p className="text-sm text-slate-500">Chọn KOL từ tab Brief & Danh sách KOL vào phương án. Bản nháp được phép còn thiếu giá hoặc giá chưa xác nhận; gửi duyệt/duyệt/chốt chỉ khi các dòng được tính đã đủ giá và giá đầu vào đã xác nhận. Mỗi phương án là một lựa chọn cho khách. Các phiên bản là lịch sử chỉnh sửa của lựa chọn đó.</p></div>
+    <div><h2 className="text-xl font-bold">Phương án KOL & Báo giá</h2><p className="text-sm text-slate-500">Chọn KOL từ tab Đối tác & Phase vào phương án. Bản nháp được phép còn thiếu giá; chỉ gửi duyệt/chốt khi mọi dòng đã đủ giá và giá đầu vào đã xác nhận.</p></div>
     {error&&<p role="alert" className="bg-red-50 text-red-700 p-3 rounded-lg">{error}</p>}
     {notice&&<p role="status" className="bg-emerald-50 text-emerald-800 p-3 rounded-lg">{notice}</p>}
     <section className="rounded-xl bg-slate-50 p-4"><h3 className="font-semibold mb-2">Thông tin chiến dịch</h3>
@@ -350,7 +350,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
         return <div key={ph.id} className="bg-white border rounded-xl p-3 space-y-2">
           <p className="text-sm font-semibold">{ph.name} <span className="font-normal text-slate-500">· {rows.length} ứng viên trong danh sách sơ bộ</span></p>
           {targetLines.length>0&&<ul className="text-xs text-slate-600 space-y-0.5">{targetLines.map((t,i)=><li key={i}>· {t}</li>)}</ul>}
-          {!rows.length&&<p className="text-xs text-slate-500">Phase chưa có ứng viên. Thêm đối tác vào danh sách sơ bộ ở tab Brief & Danh sách đối tác.</p>}
+          {!rows.length&&<p className="text-xs text-slate-500">Phase chưa có ứng viên. Thêm đối tác vào danh sách sơ bộ ở tab Đối tác & Phase.</p>}
           {rows.map((r:any)=>{
             const isComm=r.partnerType==='community';
             const keys=isComm?(r.profile.dichVu??[]).map((s:any)=>({key:s.id,label:s.ten+' ('+s.donVi+')'})):(b?.deliverables?.length?b.deliverables.map((d:any)=>({key:d.format,label:PRICE_FORMAT_LABELS[d.format as keyof typeof PRICE_FORMAT_LABELS]??d.format})):Object.entries(PRICE_FORMAT_LABELS).map(([k,v])=>({key:k,label:v})));

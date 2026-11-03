@@ -53,7 +53,7 @@ test('Community hiển thị giá (b): Mã nguồn — xem trước hiện giá,
   // (thay quy tắc "giá trước tên" cũ): đúng khuôn chip KOL = tên dịch vụ + ": " (font-medium)
   // TRƯỚC, giá in đậm SAU; tên được truncate còn giá shrink-0 nên vẫn không bao giờ bị cắt mất.
   const nameIdx = managerCode.indexOf('>{s.ten}:</span>');
-  const chipIdx = managerCode.indexOf('formatNumberOnly(s.giaThamKhao!)}đ');
+  const chipIdx = managerCode.indexOf('formatNumberOnly(s.giaThamKhao!)}₫');
   assert.ok(nameIdx > 0 && chipIdx > nameIdx, 'Chip danh sách phải render tên dịch vụ trước, giá in đậm sau (khuôn KOL)');
   assert.ok(managerCode.includes("const hasPrice = s.giaThamKhao != null;"), 'Giá 0đ phải được coi là có giá (chỉ null mới là chưa có giá)');
 });

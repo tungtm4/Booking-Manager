@@ -274,7 +274,13 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
       {notice && <p className="mb-3 text-sm text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">{notice}</p>}
       {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
       {contracts === null && !error && <p className="text-slate-500">Đang tải…</p>}
-      {contracts !== null && contracts.length === 0 && <p className="text-slate-500">Dự án chưa có hợp đồng nào.</p>}
+      {contracts !== null && contracts.length === 0 && (
+        <div className="border border-dashed border-purple-200 rounded-2xl bg-purple-50/40 p-8 text-center space-y-2">
+          <p className="font-semibold text-slate-800">Dự án chưa có hợp đồng nào</p>
+          <p className="text-sm text-slate-500 max-w-md mx-auto">Hợp đồng được lập cho từng đối tác sau khi phương án được khách chốt. Bấm "Tạo hợp đồng" để lập hợp đồng đầu tiên — hệ thống sẽ chụp lại hồ sơ ký kết của đối tác tại thời điểm lập.</p>
+          <button className={button} onClick={startCreate}>+ Tạo hợp đồng</button>
+        </div>
+      )}
       <div className="divide-y border rounded-2xl bg-white">
         {(contracts ?? []).map(c => (
           <button key={c.id} className="w-full text-left p-4 hover:bg-slate-50" onClick={() => openDetail(c.id)}>
