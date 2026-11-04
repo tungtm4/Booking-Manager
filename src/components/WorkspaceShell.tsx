@@ -170,15 +170,13 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
               <span className="px-2 py-0.5 text-[11px] font-semibold rounded-full bg-purple-50 text-purple-700 border border-purple-200">
                 {project.canManage ? 'PM / Quản lý' : 'Booking'}
               </span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="font-bold text-slate-900 text-lg">Thông tin chiến dịch & Khách hàng</h3>
               {canEdit && !editingInfo && (
-                <button type="button" onClick={startEditInfo} className="text-xs text-[#7C3AED] font-semibold hover:underline cursor-pointer whitespace-nowrap">
+                <button type="button" onClick={startEditInfo} className="ml-auto text-xs text-[#7C3AED] font-semibold hover:underline cursor-pointer whitespace-nowrap">
                   Chỉnh sửa
                 </button>
               )}
             </div>
+            <h3 className="font-bold text-slate-900 text-lg mt-1.5">Thông tin chiến dịch & Khách hàng</h3>
           </div>
           {editingInfo ? (
             <div className="space-y-2.5">
@@ -210,7 +208,7 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
                 <span className="text-slate-400 text-xs block font-medium">Khách hàng / Nhãn hàng</span>
                 <strong className="text-slate-800">{project.client_name || 'Chưa cập nhật'}</strong>
               </div>
-              <div>
+              <div className="col-span-2">
                 <span className="text-slate-400 text-xs block font-medium">Tên chiến dịch</span>
                 <strong className="text-slate-800">{project.campaign_name || project.name}</strong>
               </div>
@@ -232,7 +230,7 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
           <ul className="space-y-2 text-sm">
             {missingPriceRows.length > 0 && (
               <li className="flex items-center justify-between gap-2 p-2.5 bg-amber-50/80 rounded-xl text-amber-900 text-xs font-medium border border-amber-200/50">
-                <span>⚠️ {missingPriceRows.length} đối tác trong danh sách sơ bộ chưa có giá đầu vào.</span>
+                <span>⚠️ {missingPriceRows.length} đối tác chưa có giá đầu vào.</span>
                 <button onClick={() => onSwitchTab('shortlist')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer whitespace-nowrap shrink-0">Xử lý ngay</button>
               </li>
             )}
@@ -244,13 +242,13 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
             )}
             {draftQuotes.length > 0 && (
               <li className="flex items-center justify-between gap-2 p-2.5 bg-blue-50/80 rounded-xl text-blue-900 text-xs font-medium border border-blue-200/50">
-                <span>📄 {draftQuotes.length} bản nháp phương án/báo giá đang chờ hoàn thiện/gửi duyệt.</span>
+                <span>📄 {draftQuotes.length} bản nháp báo giá chờ gửi duyệt.</span>
                 <button onClick={() => onSwitchTab('quotes')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer whitespace-nowrap shrink-0">Xem phương án</button>
               </li>
             )}
             {pendingContractApprovals.length > 0 && (
               <li className="flex items-center justify-between gap-2 p-2.5 bg-purple-50/80 rounded-xl text-purple-900 text-xs font-medium border border-purple-200/50">
-                <span>📑 {pendingContractApprovals.length} hợp đồng chưa trình ký hoặc chờ đối tác chốt.</span>
+                <span>📑 {pendingContractApprovals.length} hợp đồng chờ trình ký/chốt.</span>
                 <button onClick={() => onSwitchTab('contracts')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer whitespace-nowrap shrink-0">Xem hợp đồng</button>
               </li>
             )}
@@ -266,16 +264,14 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
         <div className="flex flex-wrap gap-3">
           {members.length === 0 && <p className="text-sm text-slate-500">Chưa có phân công thành viên riêng. Admin hệ thống có toàn quyền quản lý.</p>}
           {members.map((m: any) => (
-            <div key={m.id} className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50/50">
-              <div className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-xs font-bold">
+            <div key={m.id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50/50 py-1 pl-1 pr-3">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-purple-600 text-xs font-bold text-white">
                 {m.display_name?.charAt(0).toUpperCase() || 'U'}
               </div>
-              <div>
-                <strong className="text-xs text-slate-800 block">{m.display_name}</strong>
-                <span className="text-[10px] text-purple-700 font-semibold bg-purple-50 px-1.5 py-0.5 rounded">
-                  {m.roles?.map((r: string) => labels[r] || r).join(', ')}
-                </span>
-              </div>
+              <strong className="whitespace-nowrap text-sm text-slate-800">{m.display_name}</strong>
+              <span className="whitespace-nowrap text-[11px] font-semibold text-purple-700">
+                {m.roles?.map((r: string) => labels[r] || r).join(', ')}
+              </span>
             </div>
           ))}
         </div>

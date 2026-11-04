@@ -291,6 +291,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
   const [confirmSources,setConfirmSources]=useState<Record<string,string>>({});
   const [costItemId,setCostItemId]=useState<string|null>(null);
   const loadSeqRef=useRef(0);
+  const allocAnchorRef=useRef<Record<string,number>>({});
   const base=`/projects/${projectId}`;
   // Báo trạng thái chưa lưu lên shell để chặn chuyển tab làm mất dữ liệu đang sửa.
   useEffect(()=>{onDirtyChange?.(dirty);},[dirty,onDirtyChange]);
@@ -381,7 +382,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
     </form>}
     {manage&&phases.length>0&&(showCreateFromPhase||fromPhaseIds.length>0||commentLines.length>0||Object.keys(alloc).length>0)&&<section className="p-4 border border-indigo-200 bg-indigo-50/50 rounded-xl space-y-3">
       <h3 className="font-semibold">Tạo phương án từ phase — theo phân bổ PM chọn</h3>
-      <p className="text-xs text-slate-500">Tick chọn đối tác và điền số lượng — chỉ dòng đã chọn mới vào phương án.</p>
+      <p className="text-xs text-slate-500">Tick chọn đối tác và điền số lượng — chỉ dòng đã chọn mới vào phương án. Giữ Shift + bấm để chọn cả khoảng. Giá báo khách điền ở bảng phương án sau khi tạo.</p>
       <div className="flex flex-wrap gap-2">
         {phases.map((ph:any,phIdx:number)=><label key={ph.id} className="flex items-center gap-1 text-sm bg-white border rounded-lg px-2 py-1"><input type="checkbox" checked={fromPhaseIds.includes(ph.id)} onChange={()=>setFromPhaseIds(prev=>prev.includes(ph.id)?prev.filter(x=>x!==ph.id):[...prev,ph.id])}/>{phIdx+1}. {ph.name}</label>)}
       </div>
@@ -410,7 +411,19 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
           return 1;
         };
         const selectedPartners=new Set(allocLines.filter(l=>l.qty>0).map(l=>l.rowId)).size;
-        const toggleLine=(l:any,on:boolean)=>setAlloc(prev=>({...prev,[l.rowId+':'+l.key]:on?suggestQty(l):0}));
+        const handleLineToggle=(l:any,li:number,e:any)=>{
+          const on=!(l.qty>0);
+          const shift=!!e?.nativeEvent?.shiftKey;
+          const anchor=allocAnchorRef.current[ph.id];
+          setAlloc(prev=>{
+            const next={...prev};
+            const apply=(x:any)=>{next[x.rowId+':'+x.key]=on?((prev[x.rowId+':'+x.key]??0)>0?prev[x.rowId+':'+x.key]:suggestQty(x)):0;};
+            if(shift&&anchor!=null&&anchor!==li){const[a,b]=anchor<li?[anchor,li]:[li,anchor];for(let i=a;i<=b;i++)apply(allocLines[i]);}
+            else apply(l);
+            return next;
+          });
+          if(!shift)allocAnchorRef.current[ph.id]=li;
+        };
         const selectAllLines=()=>setAlloc(prev=>{const next={...prev};for(const l of allocLines){if((next[l.rowId+':'+l.key]??0)===0)next[l.rowId+':'+l.key]=suggestQty(l);}return next;});
         const clearAllLines=()=>setAlloc(prev=>{const next={...prev};for(const l of allocLines)next[l.rowId+':'+l.key]=0;return next;});
         return <div key={ph.id} className="bg-white border rounded-xl p-3 space-y-2">
@@ -424,9 +437,9 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
           {allocLines.length>0&&<div className="overflow-x-auto"><table className="w-full text-sm min-w-[680px]">
             <thead><tr className="border-b text-left text-xs text-slate-500"><th className="py-1.5 pr-2 w-10">Chọn</th><th className="py-1.5 pr-2">Đối tác</th><th className="py-1.5 pr-2">Hạng mục / Dịch vụ</th><th className="py-1.5 pr-2 text-right">Giá đầu vào</th><th className="py-1.5 pr-2 text-center">SL phân bổ</th><th className="py-1.5 text-right">Thành tiền</th></tr></thead>
             <tbody>
-              {allocLines.map(l=>(
+              {allocLines.map((l,li)=>(
                 <tr key={l.rowId+':'+l.key} className={'border-b '+(l.qty===0?'opacity-50':'')}>
-                  <td className="py-1.5 pr-2"><input type="checkbox" aria-label={'Chọn '+l.name+' — '+l.label} checked={l.qty>0} onChange={e=>toggleLine(l,e.target.checked)} className="w-4 h-4 cursor-pointer"/></td>
+                  <td className="py-1.5 pr-2"><input type="checkbox" aria-label={'Chọn '+l.name+' — '+l.label} checked={l.qty>0} onChange={e=>handleLineToggle(l,li,e)} className="w-4 h-4 cursor-pointer"/></td>
                   <td className="py-1.5 pr-2 font-medium">{l.name} <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 font-normal">{l.isComm?'Community':'KOL'}</span></td>
                   <td className="py-1.5 pr-2">{l.label}</td>
                   <td className="py-1.5 pr-2 text-right whitespace-nowrap">{l.priceValue===null?'chưa có giá':formatMoneyInput(l.priceValue)+' ₫'}<span className="block text-[11px] text-slate-500">{l.priceValue===null?'':l.priceStatus==='confirmed'?'đã xác nhận':'chưa xác nhận'}</span></td>
@@ -498,7 +511,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
           const r=await request(base+'/options/from-phases',{name:fromName.trim(),allocations,commentLines});
           const mismatches=(r.reconciliation??[]).filter((x:any)=>x.difference!==0).map((x:any)=>`${x.phase} — ${x.label}: đã phân bổ ${x.allocated.toLocaleString('vi-VN')} / mục tiêu ${x.target.toLocaleString('vi-VN')} (${x.difference<0?'thiếu':'vượt'} ${Math.abs(x.difference).toLocaleString('vi-VN')})`);
           await refresh(r.quoteId);setAlloc({});setCommentLines([]);
-          setNotice(`Đã tạo phương án từ phân bổ của PM: ${r.itemCount} dòng báo giá.${r.missingPrice?` ${r.missingPrice} dòng đang thiếu giá đầu vào.`:''}${r.unconfirmedPrice?` ${r.unconfirmedPrice} dòng giá chưa xác nhận.`:''}${mismatches.length?' Đối chiếu mục tiêu — '+mismatches.join('; ')+'.':' Đối chiếu mục tiêu: các hạng mục đã phân bổ khớp mục tiêu.'} Điền giá bán rồi lưu.`);
+          setNotice(`Đã tạo phương án từ phân bổ của PM: ${r.itemCount} dòng báo giá.${r.missingPrice?` ${r.missingPrice} dòng đang thiếu giá đầu vào.`:''}${r.unconfirmedPrice?` ${r.unconfirmedPrice} dòng giá chưa xác nhận.`:''}${mismatches.length?' Đối chiếu mục tiêu — '+mismatches.join('; ')+'.':' Đối chiếu mục tiêu: các hạng mục đã phân bổ khớp mục tiêu.'} Điền giá báo khách ở bảng chỉnh sửa của phương án vừa tạo, ngay bên dưới, rồi bấm Lưu.`);
         })}>Tạo phương án từ phân bổ đã chọn</button>
       </div>
     </section>}
