@@ -838,8 +838,8 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
             </h4>
             <p className="text-xs text-slate-500">
               {searchMode === 'proposal'
-                ? 'Đề xuất thông minh: Chấm điểm đối tác theo brief của phase, thêm thẳng vào danh sách sơ bộ.'
-                : 'Tìm từ kho: Lọc đối tác từ kho Creator/KOL hoặc Community theo tiêu chí đã chọn.'}
+                ? 'Tự chấm điểm hồ sơ trong kho theo brief của phase.'
+                : 'Tự lọc hồ sơ trong kho theo tiêu chí.'}
             </p>
           </div>
           <div className="flex rounded-xl bg-slate-100 p-1 gap-1">
@@ -850,7 +850,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
               }`}
               onClick={() => setSearchMode('proposal')}
             >
-              🎯 Đề xuất thông minh bằng AI
+              🎯 Đề xuất thông minh
             </button>
             <button
               type="button"
@@ -859,7 +859,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
               }`}
               onClick={() => setSearchMode('catalog')}
             >
-              🔍 Tìm từ kho dữ liệu ({candidateSource === 'kol' ? visibleMatches.length : visibleCommunities.length})
+              🔍 Tìm trong kho ({candidateSource === 'kol' ? visibleMatches.length : visibleCommunities.length})
             </button>
           </div>
         </div>
@@ -881,11 +881,11 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
         ) : (
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2 items-center">
-              <span className="text-xs text-slate-500">Nguồn ứng viên{activeBrief?.partnerType ? ' (brief gợi ý: ' + (activeBrief.partnerType === 'kol' ? 'Creator/KOL' : activeBrief.partnerType === 'community' ? 'Community' : 'cả hai') + ')' : ''}:</span>
+              <span className="text-xs text-slate-500">Nguồn:</span>
               <button type="button" className={'rounded-lg border px-3 py-1.5 text-sm cursor-pointer ' + (candidateSource === 'kol' ? 'border-indigo-600 bg-indigo-50 font-semibold text-indigo-900' : 'bg-white')} onClick={() => setSourceOverride('kol')}>Creator / KOL ({data.catalogCount.toLocaleString('vi-VN')})</button>
               <button type="button" className={'rounded-lg border px-3 py-1.5 text-sm cursor-pointer ' + (candidateSource === 'community' ? 'border-indigo-600 bg-indigo-50 font-semibold text-indigo-900' : 'bg-white')} onClick={() => setSourceOverride('community')}>Community ({(data.communityCount ?? communityPool.length).toLocaleString('vi-VN')})</button>
             </div>
-            <p className="text-xs text-slate-500">{activePhase ? 'Đang lọc theo brief của phase “' + activePhase.name + '”; đối tác thêm vào sẽ vào thẳng phase này. ' : ''}{candidateSource === 'kol' ? 'KOL được tìm từ kho Creator/KOL; Community được tìm từ kho Community riêng — không thay thế cho nhau.' : 'Community được tìm từ kho Community theo chủ đề, nền tảng, tệp người xem, quy mô và điều kiện dịch vụ có trong hồ sơ.'} Lọc theo nội dung hồ sơ và tiêu chí đã duyệt; chưa dùng AI để đánh giá ngữ nghĩa. Thiếu giá vẫn xuất hiện. Không áp dụng Top N hoặc lọc theo giá; không tự tích đối tác. Giữ Shift + Click để chọn nhiều dòng liên tiếp.</p>
+            <p className="text-xs text-slate-500">Giữ Shift + bấm để chọn nhiều dòng liên tiếp.</p>
 
             {candidateSource === 'community' ? (
               <>

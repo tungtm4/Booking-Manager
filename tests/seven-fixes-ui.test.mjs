@@ -13,7 +13,7 @@ test('Vấn đề 3: trang Đề xuất không cắt cứng kết quả, không 
   assert.ok(!proposal.includes('setSelectedIds(ranked.slice'), 'không tự tích KOL theo số lượng brief');
   assert.ok(proposal.includes('paginateItems'), 'kết quả dùng phân trang để truy cập toàn bộ');
   assert.ok(proposal.includes('selectedKols'), 'có danh sách đã chọn để xem và bỏ từng lựa chọn');
-  assert.ok(proposal.includes('chỉ để đối chiếu'), 'số lượng brief chỉ dùng đối chiếu tiến độ');
+  assert.ok(proposal.includes('cần ${kolTargetCount'), 'số lượng brief hiện dạng mục tiêu cần ở tiêu đề nhóm, không chặn lựa chọn');
 });
 
 test('Vấn đề 4: trang Đề xuất reset sạch khi đổi ngữ cảnh, chống ghi đè bất đồng bộ, cảnh báo sửa chưa lưu', () => {

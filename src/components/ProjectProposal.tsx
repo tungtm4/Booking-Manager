@@ -45,7 +45,7 @@ function SelectionToolbar({ label, total, pageCount, selected, disabled, onPage,
       <button type="button" aria-label={'Chọn tất cả kết quả ' + label} className={button} disabled={disabled || !total} onClick={onAll}>Chọn tất cả {total.toLocaleString('vi-VN')} kết quả</button>
       <button type="button" aria-label={'Bỏ chọn tất cả ' + label} className="rounded-lg border px-3 py-2 disabled:opacity-50 cursor-pointer" disabled={disabled || !selected} onClick={onClear}>Bỏ chọn tất cả</button>
     </div>
-    <p className="text-xs text-slate-600">Bấm ô đầu, giữ Shift rồi bấm ô cuối để chọn cả khoảng; bấm ngược chiều cũng được. Shift + bấm ô đã chọn để bỏ chọn cả khoảng. Lựa chọn được giữ khi chuyển trang.</p>
+    <p className="text-xs text-slate-600">Giữ Shift + bấm để chọn hoặc bỏ chọn cả khoảng. Lựa chọn giữ nguyên khi chuyển trang.</p>
   </div>;
 }
 
@@ -890,13 +890,9 @@ export function ProjectProposal({
       <section className="bg-white border rounded-2xl p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-semibold">
-            {embedded ? `Tiêu chí brief của phase (Chỉ đọc)` : '2. Brief & tiêu chí của phase'}
+            {embedded ? 'Tiêu chí brief của phase' : '2. Brief & tiêu chí của phase'}
           </h2>
-          {embedded ? (
-            <span className="text-xs text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full font-medium">
-              Chỉ đọc từ phase đang chọn
-            </span>
-          ) : (
+          {embedded ? null : (
             formDirty() && (
               <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
                 Có chỉnh sửa chưa lưu
@@ -1333,7 +1329,7 @@ export function ProjectProposal({
             <div>
               <h2 className="text-lg font-semibold">{embedded ? 'Kết quả đề xuất' : '3. Kết quả đề xuất'}</h2>
               <p className="text-xs text-slate-500">
-                Đã chọn: {selectedIds.length} KOL · {commSelected.length} Community (tổng {selectedIds.length + commSelected.length} đối tác)
+                Đã chọn: {selectedIds.length} KOL · {commSelected.length} Community
               </p>
             </div>
             <button
@@ -1351,11 +1347,11 @@ export function ProjectProposal({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="font-semibold text-base text-slate-900">
                 Creator / KOL — {kolTargetCount != null ? `cần ${kolTargetCount.toLocaleString('vi-VN')} · ` : ''}tìm thấy {results ? results.length.toLocaleString('vi-VN') : 0} hồ sơ phù hợp
-                <span className="font-normal text-slate-500 text-sm ml-2">· đã chọn {selectedIds.length} {kolTargetCount != null ? `(mục tiêu brief: ${kolTargetCount} KOL — chỉ để đối chiếu tiến độ)` : '(chỉ để đối chiếu tiến độ)'}</span>
+                <span className="font-normal text-slate-500 text-sm ml-2">· đã chọn {selectedIds.length}</span>
               </h3>
               {results && (
                 <p className="text-xs text-slate-500 -mt-1">
-                  Chỉ hiện hồ sơ đạt ngưỡng phù hợp: tổng điểm từ {PROPOSAL_MIN_TOTAL_SCORE}/80 và điểm lĩnh vực từ {PROPOSAL_MIN_CATEGORY_SCORE}/40.{kolBelowThreshold > 0 ? ` Đã ẩn ${kolBelowThreshold.toLocaleString('vi-VN')} hồ sơ dưới ngưỡng.` : ''}
+                  Đạt ngưỡng: tổng ≥ {PROPOSAL_MIN_TOTAL_SCORE}/80 · lĩnh vực ≥ {PROPOSAL_MIN_CATEGORY_SCORE}/40.{kolBelowThreshold > 0 ? ` Đã ẩn ${kolBelowThreshold.toLocaleString('vi-VN')} hồ sơ dưới ngưỡng.` : ''}
                 </p>
               )}
               {kolBelowThreshold > 0 && (
@@ -1390,7 +1386,7 @@ export function ProjectProposal({
                   />}
                   {selectedKols.length > 0 && (
                     <div className="text-sm">
-                      <p className="text-slate-600 mb-1">Đã chọn {selectedKols.length} KOL — lựa chọn được giữ nguyên khi chuyển trang:</p>
+                      <p className="text-slate-600 mb-1">Đã chọn {selectedKols.length} KOL:</p>
                       <div className="flex flex-wrap gap-1">
                         {selectedKols.map(r => (
                           <span key={r.kol.id} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2 py-0.5 text-xs font-medium">
@@ -1566,9 +1562,6 @@ export function ProjectProposal({
             ) : (
               commResults && (
                 <>
-                  <p className="text-xs text-slate-500">
-                    Community lấy từ kho Community riêng. Lý do đề xuất chỉ dựa trên dữ kiện có trong hồ sơ (chủ đề, nền tảng, quy mô, dịch vụ). PM chọn từ danh sách sơ bộ vào phương án A/B/C sau khi Booking xác nhận giá.
-                  </p>
                   {commResults.length > 0 && <SelectionToolbar label="Community" total={commResults.length} pageCount={commPaged?.pageItems.length ?? 0} selected={commSelected.length} disabled={busy}
                     onPage={() => { commAnchorRef.current = null; setCommSelected(prev => [...new Set([...prev, ...(commPaged?.pageItems ?? []).map(r => r.profile.id)])]); }}
                     onAll={() => { commAnchorRef.current = null; setCommSelected(commResults.map(r => r.profile.id)); }}
