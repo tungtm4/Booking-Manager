@@ -667,7 +667,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
               return (
                 <div key={ph.id} className="py-2 flex flex-wrap gap-x-4 gap-y-1 items-baseline justify-between">
                   <span className="font-medium">Phase {phIdx + 1} · {ph.name} <span className="font-normal text-slate-500">· {PHASE_KIND_LABELS[ph.kind as keyof typeof PHASE_KIND_LABELS]} · {r.kol} KOL · {r.community} Community</span></span>
-                  <span>Ngân sách phase: <strong>{ph.budget != null ? formatVND(ph.budget) : 'Chưa nhập'}</strong></span>
+                  <span>Ngân sách phase: <strong>{ph.budget != null ? formatVND(ph.budget) : 'Chưa nhập'}</strong> · <span className="text-slate-500">Chưa phân bổ công việc — chưa đủ cơ sở tính chi phí</span></span>
                 </div>
               );
             })}
