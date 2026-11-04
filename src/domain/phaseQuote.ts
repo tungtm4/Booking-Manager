@@ -41,6 +41,9 @@ export interface AllocatedLine {
   conditions?: string;
   quantity: number;
   price: PhaseQuotePrice;
+  /** Giá báo khách PM điền NGAY tại bảng phân bổ (nếu có) — mang thẳng vào phương án;
+   *  dòng kèm theo luôn 0. Sau khi tạo vẫn sửa lại được trong bảng phương án. */
+  sellUnitPrice?: number | null;
 }
 
 export interface AllocatedQuoteItem {
@@ -93,7 +96,7 @@ export function buildAllocatedQuoteItems(
       partnerType: line.partnerType,
       quantity: line.quantity,
       buyUnitPrice: price.value,
-      sellUnitPrice: line.bundled ? 0 : null,
+      sellUnitPrice: line.bundled ? 0 : (line.sellUnitPrice ?? null),
       included: true,
       ...(line.bundled ? { bundled: true } : {}),
       shortlistId: line.shortlistId,

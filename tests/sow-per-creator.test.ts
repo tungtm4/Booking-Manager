@@ -91,6 +91,19 @@ test('Tạo phương án: dòng kèm theo giá 0, snapshot đã xác nhận, kh�
   const submit=await call(`/projects/${pid}/quotes/${q2.id}/status`,{status:'submitted',revision:q2.revision},cookies.pm);
   assert.equal(submit.status,200,'cổng giá không chặn dòng kèm theo');
 }));
+test('Giá báo khách điền ngay tại phân bổ mang thẳng vào phương án; giá sai bị chặn; dòng kèm theo bỏ qua giá bán',()=>fixture(async(f:any)=>{
+  const {call,pid,cookies}=f;const {rows}=await seed(f);const rowA=rows.find((r:any)=>r.catalogId==='a');
+  const bad=await call(`/projects/${pid}/options/from-phases`,{name:'PA lỗi giá',allocations:[{shortlistId:rowA.id,key:'video',quantity:1,sellUnitPrice:-5}]},cookies.pm);
+  assert.equal(bad.status,400);
+  const created=await call(`/projects/${pid}/options/from-phases`,{name:'PA có giá bán',allocations:[
+    {shortlistId:rowA.id,key:'video',quantity:2,sellUnitPrice:15_000_000},
+    {shortlistId:rowA.id,key:'sdha',quantity:1,included:true,sellUnitPrice:999_000_000},
+  ]},cookies.pm);
+  assert.equal(created.status,200);
+  const q=(await call(`/projects/${pid}/options`,undefined,cookies.pm)).body.options[0].versions[0];
+  assert.equal(q.items.find((i:any)=>i.format==='video').sellUnitPrice,15_000_000,'giá bán từ phân bổ vào đúng dòng phương án');
+  assert.equal(q.items.find((i:any)=>i.format==='sdha').sellUnitPrice,0,'dòng kèm theo luôn 0 dù client gửi giá bán');
+}));
 test('UI: Bước 3 có chốt SOW, phân bổ gom nhóm + nhắc chưa chốt SOW',()=>{
   const panel=readFileSync(new URL('../src/components/ProjectShortlistPanel.tsx',import.meta.url),'utf8');
   assert.ok(panel.includes('Chốt SOW'),'Bước 3 phải có nút chốt SOW');
@@ -99,4 +112,5 @@ test('UI: Bước 3 có chốt SOW, phân bổ gom nhóm + nhắc chưa chốt S
   assert.ok(quotes.includes('Chưa chốt SOW'),'phân bổ phải nhắc creator chưa chốt SOW');
   assert.ok(quotes.includes('Kèm theo'),'phân bổ phải hiện nhãn kèm theo');
   assert.ok(quotes.includes('Chỉ xổ dòng theo SOW đã chốt ở Bước 3'),'phân bổ phải nói rõ nguồn dòng');
+  assert.ok(quotes.includes('sellAlloc')&&quotes.includes('Điền giá bán'),'bảng phân bổ phải có cột điền giá báo khách ngay tại chỗ');
 });

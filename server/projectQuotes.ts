@@ -439,7 +439,7 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     const phaseNameOf=(rowPhaseId:any)=>{const ph=allPhases.find((x:any)=>x.id===(rowPhaseId??firstPhaseId));return ph?.name??'';};
     const lines:AllocatedLine[]=[];const seenAlloc=new Set<string>();const usedPhaseIds=new Set<string>();
     for(const a of allocations){
-      if(!a||typeof a.shortlistId!=='string'||typeof a.key!=='string'||!a.key||!Number.isSafeInteger(a.quantity)||a.quantity<1||a.quantity>1000000)return res.status(400).json({message:'Mỗi phân bổ cần đối tác, hạng mục/dịch vụ và số lượng nguyên dương.'});
+      if(!a||typeof a.shortlistId!=='string'||typeof a.key!=='string'||!a.key||!Number.isSafeInteger(a.quantity)||a.quantity<1||a.quantity>1000000||(a.sellUnitPrice!==undefined&&!validMoney(a.sellUnitPrice)))return res.status(400).json({message:'Mỗi phân bổ cần đối tác, hạng mục/dịch vụ và số lượng nguyên dương; giá báo khách (nếu điền) phải là số tiền hợp lệ.'});
       const dupKey=a.shortlistId+':'+a.key;if(seenAlloc.has(dupKey))return res.status(400).json({message:'Một đối tác chỉ phân bổ một lần cho cùng hạng mục/dịch vụ trong một lần tạo phương án. Cộng gộp số lượng trước khi tạo.'});seenAlloc.add(dupKey);
       const row=db.prepare('SELECT * FROM project_shortlist WHERE id=? AND project_id=?').get(a.shortlistId,pid) as any;
       if(!row)return res.status(400).json({message:'Có đối tác trong phân bổ không thuộc danh sách của dự án.'});
@@ -448,17 +448,17 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
       if(row.partner_type==='community'){
         const svc=(prof.dichVu??[]).find((s:any)=>s.id===a.key);
         if(!svc||!price)return res.status(400).json({message:`Dịch vụ đã chọn không thuộc hồ sơ Community “${prof.ten}”.`});
-        lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'community',key:a.key,description:svc.ten,serviceName:svc.ten,unit:svc.donVi,...(svc.dieuKien?{conditions:svc.dieuKien}:{}),quantity:a.quantity,price});
+        lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'community',key:a.key,description:svc.ten,serviceName:svc.ten,unit:svc.donVi,...(svc.dieuKien?{conditions:svc.dieuKien}:{}),quantity:a.quantity,price,sellUnitPrice:a.sellUnitPrice??null});
       }else{
         const bundled=a.included===true;
         if(a.key==='story'){
           // Story là hạng mục KÈM THEO (anh chốt 04/11/2026): không có format giá
           // riêng trong kho — chỉ nhận khi đánh dấu kèm theo.
           if(!bundled)return res.status(400).json({message:'Story chỉ là hạng mục kèm theo — hãy đánh dấu kèm theo khi phân bổ.'});
-          lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'kol',key:'story',description:'Story',quantity:a.quantity,price:{value:null,status:'waiting',source:'',checkedAt:null,checkedBy:null},bundled:true});
+          lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'kol',key:'story',description:'Story',quantity:a.quantity,price:{value:null,status:'waiting',source:'',checkedAt:null,checkedBy:null},bundled:true,sellUnitPrice:0});
         }else{
           if(!(a.key in PRICE_FORMAT_LABELS)||!price)return res.status(400).json({message:`Hạng mục đã chọn không hợp lệ cho KOL “${prof.ten}”.`});
-          lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'kol',key:a.key,description:PRICE_FORMAT_LABELS[a.key as PriceFormatKey],quantity:a.quantity,price,...(bundled?{bundled:true}:{})});
+          lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'kol',key:a.key,description:PRICE_FORMAT_LABELS[a.key as PriceFormatKey],quantity:a.quantity,price,sellUnitPrice:a.sellUnitPrice??null,...(bundled?{bundled:true}:{})});
         }
       }
     }

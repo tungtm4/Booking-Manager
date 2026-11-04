@@ -297,6 +297,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
   // Phân bổ do PM chọn (rowId:key -> số lượng) + dòng dịch vụ comment thuê ngoài.
   const [shortlistRows,setShortlistRows]=useState<any[]>([]);
   const [alloc,setAlloc]=useState<Record<string,number>>({});
+  const [sellAlloc,setSellAlloc]=useState<Record<string,number|null>>({});
   const [commentLines,setCommentLines]=useState<any[]>([]);
   const [commentDraft,setCommentDraft]=useState<any>({phase:'',vendor:'',scopeNote:'',mode:'per_comment',quantity:'',commentsPerPackage:'',buyUnitPrice:'',sellUnitPrice:'',includedNote:''});
   const [loadState,setLoadState]=useState<'loading'|'ready'|'error'>('loading'),[loadError,setLoadError]=useState('');
@@ -397,7 +398,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
     </form>}
     {manage&&phases.length>0&&(showCreateFromPhase||fromPhaseIds.length>0||commentLines.length>0||Object.keys(alloc).length>0)&&<section className="p-4 border border-indigo-200 bg-indigo-50/50 rounded-xl space-y-3">
       <h3 className="font-semibold">Tạo phương án từ phase — theo phân bổ PM chọn</h3>
-      <p className="text-xs text-slate-500">Chỉ xổ dòng theo SOW đã chốt ở Bước 3. Tick chọn dòng và điền số lượng — chỉ dòng đã chọn mới vào phương án. Giữ Shift + bấm để chọn cả khoảng. Giá báo khách điền ở bảng phương án sau khi tạo.</p>
+      <p className="text-xs text-slate-500">Chỉ xổ dòng theo SOW đã chốt ở Bước 3. Tick chọn dòng, điền số lượng và giá báo khách ngay tại bảng này — tạo phương án là giá bán đã có sẵn; vào bảng phương án vẫn sửa lại được. Giữ Shift + bấm để chọn cả khoảng.</p>
       <div className="flex flex-wrap gap-2">
         {phases.map((ph:any,phIdx:number)=><label key={ph.id} className="flex items-center gap-1 text-sm bg-white border rounded-lg px-2 py-1"><input type="checkbox" checked={fromPhaseIds.includes(ph.id)} onChange={()=>setFromPhaseIds(prev=>prev.includes(ph.id)?prev.filter(x=>x!==ph.id):[...prev,ph.id])}/>{phIdx+1}. {ph.name}</label>)}
       </div>
@@ -455,8 +456,8 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
           {targetLines.length>0&&<ul className="text-xs text-slate-600 space-y-0.5">{targetLines.map((t,i)=><li key={i}>· {t}</li>)}</ul>}
           {!rows.length&&<p className="text-xs text-slate-500">Phase chưa có ứng viên. Thêm đối tác vào danh sách sơ bộ ở tab Đối tác & Phase.</p>}
           {rows.filter((r:any)=>r.partnerType==='community'&&!(r.profile.dichVu??[]).length).map((r:any)=><p key={'nodv-'+r.id} className="text-xs text-slate-500">{r.profile.ten}: chưa có dịch vụ trong hồ sơ — bổ sung bảng giá ở Kho Community.</p>)}
-          {allocLines.length>0&&<div className="overflow-x-auto"><table className="w-full text-sm min-w-[680px]">
-            <thead><tr className="border-b text-left text-xs text-slate-500"><th className="py-1.5 pr-2 w-10">Chọn</th><th className="py-1.5 pr-2">Đối tác</th><th className="py-1.5 pr-2">Hạng mục / Dịch vụ</th><th className="py-1.5 pr-2 text-right">Giá đầu vào</th><th className="py-1.5 pr-2 text-center">SL phân bổ</th><th className="py-1.5 text-right">Thành tiền</th></tr></thead>
+          {allocLines.length>0&&<div className="overflow-x-auto"><table className="w-full text-sm min-w-[880px]">
+            <thead><tr className="border-b text-left text-xs text-slate-500"><th className="py-1.5 pr-2 w-10">Chọn</th><th className="py-1.5 pr-2">Đối tác</th><th className="py-1.5 pr-2">Hạng mục / Dịch vụ</th><th className="py-1.5 pr-2 text-right">Giá đầu vào</th><th className="py-1.5 pr-2 text-center">SL phân bổ</th><th className="py-1.5 pr-2 text-right bg-indigo-100/70 text-indigo-900">Giá báo khách / đơn vị</th><th className="py-1.5 text-right">Thành tiền</th></tr></thead>
             <tbody>
               {groups.map(g=>{
                 const gTotal=g.lines.reduce((a,l)=>a+(l.total??0),0);
@@ -465,7 +466,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
                 return <React.Fragment key={g.rowId}>
                   <tr className="bg-slate-50 border-b">
                     <td className="py-1.5 pr-2"><input type="checkbox" aria-label={'Chọn tất cả hạng mục của '+g.name} checked={gAll} ref={el=>{if(el)el.indeterminate=gSelected>0&&!gAll;}} onChange={e=>toggleGroup(g,e.target.checked)} className="w-4 h-4 cursor-pointer"/></td>
-                    <td colSpan={4} className="py-1.5 pr-2 font-semibold">{g.name} <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 font-normal">{g.isComm?'Community':'KOL'}</span> <span className="text-xs font-normal text-slate-500">· {g.lines.length} hạng mục</span></td>
+                    <td colSpan={5} className="py-1.5 pr-2 font-semibold">{g.name} <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 font-normal">{g.isComm?'Community':'KOL'}</span> <span className="text-xs font-normal text-slate-500">· {g.lines.length} hạng mục</span></td>
                     <td className="py-1.5 text-right font-semibold whitespace-nowrap">{money(gTotal)}</td>
                   </tr>
                   {g.lines.map(l=>(
@@ -475,19 +476,20 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
                       <td className="py-1.5 pr-2 pl-4">{l.label}{l.included&&<span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold">Kèm theo</span>}</td>
                       <td className="py-1.5 pr-2 text-right whitespace-nowrap">{l.included?'0 ₫':l.priceValue===null?'chưa có giá':formatMoneyInput(l.priceValue)+' ₫'}<span className="block text-[11px] text-slate-500">{l.included?'kèm theo trong SOW':l.priceValue===null?'':l.priceStatus==='confirmed'?'đã xác nhận':'chưa xác nhận'}</span></td>
                       <td className="py-1.5 pr-2 text-center"><input aria-label={'Phân bổ '+l.label+' cho '+l.name} className="w-24 rounded border border-slate-300 px-2 py-1 bg-white text-center" type="number" min={0} step={1} value={alloc[l.rowId+':'+l.key]??''} placeholder="0" onChange={e=>{const v=e.target.value===''?0:Math.max(0,Math.floor(Number(e.target.value)||0));setAlloc(prev=>({...prev,[l.rowId+':'+l.key]:v}));}}/></td>
+                      <td className="py-1.5 pr-2 text-right bg-indigo-50/40">{l.included?<span className="text-xs font-semibold text-amber-700">Đã bao gồm</span>:<input aria-label={'Giá báo khách '+l.label+' cho '+l.name} className="w-32 rounded border border-slate-300 px-2 py-1 bg-white text-right" inputMode="numeric" placeholder="Điền giá bán" value={formatMoneyInput(sellAlloc[l.rowId+':'+l.key]??'')} onChange={e=>{const n=parseMoneyInput(e.target.value);setSellAlloc(prev=>({...prev,[l.rowId+':'+l.key]:n===''?null:n}));}}/>}</td>
                       <td className="py-1.5 text-right font-medium whitespace-nowrap">{l.total===null?'—':money(l.total)}</td>
                     </tr>
                   ))}
                 </React.Fragment>;
               })}
             </tbody>
-            <tfoot><tr><td colSpan={5} className="py-2 text-right font-semibold">Tiểu tổng phase (giá đầu vào):</td><td className="py-2 text-right font-bold whitespace-nowrap">{money(phaseAllocTotal)}</td></tr></tfoot>
+            <tfoot><tr><td colSpan={6} className="py-2 text-right font-semibold">Tiểu tổng phase (giá đầu vào):</td><td className="py-2 text-right font-bold whitespace-nowrap">{money(phaseAllocTotal)}</td></tr></tfoot>
           </table></div>}
           {unSowRows.length>0&&<p className="text-xs text-amber-700">Chưa chốt SOW: {unSowRows.map((r:any)=>r.profile.ten).join(', ')} — chốt SOW ở Bước 3 (tab Đối tác & Phase) để có dòng phân bổ.</p>}
           {emptySowRows.length>0&&<p className="text-xs text-slate-500">SOW đã chốt trống (không làm hạng mục nào): {emptySowRows.map((r:any)=>r.profile.ten).join(', ')}.</p>}
         </div>;
       })}
-      {fromPhaseIds.length>0&&(()=>{const grandAlloc=fromPhaseIds.reduce((sum,pid3)=>{const phx=phases.find((x:any)=>x.id===pid3);if(!phx)return sum;const rws=shortlistRows.filter((r:any)=>(r.phaseId??phases[0]?.id)===phx.id);return sum+allocLinesForPhase(phx,rws,alloc).reduce((a,l)=>a+(l.total??0),0);},0);const commentBuy=commentLines.reduce((a,c)=>a+(c.buyUnitPrice!=null?c.buyUnitPrice*c.quantity:0),0);return <div className="bg-indigo-600 text-white rounded-xl px-4 py-3 flex flex-wrap gap-x-6 gap-y-1 text-sm"><span>Tổng chi phí phân bổ (giá đầu vào): <strong>{money(grandAlloc)}</strong></span>{commentLines.length>0&&<span>Dịch vụ comment: <strong>{money(commentBuy)}</strong></span>}<span>Tổng cộng dự kiến: <strong>{money(grandAlloc+commentBuy)}</strong></span><span className="text-indigo-100 text-xs self-center">Chi phí mua dự kiến của phương án sắp tạo.</span></div>;})()}
+      {fromPhaseIds.length>0&&(()=>{const grandAlloc=fromPhaseIds.reduce((sum,pid3)=>{const phx=phases.find((x:any)=>x.id===pid3);if(!phx)return sum;const rws=shortlistRows.filter((r:any)=>(r.phaseId??phases[0]?.id)===phx.id);return sum+allocLinesForPhase(phx,rws,alloc).reduce((a,l)=>a+(l.total??0),0);},0);const commentBuy=commentLines.reduce((a,c)=>a+(c.buyUnitPrice!=null?c.buyUnitPrice*c.quantity:0),0);const grandSell=fromPhaseIds.reduce((sum,pid3)=>{const phx=phases.find((x:any)=>x.id===pid3);if(!phx)return sum;const rws=shortlistRows.filter((r:any)=>(r.phaseId??phases[0]?.id)===phx.id);return sum+allocLinesForPhase(phx,rws,alloc).reduce((a,l)=>a+(!l.included&&sellAlloc[l.rowId+':'+l.key]!=null?sellAlloc[l.rowId+':'+l.key]!*l.qty:0),0);},0)+commentLines.reduce((a,c)=>a+(c.sellUnitPrice!=null?c.sellUnitPrice*c.quantity:0),0);return <div className="bg-indigo-600 text-white rounded-xl px-4 py-3 flex flex-wrap gap-x-6 gap-y-1 text-sm"><span>Tổng chi phí phân bổ (giá đầu vào): <strong>{money(grandAlloc)}</strong></span><span>Tổng giá báo khách đã điền: <strong>{money(grandSell)}</strong></span>{commentLines.length>0&&<span>Dịch vụ comment: <strong>{money(commentBuy)}</strong></span>}<span>Tổng cộng dự kiến: <strong>{money(grandAlloc+commentBuy)}</strong></span><span className="text-indigo-100 text-xs self-center">Chi phí mua dự kiến của phương án sắp tạo.</span></div>;})()}
       <div className="bg-white border rounded-xl p-3 space-y-2">
         <p className="text-sm font-semibold">Dịch vụ comment thuê ngoài (tuỳ chọn, theo phase)</p>
         <p className="text-xs text-slate-500">Chỉ mua đúng số comments nhập ở đây. Ghi rõ phần đã bao gồm trong gói Community để tránh tính trùng.</p>
@@ -543,11 +545,11 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
         <button type="button" className={button} disabled={busy||dirty||!fromPhaseIds.length||!fromName.trim()} onClick={()=>run(async()=>{
           const lineMap=new Map<string,any>();
           for(const pid3 of fromPhaseIds){const phx=phases.find((x:any)=>x.id===pid3);if(!phx)continue;const rws=shortlistRows.filter((r:any)=>(r.phaseId??phases[0]?.id)===phx.id);for(const l of allocLinesForPhase(phx,rws,alloc))lineMap.set(l.rowId+':'+l.key,l);}
-          const allocations=Object.entries(alloc).filter(([,q])=>q>0).map(([k,q])=>{const [shortlistId,...rest]=k.split(':');const line=lineMap.get(k);return {shortlistId,key:rest.join(':'),quantity:q,...(line?.included?{included:true}:{})};}).filter(a=>{const row=shortlistRows.find(r=>r.id===a.shortlistId);const phId=row?.phaseId??phases[0]?.id;return phId&&fromPhaseIds.includes(phId);});
+          const allocations=Object.entries(alloc).filter(([,q])=>q>0).map(([k,q])=>{const [shortlistId,...rest]=k.split(':');const line=lineMap.get(k);const sv=sellAlloc[k];return {shortlistId,key:rest.join(':'),quantity:q,...(line?.included?{included:true}:{}),...(!line?.included&&sv!=null?{sellUnitPrice:sv}:{})};}).filter(a=>{const row=shortlistRows.find(r=>r.id===a.shortlistId);const phId=row?.phaseId??phases[0]?.id;return phId&&fromPhaseIds.includes(phId);});
           if(!allocations.length&&!commentLines.length){setError('Hãy phân bổ ít nhất một đối tác/dịch vụ (số lượng lớn hơn 0) hoặc thêm một dòng dịch vụ comment trước khi tạo phương án.');return;}
           const r=await request(base+'/options/from-phases',{name:fromName.trim(),allocations,commentLines});
           const mismatches=(r.reconciliation??[]).filter((x:any)=>x.difference!==0).map((x:any)=>`${x.phase} — ${x.label}: đã phân bổ ${x.allocated.toLocaleString('vi-VN')} / mục tiêu ${x.target.toLocaleString('vi-VN')} (${x.difference<0?'thiếu':'vượt'} ${Math.abs(x.difference).toLocaleString('vi-VN')})`);
-          await refresh(r.quoteId);setAlloc({});setCommentLines([]);setShowCreateFromPhase(false);scrollToEditor();
+          await refresh(r.quoteId);setAlloc({});setSellAlloc({});setCommentLines([]);setShowCreateFromPhase(false);scrollToEditor();
           setNotice(`Đã tạo phương án từ phân bổ của PM: ${r.itemCount} dòng báo giá.${r.missingPrice?` ${r.missingPrice} dòng đang thiếu giá đầu vào.`:''}${r.unconfirmedPrice?` ${r.unconfirmedPrice} dòng giá chưa xác nhận.`:''}${mismatches.length?' Đối chiếu mục tiêu — '+mismatches.join('; ')+'.':' Đối chiếu mục tiêu: các hạng mục đã phân bổ khớp mục tiêu.'} Bảng phương án vừa tạo đã mở ngay bên dưới — điền giá ở cột “Giá báo khách / đơn vị” rồi bấm Lưu.`);
         })}>Tạo phương án từ phân bổ đã chọn</button>
       </div>
