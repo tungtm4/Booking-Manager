@@ -342,10 +342,12 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     const catalog=db.prepare('SELECT profile_json FROM kol_catalog WHERE organization_id=? ORDER BY rowid').all(u.organization_id).map((r:any)=>(()=>{const {engagementRate,...p}=JSON.parse(r.profile_json);return p;})());
     const brief=readProjectBrief(b?JSON.parse(b.payload_json):null);
     // Không cắt Top N; số KOL mục tiêu chỉ để PM đối chiếu khi chọn phương án.
-    const matches=catalog.filter(p=>assessProjectKol(p,brief).matches);
+    // Gia cố: 1 hồ sơ kho có dữ liệu lạ không được làm sập cả endpoint (khiến Bước 3 /
+    // thao tác xoá trông như hỏng) — hồ sơ lỗi chỉ bị bỏ qua khỏi danh sách gợi ý.
+    const matches=catalog.filter(p=>{try{return assessProjectKol(p,brief).matches;}catch{return false;}});
     // Community được tìm từ KHO COMMUNITY riêng — không bao giờ thay bằng danh sách Creator.
     const communityCatalog=db.prepare('SELECT profile_json FROM community_catalog WHERE organization_id=? ORDER BY rowid').all(u.organization_id).map((r:any)=>JSON.parse(r.profile_json));
-    const communityMatches=communityCatalog.filter((p:any)=>assessCommunity(p,brief).matches);
+    const communityMatches=communityCatalog.filter((p:any)=>{try{return assessCommunity(p,brief).matches;}catch{return false;}});
     const rows=db.prepare('SELECT * FROM project_shortlist WHERE project_id=? ORDER BY rowid').all(pid).map((r:any)=>({id:r.id,catalogId:r.catalog_id,partnerType:r.partner_type??'kol',profile:(()=>{const {engagementRate,...p}=JSON.parse(r.profile_json);return p;})(),prices:JSON.parse(r.prices_json),sow:r.sow_json?(()=>{try{return JSON.parse(r.sow_json);}catch{return null;}})():null,revision:r.revision,phaseId:r.phase_id??null}));
     res.json({brief,briefRevision:b?.revision??0,canManage:access(u,pid,true),canImport:u.organization_role==='admin',catalogCount:catalog.length,matches,rows,communityCount:communityCatalog.length,communityMatches});
   });

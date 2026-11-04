@@ -508,14 +508,19 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
     setCommunityIds([]);
   }
 
+  // Tải lại CHỊU LỖI TỪNG PHẦN (allSettled): một endpoint phụ lỗi (vd /options) không được
+  // phép chặn việc cập nhật danh sách chính — trước đây Promise.all chết chung khiến thao
+  // tác đã thành công ở server (vd Xoá khỏi dự án) không hiện lên màn hình, trông như lỗi.
   async function refresh() {
-    const [d, o, ph, cat, comm] = await Promise.all([request(base + '/shortlist'), request(base + '/options'), request(base + '/phases'), request('/catalog').catch(() => ({ kols: [] })), request('/communities').catch(() => ({ communities: [] }))]);
-    setData(d);
-    setBrief(d.brief);
-    setOptions(o.options);
-    setPool(cat.kols ?? []);
-    setCommunityPool(comm.communities ?? []);
-    applyPhases(ph.phases ?? []);
+    const [d, o, ph, cat, comm] = await Promise.allSettled([request(base + '/shortlist'), request(base + '/options'), request(base + '/phases'), request('/catalog').catch(() => ({ kols: [] })), request('/communities').catch(() => ({ communities: [] }))]);
+    if (d.status === 'fulfilled') {
+      setData(d.value);
+      setBrief(d.value.brief);
+    }
+    if (o.status === 'fulfilled') setOptions(o.value.options);
+    if (cat.status === 'fulfilled') setPool(cat.value.kols ?? []);
+    if (comm.status === 'fulfilled') setCommunityPool(comm.value.communities ?? []);
+    if (ph.status === 'fulfilled') applyPhases(ph.value.phases ?? []);
     setDirty(false);
     setCatalogIds([]);
     setSelected([]);
@@ -1211,7 +1216,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
                 )}
                 {phases.length === 1 && <span className="text-slate-500">Phase: {phases[0].name}</span>}
                 <button type="button" className="text-indigo-700 underline disabled:opacity-50" disabled={busy} onClick={() => setSigningTarget({ type: 'kol', id: row.catalogId, name: row.profile?.ten ?? '' })}>Hồ sơ ký kết</button>
-                <button type="button" className="text-red-700 underline disabled:opacity-50" disabled={busy} onClick={() => { if (window.confirm('Xoá KOL này khỏi danh sách dự án?')) run(async () => { await request(base + `/shortlist/${row.id}/remove`, {}); await refresh(); setNotice('Đã xoá KOL khỏi danh sách dự án.'); }); }}>Xoá khỏi dự án</button>
+                <button type="button" className="text-red-700 underline disabled:opacity-50" disabled={busy} onClick={() => { if (window.confirm('Xoá KOL này khỏi danh sách dự án?')) run(async () => { await request(base + `/shortlist/${row.id}/remove`, {}); setData((prev: any) => prev ? { ...prev, rows: (prev.rows || []).filter((r: any) => r.id !== row.id) } : prev); setNotice('Đã xoá KOL khỏi danh sách dự án.'); await refresh(); }); }}>Xoá khỏi dự án</button>
               </div>
             </div>
           ))}
@@ -1269,7 +1274,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
                 )}
                 {phases.length === 1 && <span className="text-slate-500">Phase: {phases[0].name}</span>}
                 <button type="button" className="text-indigo-700 underline disabled:opacity-50" disabled={busy} onClick={() => setSigningTarget({ type: 'community', id: row.catalogId, name: row.profile?.ten ?? '' })}>Hồ sơ ký kết</button>
-                <button type="button" className="text-red-700 underline disabled:opacity-50" disabled={busy} onClick={() => { if (window.confirm('Xoá Community này khỏi danh sách dự án?')) run(async () => { await request(base + `/shortlist/${row.id}/remove`, {}); await refresh(); setNotice('Đã xoá Community khỏi danh sách dự án.'); }); }}>Xoá khỏi dự án</button>
+                <button type="button" className="text-red-700 underline disabled:opacity-50" disabled={busy} onClick={() => { if (window.confirm('Xoá Community này khỏi danh sách dự án?')) run(async () => { await request(base + `/shortlist/${row.id}/remove`, {}); setData((prev: any) => prev ? { ...prev, rows: (prev.rows || []).filter((r: any) => r.id !== row.id) } : prev); setNotice('Đã xoá Community khỏi danh sách dự án.'); await refresh(); }); }}>Xoá khỏi dự án</button>
               </div>
             </div>
           ))}
