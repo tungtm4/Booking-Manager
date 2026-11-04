@@ -27,10 +27,11 @@ async function request(path: string, body?: unknown, method?: string) {
   return d;
 }
 
-type SowItem = { key: string; qty: number | null; included: boolean };
+type SowItem = { key: string; qty: number | null };
 // Chốt SOW của TỪNG creator trong phase (anh chốt 04/11/2026): creator làm hạng mục
-// nào, bao nhiêu, hạng mục nào kèm theo. Story là hạng mục kèm theo — không có format
-// giá riêng trong kho. Phân bổ chỉ xổ đúng các dòng đã chốt ở đây.
+// nào, bao nhiêu — CHỈ vậy. Không còn trạng thái "kèm theo": Story là hạng mục phải
+// giao nhưng không tính tiền riêng (ghi vào ghi chú nội bộ khi báo giá); hạng mục có
+// giá thì phí cụ thể chốt ngay tại bảng phân bổ. Phân bổ chỉ xổ đúng các dòng ở đây.
 function SowEditor({ row, brief, busy, onSave }: { row: any; brief: any; busy: boolean; onSave: (sow: SowItem[] | null) => void }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<SowItem[]>([]);
@@ -40,12 +41,13 @@ function SowEditor({ row, brief, busy, onSave }: { row: any; brief: any; busy: b
   const briefKeys: string[] = (brief?.deliverables ?? []).map((d: any) => d.format);
   const labelOf = (key: string) => key === 'story' ? 'Story' : (PRICE_FORMAT_LABELS[key as keyof typeof PRICE_FORMAT_LABELS] ?? key);
   const startEdit = () => {
-    setDraft(sow ? sow.map(e => ({ ...e })) : (brief?.deliverables ?? []).map((d: any) => ({ key: d.format, qty: scope === 'per_kol' ? d.quantity : null, included: false })));
+    // Dữ liệu SOW cũ có thể còn trường 'included' — bỏ qua, mô hình mới không dùng nữa.
+    setDraft(sow ? sow.map(e => ({ key: e.key, qty: e.qty ?? null })) : (brief?.deliverables ?? []).map((d: any) => ({ key: d.format, qty: scope === 'per_kol' ? d.quantity : null })));
     setOpen(true);
   };
   const toggleKey = (key: string) => setDraft(prev => prev.some(e => e.key === key)
     ? prev.filter(e => e.key !== key)
-    : [...prev, key === 'story' ? { key, qty: 1, included: true } : { key, qty: scope === 'per_kol' ? (briefQty(key) ?? 1) : null, included: false }]);
+    : [...prev, key === 'story' ? { key, qty: 1 } : { key, qty: scope === 'per_kol' ? (briefQty(key) ?? 1) : null }]);
   const patchItem = (key: string, patch: Partial<SowItem>) => setDraft(prev => prev.map(e => e.key === key ? { ...e, ...patch } : e));
   const outsideBrief = sow ? sow.filter(e => e.key !== 'story' && briefKeys.length > 0 && !briefKeys.includes(e.key)).map(e => labelOf(e.key)) : [];
   if (!open) {
@@ -54,7 +56,7 @@ function SowEditor({ row, brief, busy, onSave }: { row: any; brief: any; busy: b
         <span className="font-semibold text-slate-600">SOW của phase:</span>
         {sow === null && <span className="text-amber-700">Chưa chốt — phân bổ chưa có dòng cho KOL này.</span>}
         {sow !== null && sow.length === 0 && <span className="text-slate-500">Không làm hạng mục nào trong phase này.</span>}
-        {sow !== null && sow.length > 0 && <span className="text-slate-700">{sow.map(e => labelOf(e.key) + (e.qty ? ' ×' + e.qty : '') + (e.included ? ' (kèm theo)' : '')).join(' · ')}</span>}
+        {sow !== null && sow.length > 0 && <span className="text-slate-700">{sow.map(e => labelOf(e.key) + (e.qty ? ' ×' + e.qty : '')).join(' · ')}</span>}
         {outsideBrief.length > 0 && <span className="text-amber-700">Ngoài brief: {outsideBrief.join(', ')}</span>}
         <button type="button" className="text-indigo-700 underline disabled:opacity-50 cursor-pointer" disabled={busy} onClick={startEdit}>{sow === null ? 'Chốt SOW' : 'Sửa SOW'}</button>
       </div>
@@ -76,15 +78,13 @@ function SowEditor({ row, brief, busy, onSave }: { row: any; brief: any; busy: b
                 {briefKeys.includes(key) && <span className="text-slate-400">(trong brief)</span>}
               </label>
               {item && (<>
-                {(scope === 'per_kol' || item.included) ? (
+                {(scope === 'per_kol' || isStory) ? (
                   <label className="flex items-center gap-1">SL:
                     <input type="number" min={1} max={100000} aria-label={'Số lượng ' + labelOf(key)} className="w-20 rounded border border-slate-300 px-2 py-1 bg-white" value={item.qty ?? ''} disabled={busy}
                       onChange={e => patchItem(key, { qty: e.target.value === '' ? null : Math.max(0, Math.floor(Number(e.target.value) || 0)) || null })} />
                   </label>
                 ) : <span className="text-slate-400">SL chia ở bước phân bổ</span>}
-                {isStory
-                  ? <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold">Kèm theo</span>
-                  : <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={item.included} disabled={busy} onChange={e => patchItem(key, { included: e.target.checked, qty: e.target.checked ? (item.qty ?? 1) : item.qty })} /> Kèm theo (không tính tiền riêng)</label>}
+                {isStory && <span className="text-slate-400">không tính tiền riêng</span>}
               </>)}
             </div>
           );

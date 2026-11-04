@@ -30,6 +30,9 @@ export interface ProjectQuoteItem {
   // điều kiện dịch vụ tại thời điểm đó; PM/Admin sửa được trong bản nháp; cập nhật
   // kho hoặc lấy lại giá KHÔNG ghi đè ghi chú đã chỉnh.
   note?:string;
+  // Ghi chú NỘI BỘ theo dòng (vd "FOC 2 story trước livestream 2 ngày") — PM ghi tại
+  // bảng phân bổ hoặc trong bản nháp; chỉ team xem, TUYỆT ĐỐI không xuất bản khách.
+  internalNote?:string;
   // Bối cảnh comment thuê ngoài: tổng comments mục tiêu của brief (chỉ để đối chiếu —
   // KHÔNG tự suy ra số lượng mua), phạm vi áp dụng và phần gói đã bao gồm để tránh tính trùng.
   // Cách tính gói: pricingMode='package' -> thành tiền = số gói (quantity) x giá gói;
@@ -174,6 +177,7 @@ const cleanItems=(items:ProjectQuoteItem[]):ProjectQuoteItem[]=>items.map(i=>({i
   ...(typeof i.unit==='string'&&i.unit.trim()?{unit:i.unit.trim().slice(0,50)}:{}),
   ...(typeof i.conditions==='string'&&i.conditions.trim()?{conditions:i.conditions.trim().slice(0,1000)}:{}),
   ...(typeof i.note==='string'&&i.note.trim()?{note:i.note.trim().slice(0,2000)}:{}),
+  ...(typeof i.internalNote==='string'&&i.internalNote.trim()?{internalNote:i.internalNote.trim().slice(0,1000)}:{}),
   ...(cleanCommentInfo(i.commentInfo)?{commentInfo:cleanCommentInfo(i.commentInfo) as ProjectQuoteItem['commentInfo']}:{}),
   ...(i.acceptedQty!==undefined?{acceptedQty:i.acceptedQty}:{})}));;
 // Tổng số comment thuê của một dòng dịch vụ: theo comment = chính số lượng dòng;
@@ -445,21 +449,19 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
       if(!row)return res.status(400).json({message:'Có đối tác trong phân bổ không thuộc danh sách của dự án.'});
       const prof=JSON.parse(row.profile_json);const prices=JSON.parse(row.prices_json);const price=prices[a.key];
       const rowPhaseId=row.phase_id??firstPhaseId;if(rowPhaseId)usedPhaseIds.add(rowPhaseId);
+      const internalNote=typeof a.internalNote==='string'&&a.internalNote.trim()?a.internalNote.trim().slice(0,1000):undefined;
       if(row.partner_type==='community'){
         const svc=(prof.dichVu??[]).find((s:any)=>s.id===a.key);
         if(!svc||!price)return res.status(400).json({message:`Dịch vụ đã chọn không thuộc hồ sơ Community “${prof.ten}”.`});
-        lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'community',key:a.key,description:svc.ten,serviceName:svc.ten,unit:svc.donVi,...(svc.dieuKien?{conditions:svc.dieuKien}:{}),quantity:a.quantity,price,sellUnitPrice:a.sellUnitPrice??null});
+        lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'community',key:a.key,description:svc.ten,serviceName:svc.ten,unit:svc.donVi,...(svc.dieuKien?{conditions:svc.dieuKien}:{}),quantity:a.quantity,price,sellUnitPrice:a.sellUnitPrice??null,...(internalNote?{internalNote}:{})});
       }else{
-        const bundled=a.included===true;
-        if(a.key==='story'){
-          // Story là hạng mục KÈM THEO (anh chốt 04/11/2026): không có format giá
-          // riêng trong kho — chỉ nhận khi đánh dấu kèm theo.
-          if(!bundled)return res.status(400).json({message:'Story chỉ là hạng mục kèm theo — hãy đánh dấu kèm theo khi phân bổ.'});
-          lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'kol',key:'story',description:'Story',quantity:a.quantity,price:{value:null,status:'waiting',source:'',checkedAt:null,checkedBy:null},bundled:true,sellUnitPrice:0});
-        }else{
-          if(!(a.key in PRICE_FORMAT_LABELS)||!price)return res.status(400).json({message:`Hạng mục đã chọn không hợp lệ cho KOL “${prof.ten}”.`});
-          lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'kol',key:a.key,description:PRICE_FORMAT_LABELS[a.key as PriceFormatKey],quantity:a.quantity,price,sellUnitPrice:a.sellUnitPrice??null,...(bundled?{bundled:true}:{})});
-        }
+        // Mô hình mới (anh chốt 04/11/2026): KHÔNG còn dòng "kèm theo". Story không
+        // tính tiền riêng nên không sinh dòng báo giá — PM ghi story vào ghi chú nội
+        // bộ của dòng creator. Hạng mục từng "kèm theo" trước đây nay là dòng giá
+        // bình thường (phí chốt tại bảng phân bổ; miễn phí thật thì điền phí 0).
+        if(a.key==='story')return res.status(400).json({message:'Story không phải hạng mục tính tiền — hãy ghi story vào ghi chú nội bộ của dòng creator khi báo giá.'});
+        if(!(a.key in PRICE_FORMAT_LABELS)||!price)return res.status(400).json({message:`Hạng mục đã chọn không hợp lệ cho KOL “${prof.ten}”.`});
+        lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'kol',key:a.key,description:PRICE_FORMAT_LABELS[a.key as PriceFormatKey],quantity:a.quantity,price,sellUnitPrice:a.sellUnitPrice??null,...(internalNote?{internalNote}:{})});
       }
     }
     const built=buildAllocatedQuoteItems(lines,()=>randomUUID());

@@ -323,8 +323,10 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
       seen.add(key);
       const qty=e.qty===undefined?null:e.qty;
       if(qty!==null&&(!Number.isSafeInteger(qty)||qty<1||qty>100000))return undefined;
-      const included=key==='story'?true:e.included===true;
-      out.push({key,qty,included});
+      // Mô hình mới (anh chốt 04/11/2026): SOW chỉ còn hạng mục + số lượng — KHÔNG còn
+      // trạng thái "kèm theo". Story là hạng mục phải giao nhưng không tính tiền riêng
+      // (ghi vào ghi chú nội bộ khi báo giá); hạng mục có giá thì phí chốt ở bảng phân bổ.
+      out.push({key,qty});
     }
     return out;
   }
