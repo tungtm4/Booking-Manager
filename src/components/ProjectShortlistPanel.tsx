@@ -264,7 +264,7 @@ function CommunityCandidateCard({ profile, brief, selected, disabled, onSelect, 
 }
 
 // Một Community đã nằm trong danh sách sơ bộ của phase: Booking kiểm tra giá theo TỪNG DỊCH VỤ,
-// PM đưa từng dịch vụ vào phương án nháp đã chọn ở mục 5.
+// PM đưa từng dịch vụ vào phương án nháp đã chọn ở Bước 4.
 function CommunityShortlistRow({ row, brief, busy, quoteId, onSavePrice, onToOption }: {
   row: any; brief: any; busy: boolean; quoteId: string;
   onSavePrice: (row: any, body: any) => void;
@@ -299,7 +299,7 @@ function CommunityShortlistRow({ row, brief, busy, quoteId, onSavePrice, onToOpt
           <button type="button" className={button} disabled={busy || !quoteId || !activeService} onClick={() => onToOption(row, activeService, qty)}>
             Đưa dịch vụ vào phương án
           </button>
-          {!quoteId && <span className="text-xs text-slate-500">Chọn bản nháp phương án ở mục 5 trước.</span>}
+          {!quoteId && <span className="text-xs text-slate-500">Chọn bản nháp phương án ở Bước 4 trước.</span>}
         </div>
       )}
     </article>
@@ -355,14 +355,10 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
     setSigningDirty(false);
   };
   const [newPhase, setNewPhase] = useState<any>({ name: '', kind: 'creator', budget: '' });
-  const [aiText, setAiText] = useState(''), [aiDrafts, setAiDrafts] = useState<any[] | null>(null), [aiBusy, setAiBusy] = useState(false), [aiMsg, setAiMsg] = useState('');
   // DG-1 (tinh gọn phần dự án): khối AI bóc tách phase + form brief của phase mặc định ĐÓNG.
-  const [aiOpen, setAiOpen] = useState(false);
   const [phaseBriefOpen, setPhaseBriefOpen] = useState(false);
   // Ô AI bóc tách phase TỰ ĐIỀN brief dự án đã lưu (không bắt dán lại) — chỉ khi người dùng
   // tự sửa ô này thì mới ngừng đồng bộ theo brief.
-  const aiTouchedRef = useRef(false);
-  useEffect(() => { if (!aiTouchedRef.current) setAiText(data?.brief?.text || ''); }, [data?.brief?.text]);
   const activePhaseIdRef = useRef(''), syncedPhaseRev = useRef<Record<string, number>>({});
 
   // Phân trang cho cả hai danh sách
@@ -544,23 +540,6 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
     );
   }
 
-  async function runBreakdown() {
-    setAiBusy(true);
-    setAiMsg('');
-    setAiDrafts(null);
-    try {
-      const r = await fetch('/api/ai/breakdown-phases', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ briefText: aiText.trim() }) });
-      const d = await r.json();
-      if (!d.success) { setAiMsg(d.message || 'AI chưa bóc tách được. Có thể tạo phase thủ công ở mục 2.'); return; }
-      const drafts = normalizePhaseDrafts(d.phases).map((x: any) => ({ ...x, include: true }));
-      if (!drafts.length) { setAiMsg('AI không tách được phase nào từ brief này.'); return; }
-      setAiDrafts(drafts);
-      setAiMsg(`AI đề xuất ${drafts.length} phase. Kiểm tra, sửa nếu cần rồi bấm tạo.`);
-    } catch {
-      setAiMsg('Không gọi được AI lúc này. Có thể tạo phase thủ công ở mục 2.');
-    } finally { setAiBusy(false); }
-  }
-
   const toggle = (list: string[], id: string) => list.includes(id) ? list.filter(x => x !== id) : [...list, id];
 
   if (!data) return <p>{error || 'Đang tải brief và danh sách dự án…'}</p>;
@@ -703,127 +682,24 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
       {error && <p role="alert" className="p-3 bg-red-50 text-red-700 rounded-lg">{error}</p>}
       {notice && <p role="status" className="p-3 bg-emerald-50 text-emerald-800 rounded-lg">{notice}</p>}
 
-      {/* 1. Brief dự án (Chỉ đọc — Chỉnh sửa tại tab Tổng quan) */}
-      <section className="border rounded-2xl p-4 bg-white space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
-          <div>
-            <h4 className="font-semibold text-slate-800 flex items-center gap-2">
-              1. Brief dự án
-              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-normal">Chỉ đọc</span>
-            </h4>
-            <p className="text-xs text-slate-500">Brief tầng dự án chỉ được chỉnh sửa tại tab Tổng quan bởi PM / Admin.</p>
-          </div>
-          {onOpenOverview && (
-            <button
-              type="button"
-              onClick={onOpenOverview}
-              className="text-xs text-purple-700 hover:text-purple-900 font-semibold underline cursor-pointer"
-            >
-              ← Chỉnh sửa brief dự án tại tab Tổng quan
-            </button>
-          )}
-        </div>
-
-        <div className="text-sm space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
-          <div>
-            <span className="text-xs font-semibold text-slate-500 block uppercase tracking-wider">Nội dung brief chung:</span>
-            <p className="text-slate-800 whitespace-pre-wrap">{data.brief.text || 'Chưa nhập nội dung brief chung.'}</p>
-          </div>
-          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-slate-200/60 text-xs">
-            <div>
-              <span className="text-slate-400 block">Lĩnh vực:</span>
-              <strong className="text-slate-700">{data.brief.category || 'Tất cả'}</strong>
-            </div>
-            <div>
-              <span className="text-slate-400 block">Từ khóa:</span>
-              <strong className="text-slate-700">{data.brief.keyword || 'Không'}</strong>
-            </div>
-            <div>
-              <span className="text-slate-400 block">Nền tảng:</span>
-              <strong className="text-slate-700">
-                {(data.brief.platforms && data.brief.platforms.length > 0)
-                  ? data.brief.platforms.join(', ')
-                  : (data.brief.platform || 'Tất cả')}
-              </strong>
-            </div>
-            <div>
-              <span className="text-slate-400 block">Follower tối thiểu:</span>
-              <strong className="text-slate-700">{data.brief.minFollowers ? formatMoneyInput(data.brief.minFollowers) : 'Không lọc'}</strong>
-            </div>
-          </div>
-        </div>
-
-        {/* Khối Bóc tách phase bằng AI (AI-1) */}
-        <div className="border-t pt-3 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-semibold">Bóc tách phase bằng AI (AI-1)</p>
-            <button type="button" className="text-sm text-indigo-700 underline cursor-pointer" aria-expanded={aiOpen} onClick={() => setAiOpen(v => !v)}>{aiOpen ? 'Đóng bóc tách AI' : 'Mở bóc tách AI'}</button>
-          </div>
-          <div className={(aiOpen || aiDrafts) ? 'space-y-3' : 'hidden'}>
-          <p className="text-xs text-slate-500">AI đọc brief tổng và đề xuất các phase (loại đối tác, số lượng, ngân sách từng phase). Kết quả chỉ là bản nháp — kiểm tra, sửa rồi mới tạo phase ở mục 2.</p>
-          <textarea aria-label="Brief tổng để AI bóc tách phase" className={field} rows={3} maxLength={30000} value={aiText} onChange={e => { aiTouchedRef.current = true; setAiText(e.target.value); }} placeholder="Brief dự án đã lưu sẽ tự điền vào đây — sửa trực tiếp nếu muốn bóc tách theo nội dung khác…" />
-          <div className="flex gap-2 flex-wrap">
-            <button type="button" className="border rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-slate-50" disabled={aiBusy} onClick={() => { aiTouchedRef.current = false; setAiText(data.brief.text || ''); }}>Dùng nội dung brief chung</button>
-            <button type="button" className={button} disabled={aiBusy || !aiText.trim()} onClick={runBreakdown}>{aiBusy ? 'Đang bóc tách…' : 'Bóc tách thành phase'}</button>
-          </div>
-          {aiMsg && <p className="text-sm text-slate-600">{aiMsg}</p>}
-          {aiDrafts && (
-            <div className="space-y-3">
-              {aiDrafts.map((d: any, i: number) => (
-                <div key={i} className="border rounded-xl p-3 space-y-2 bg-slate-50">
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <label className="flex items-center gap-1 text-sm font-medium"><input type="checkbox" checked={d.include} onChange={e => setAiDrafts(aiDrafts.map((x: any, j: number) => j === i ? { ...x, include: e.target.checked } : x))} /> Tạo phase này</label>
-                    <input aria-label="Tên phase AI đề xuất" className={field + ' sm:w-64'} value={d.name} onChange={e => setAiDrafts(aiDrafts.map((x: any, j: number) => j === i ? { ...x, name: e.target.value } : x))} />
-                    <select aria-label="Loại phase AI đề xuất" className="rounded-lg border border-slate-300 px-2 py-2 bg-white text-sm" value={d.kind} onChange={e => setAiDrafts(aiDrafts.map((x: any, j: number) => j === i ? { ...x, kind: e.target.value } : x))}>{Object.entries(PHASE_KIND_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-                    <button type="button" className="text-sm text-red-700 underline" onClick={() => setAiDrafts(aiDrafts.filter((_: any, j: number) => j !== i))}>Bỏ</button>
-                  </div>
-                  <div className="grid sm:grid-cols-3 gap-2">
-                    <label className="text-xs">Ngân sách phase (VND)<input className={field} inputMode="numeric" value={formatMoneyInput(d.budget ?? '')} onChange={e => setAiDrafts(aiDrafts.map((x: any, j: number) => j === i ? { ...x, budget: parseMoneyInput(e.target.value) } : x))} /></label>
-                    <label className="text-xs">Số lượng mục tiêu<input className={field} type="number" min={1} value={d.targetCount ?? ''} onChange={e => setAiDrafts(aiDrafts.map((x: any, j: number) => j === i ? { ...x, targetCount: e.target.value === '' ? null : Number(e.target.value) } : x))} /></label>
-                    <label className="text-xs">Lĩnh vực / nền tảng<input className={field} value={[d.category, d.platform].filter(Boolean).join(' · ')} readOnly /></label>
-                  </div>
-                  <label className="block text-xs">Mô tả / brief của phase<textarea className={field} rows={2} maxLength={2000} value={d.description} onChange={e => setAiDrafts(aiDrafts.map((x: any, j: number) => j === i ? { ...x, description: e.target.value } : x))} /></label>
-                  {d.deliverables.length > 0 && <p className="text-xs text-slate-600">Hạng mục ({d.deliverableScope === 'campaign' ? 'tổng toàn phase' : 'mỗi KOL'}): {d.deliverables.map((x: any) => (PRICE_FORMAT_LABELS[x.format as keyof typeof PRICE_FORMAT_LABELS] ?? x.format) + ' × ' + x.quantity.toLocaleString('vi-VN')).join(' · ')}</p>}
-                  {(d.kpiTopics != null || d.kpiComments != null || d.kpiBuzz != null || (d.services ?? []).length > 0) && <p className="text-xs text-slate-600">{[d.kpiTopics != null ? 'KPI ' + d.kpiTopics.toLocaleString('vi-VN') + ' bài' : null, d.kpiComments != null ? d.kpiComments.toLocaleString('vi-VN') + ' comments' : null, d.kpiBuzz != null ? d.kpiBuzz.toLocaleString('vi-VN') + ' buzz' : null].filter(Boolean).join(' · ')}{(d.services ?? []).length > 0 ? ' · Dịch vụ: ' + d.services.map((s: any) => s.name + ' × ' + s.quantity.toLocaleString('vi-VN')).join(', ') : ''}</p>}
-                </div>
-              ))}
-              {data.canManage && (
-              <button type="button" className={button} disabled={busy || !aiDrafts.some((d: any) => d.include)} onClick={() => run(async () => {
-                let created = 0;
-                for (const d of aiDrafts.filter((x: any) => x.include)) {
-                  await request(base + '/phases', { name: d.name, kind: d.kind, description: d.description, budget: d.budget === '' || d.budget == null ? null : d.budget, brief: { text: d.description || d.name, category: d.category, keyword: '', platform: d.platform, platforms: normalizeBriefPlatforms({ platform: d.platform }).platforms, minFollowers: 0, deliverableScope: d.deliverableScope, deliverables: d.deliverables, targetCount: d.targetCount, kolTargetCount: d.kolTargetCount ?? null, communityTargetCount: d.communityTargetCount ?? null, budget: null, partnerType: d.partnerType ?? (d.kind === 'creator' ? 'kol' : d.kind === 'community' ? 'community' : null), kpiTopics: d.kpiTopics ?? null, kpiComments: d.kpiComments ?? null, kpiBuzz: d.kpiBuzz ?? null, pillars: d.pillars ?? [], services: d.services ?? [] } });
-                  created++;
-                }
-                setAiDrafts(null);
-                await refresh();
-                setNotice(`Đã tạo ${created} phase từ bản bóc tách AI.`);
-              })}>Tạo {aiDrafts.filter((d: any) => d.include).length} phase đã chọn</button>
-              )}
-            </div>
-          )}
-          </div>
-        </div>
+      {/* Brief dự án: chỉ tóm tắt 1 dòng — sửa ở tab Tổng quan (Bước 2); bóc tách phase ở Tổng quan (Bước 3) */}
+      <section className="border rounded-2xl px-4 py-3 bg-white flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        <span className="font-semibold text-slate-800">Brief dự án:</span>
+        <span className="text-slate-600 truncate max-w-xl">{data.brief.text || 'Chưa nhập brief chung'}</span>
+        <span className="text-xs text-slate-500">Lĩnh vực: <strong className="text-slate-700">{data.brief.category || 'Tất cả'}</strong> · Nền tảng: <strong className="text-slate-700">{(data.brief.platforms && data.brief.platforms.length > 0) ? data.brief.platforms.join(', ') : (data.brief.platform || 'Tất cả')}</strong> · Follower tối thiểu: <strong className="text-slate-700">{data.brief.minFollowers ? formatMoneyInput(data.brief.minFollowers) : 'Không lọc'}</strong></span>
+        {onOpenOverview && (
+          <button type="button" onClick={onOpenOverview} className="text-xs text-purple-700 hover:text-purple-900 font-semibold underline cursor-pointer ml-auto">
+            Sửa brief & bóc tách phase ở tab Tổng quan →
+          </button>
+        )}
       </section>
 
-      <section className="border rounded-xl p-4 space-y-4">
+      <section id="buoc-1-phase" className="border rounded-xl p-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h4 className="font-semibold">2. Các phase của dự án ({phases.length})</h4>
-          {activePhase && (
-            <button
-              type="button"
-              className="border border-indigo-200 bg-indigo-50/70 text-indigo-700 font-medium rounded-lg px-3 py-2 text-sm cursor-pointer hover:bg-indigo-100/70"
-              disabled={busy}
-              onClick={() => {
-                setSearchMode('proposal');
-                onOpenProposal?.(activePhase.id);
-              }}
-            >
-              🎯 Đề xuất thông minh cho phase này
-            </button>
-          )}
+          <h4 className="font-semibold">Bước 1 · Phase & brief của phase ({phases.length})</h4>
         </div>
-        <p className="text-xs text-slate-500">Mỗi phase là một bài toán riêng: loại đối tác, brief riêng, ngân sách riêng. Booking đề xuất và add KOL theo từng phase; PM xem tổng quan ở trên để điều chỉnh.</p>
-        {phases.length === 0 && <p className="text-sm text-slate-500">Dự án chưa có phase. Tạo phase đầu tiên ở cuối mục này, hoặc dùng AI bóc tách từ brief chung ở mục 1.</p>}
+        <p className="text-xs text-slate-500">Mỗi phase là một bài toán riêng: loại đối tác, brief riêng, ngân sách riêng. Brief của phase chỉ sửa tại đây — phần tìm ở Bước 2 dùng đúng brief này. Phase mới tạo ở cuối mục này hoặc bóc tách bằng AI ở tab Tổng quan.</p>
+        {phases.length === 0 && <p className="text-sm text-slate-500">Dự án chưa có phase. Tạo phase đầu tiên ở cuối mục này, hoặc dùng AI bóc tách từ brief chung ở tab Tổng quan (Bước 3).</p>}
         {phases.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {phases.map((ph: any) => {
@@ -958,7 +834,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
         <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
           <div>
             <h4 className="font-semibold text-slate-800">
-              3. Tìm & Đề xuất đối tác{activePhase ? ' cho phase “' + activePhase.name + '”' : ''}
+              Bước 2 · Tìm đối tác{activePhase ? ' cho phase “' + activePhase.name + '”' : ''}
             </h4>
             <p className="text-xs text-slate-500">
               {searchMode === 'proposal'
@@ -996,6 +872,10 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
               phaseId={activePhase?.id}
               embedded={true}
               onAdded={refresh}
+              onEditCriteriaExternal={() => {
+                setPhaseBriefOpen(true);
+                document.getElementById('buoc-1-phase')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
             />
           </div>
         ) : (
@@ -1189,7 +1069,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
       </section>
 
       <section className="space-y-3">
-        <h4 className="font-semibold">4. Danh sách {activePhase ? 'của phase “' + activePhase.name + '”' : 'sơ bộ'} — Booking kiểm tra giá ({visibleKolRows.length} KOL · {visibleCommRows.length} Community)</h4>
+        <h4 className="font-semibold">Bước 3 · Danh sách cơ bản {activePhase ? 'của phase “' + activePhase.name + '”' : ''} — kiểm tra giá ({visibleKolRows.length} KOL · {visibleCommRows.length} Community)</h4>
         <p className="text-xs text-slate-500">Giá trong kho chưa được coi là đã xác nhận — kiểm tra từng hạng mục/dịch vụ, ghi nguồn rồi xác nhận. Giữ Shift + Click để chọn nhiều dòng liên tiếp.</p>
         <details>
           <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-600">Danh sách này dùng để làm gì?</summary>
@@ -1253,7 +1133,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
             </div>
           ))}
           {!visibleRows.length && (
-            <p className="text-sm border border-dashed rounded-xl p-4">{activePhase ? 'Chưa có đối tác nào trong phase này. Thêm từ đúng kho dữ liệu ở mục 3 hoặc dùng nút Đề xuất bằng AI ở mục 2.' : 'Thêm đối tác từ mục 3. Danh sách này dùng chung cho cả PM và Booking.'}</p>
+            <p className="text-sm border border-dashed rounded-xl p-4">{activePhase ? 'Chưa có đối tác nào trong phase này. Tìm và thêm đối tác ở Bước 2 phía trên.' : 'Thêm đối tác từ Bước 2. Danh sách này dùng chung cho cả PM và Booking.'}</p>
           )}
 
           <PaginationBar
@@ -1328,7 +1208,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
 
       {data.canManage && selected.length > 0 && (
         <section className="border border-indigo-200 bg-indigo-50 rounded-xl p-4 space-y-3">
-          <h4 className="font-semibold">5. Đưa KOL đã chọn vào phương án</h4>
+          <h4 className="font-semibold">Bước 4 · Đưa KOL đã chọn vào phương án (báo giá sơ bộ)</h4>
           <p className="text-sm">Mục tiêu brief: {brief.targetCount ?? 'Chưa đặt'} KOL · Đang tích {selected.length} KOL. Có thể dùng một KOL trong nhiều phương án.</p>
           <div className="grid sm:grid-cols-3 gap-3">
             <label className="text-sm">
@@ -1369,7 +1249,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
               Tải lại dữ liệu
             </button>
           </div>
-          <p className="text-xs text-slate-500">Giá chụp vào phương án kèm trạng thái xác nhận; cổng giá ở server chặn gửi duyệt tới khi đủ giá và đã xác nhận. Community đưa vào theo từng dịch vụ ở mục 4.</p>
+          <p className="text-xs text-slate-500">Giá chụp vào phương án kèm trạng thái xác nhận; cổng giá ở server chặn gửi duyệt tới khi đủ giá và đã xác nhận. Community đưa vào theo từng dịch vụ ở Bước 3.</p>
         </section>
       )}
       {signingTarget && (

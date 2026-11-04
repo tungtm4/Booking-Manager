@@ -5,6 +5,7 @@ import { PartnerCatalogManager } from './PartnerCatalogManager';
 import { ProjectProposal } from './ProjectProposal';
 import { ProjectQuotesPanel } from './ProjectQuotesPanel';
 import { ProjectContractsPanel } from './ProjectContractsPanel';
+import { PhaseBreakdownBlock } from './PhaseBreakdownBlock';
 import { ProjectMemberPicker } from './ProjectMemberPicker';
 import App from '../App';
 import { formatVND } from '../utils/formatters';
@@ -36,8 +37,9 @@ const button = 'rounded-xl bg-[#7C3AED] hover:bg-purple-700 text-white font-semi
 const buttonSecondary = 'rounded-xl border border-purple-200 bg-white hover:bg-purple-50 text-slate-700 font-semibold px-4 py-2.5 disabled:opacity-50 transition-colors cursor-pointer';
 const labels: Record<string, string> = { admin: 'Admin', pm: 'PM', booking: 'Booking', pricing: 'Phụ trách giá', paperwork: 'Phụ trách hồ sơ', creator_support: 'Hỗ trợ creator' };
 
-function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjectChanged }: { project: any; members: any[]; isAdmin: boolean; onSwitchTab: (tab: any) => void; onProjectChanged?: () => void }) {
+function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjectChanged, onOpenPhase }: { project: any; members: any[]; isAdmin: boolean; onSwitchTab: (tab: any) => void; onProjectChanged?: () => void; onOpenPhase?: (phaseId: string) => void }) {
   const [data, setData] = useState<any>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -78,7 +80,7 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
     return () => {
       active = false;
     };
-  }, [project.id]);
+  }, [project.id, reloadKey]);
 
   const handleBriefChange = (k: string, v: any) => {
     setBriefForm((prev: any) => ({ ...prev, [k]: v }));
@@ -163,7 +165,7 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
       <div className="grid md:grid-cols-2 gap-6">
         <div className="bg-white p-5 rounded-2xl border border-purple-100 shadow-sm space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="font-bold text-slate-900 text-lg">Thông tin chiến dịch & Khách hàng</h3>
+            <div><span className="text-[11px] font-semibold uppercase tracking-wider text-purple-700">Bước 1 · Thông tin & thành viên</span><h3 className="font-bold text-slate-900 text-lg">Thông tin chiến dịch & Khách hàng</h3></div>
             <div className="flex items-center gap-2">
               {canEdit && !editingInfo && (
                 <button type="button" onClick={startEditInfo} className="px-2.5 py-1 text-xs font-semibold rounded-full bg-white text-purple-700 border border-purple-200 hover:bg-purple-50 cursor-pointer">
@@ -256,12 +258,32 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
         </div>
       </div>
 
+      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+        <h3 className="font-bold text-slate-900 text-lg">Thành viên phân công dự án</h3>
+        <div className="flex flex-wrap gap-3">
+          {members.length === 0 && <p className="text-sm text-slate-500">Chưa có phân công thành viên riêng. Admin hệ thống có toàn quyền quản lý.</p>}
+          {members.map((m: any) => (
+            <div key={m.id} className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50/50">
+              <div className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-xs font-bold">
+                {m.display_name?.charAt(0).toUpperCase() || 'U'}
+              </div>
+              <div>
+                <strong className="text-xs text-slate-800 block">{m.display_name}</strong>
+                <span className="text-[10px] text-purple-700 font-semibold bg-purple-50 px-1.5 py-0.5 rounded">
+                  {m.roles?.map((r: string) => labels[r] || r).join(', ')}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Brief tầng dự án — Bề mặt sửa duy nhất của brief chiến dịch */}
       <div className="bg-white p-5 rounded-2xl border border-purple-100 shadow-sm space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-purple-100/60 pb-3">
           <div>
             <h3 className="font-bold text-slate-900 text-lg flex items-center gap-2">
-              📋 Brief & Tiêu chí chiến dịch (Brief tầng dự án)
+              📋 Bước 2 · Brief chung & tiêu chí chiến dịch
             </h3>
             <p className="text-xs text-slate-500">
               Đây là bề mặt sửa brief chiến dịch duy nhất của dự án. Brief của từng phase sẽ kế thừa từ brief này nếu chưa cấu hình riêng.
@@ -434,12 +456,13 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
 
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="font-bold text-slate-900 text-lg">Các Phase triển khai ({phases.length})</h3>
+          <h3 className="font-bold text-slate-900 text-lg">Bước 3 · Bóc tách phase & các phase triển khai ({phases.length})</h3>
           <button onClick={() => onSwitchTab('shortlist')} className="text-xs text-[#7C3AED] font-semibold hover:underline cursor-pointer">Quản lý Phase trong Danh sách</button>
         </div>
 
+        <PhaseBreakdownBlock projectId={project.id} briefText={briefForm?.text ?? ''} canManage={canEdit} onCreated={() => setReloadKey(k => k + 1)} />
         {phases.length === 0 ? (
-          <p className="text-sm text-slate-500 italic p-4 bg-slate-50 rounded-xl text-center">Chưa có Phase nào được khởi tạo. Bạn có thể bóc tách Phase bằng AI hoặc tạo Phase thủ công ở Tab Đối tác.</p>
+          <p className="text-sm text-slate-500 italic p-4 bg-slate-50 rounded-xl text-center">Chưa có Phase nào được khởi tạo. Bóc tách Phase bằng AI ở trên, hoặc tạo Phase thủ công ở tab Đối tác & Phase.</p>
         ) : (
           <div className="grid md:grid-cols-2 gap-4">
             {phases.map((ph: any) => {
@@ -453,6 +476,10 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
                     <span className="text-xs font-semibold px-2 py-0.5 rounded bg-purple-100 text-purple-800">{ph.kind || 'phase'}</span>
                   </div>
                   {ph.description && <p className="text-xs text-slate-600 line-clamp-2">{ph.description}</p>}
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500">{(data?.shortlist?.rows ?? []).filter((r: any) => r.phaseId === ph.id || (!r.phaseId && phases[0]?.id === ph.id)).length} đối tác trong danh sách cơ bản</span>
+                    <button type="button" onClick={() => (onOpenPhase ? onOpenPhase(ph.id) : onSwitchTab('shortlist'))} className="text-xs text-[#7C3AED] font-semibold hover:underline cursor-pointer">Mở phase này ở Đối tác & Phase →</button>
+                  </div>
                   <div className="text-xs space-y-1 pt-2 border-t border-purple-100/60">
                     <div className="flex justify-between text-slate-500">
                       <span>Ngân sách dự kiến:</span>
@@ -490,25 +517,7 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
         )}
       </div>
 
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-        <h3 className="font-bold text-slate-900 text-lg">Thành viên phân công dự án</h3>
-        <div className="flex flex-wrap gap-3">
-          {members.length === 0 && <p className="text-sm text-slate-500">Chưa có phân công thành viên riêng. Admin hệ thống có toàn quyền quản lý.</p>}
-          {members.map((m: any) => (
-            <div key={m.id} className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50/50">
-              <div className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center text-xs font-bold">
-                {m.display_name?.charAt(0).toUpperCase() || 'U'}
-              </div>
-              <div>
-                <strong className="text-xs text-slate-800 block">{m.display_name}</strong>
-                <span className="text-[10px] text-purple-700 font-semibold bg-purple-50 px-1.5 py-0.5 rounded">
-                  {m.roles?.map((r: string) => labels[r] || r).join(', ')}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+
     </div>
   );
 }
@@ -635,11 +644,27 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-6">
+      {baseline?.pnl && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { label: 'Doanh thu trước thuế', value: baseline.pnl.revenueBeforeTax, cls: 'text-slate-900' },
+            { label: 'Tổng chi phí (K)', value: baseline.pnl.totalK, cls: 'text-slate-900' },
+            { label: 'Tổng phải trả (L)', value: baseline.pnl.totalPayableL, cls: 'text-slate-900' },
+            { label: 'Lợi nhuận', value: baseline.pnl.profit, cls: (baseline.pnl.profit ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-700' },
+          ].map(card => (
+            <div key={card.label} className="bg-white border border-purple-100 rounded-2xl px-4 py-3 shadow-xs">
+              <p className="text-xs text-slate-500">{card.label}</p>
+              <p className={'text-lg font-bold whitespace-nowrap ' + card.cls}>{money(card.value)}</p>
+              <p className="text-[11px] text-slate-400">Theo phương án chốt {baseline.optionName} / V{baseline.number}</p>
+            </div>
+          ))}
+        </div>
+      )}
       {/* (a) P&L tổng dự án theo bản chốt */}
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-purple-700">Khối 1 — Tổng dự án</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-purple-700">Tổng dự án</span>
             <h3 className="text-xl font-bold text-slate-900">P&L tổng dự án — chỉ tính phương án khách chốt</h3>
           </div>
           {baseline && (
@@ -738,7 +763,7 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
       {/* (b) So sánh P&L giữa các phương án */}
       <section className="bg-white p-5 rounded-2xl border border-purple-100 shadow-xs space-y-4">
         <div>
-          <span className="text-xs font-semibold uppercase tracking-wider text-purple-700">Khối 2 — So sánh</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-purple-700">So sánh phương án</span>
           <h4 className="font-bold text-slate-900 text-lg">So sánh P&L giữa các phương án</h4>
           <p className="text-xs text-slate-500">
             Các phương án là lựa chọn thay thế (không cộng dồn). Bấm vào một phiên bản để xem chi tiết bên dưới.
@@ -749,53 +774,43 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
         {options.length === 0 ? (
           <p className="text-xs text-slate-500 italic p-3 border rounded-xl">Dự án chưa có phương án nào.</p>
         ) : (
-          <div className="divide-y border border-purple-100 rounded-2xl overflow-hidden text-sm">
-            {options.map((opt: any) => (
-              <div key={opt.optionId} className="p-4 space-y-2 bg-slate-50/50">
-                <div className="flex items-center justify-between">
-                  <strong className="text-slate-900 font-bold">{opt.name}</strong>
-                  <span className="text-xs text-slate-500">{opt.versions?.length || 0} phiên bản</span>
-                </div>
-                <div className="space-y-1.5">
-                  {opt.versions?.map((ver: any) => {
-                    const isSelected = ver.quoteId === currentVersion?.quoteId;
-                    return (
-                      <div
-                        key={ver.quoteId}
-                        onClick={() => setSelectedQuoteId(ver.quoteId)}
-                        className={`flex flex-wrap items-center justify-between text-xs p-3 rounded-xl border transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-purple-50 border-purple-300 ring-2 ring-purple-200'
-                            : 'bg-white border-slate-200 hover:border-purple-200 hover:bg-purple-50/20'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-slate-800">
-                            V{ver.number} ({ver.status})
-                          </span>
-                          {ver.isBaseline && (
-                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold text-[10px]">
-                              ★ BASELINE
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-4 text-slate-600">
-                          <span>Doanh thu: {money(ver.pnl?.revenueBeforeTax)}</span>
-                          <span>K: {money(ver.pnl?.totalK)}</span>
-                          <span>L: {money(ver.pnl?.totalPayableL)}</span>
-                          <strong className={ver.pnl?.profit >= 0 ? 'text-emerald-700 font-bold' : 'text-red-700 font-bold'}>
-                            LN: {money(ver.pnl?.profit)}
-                          </strong>
-                          <span className="text-purple-700 font-semibold text-[11px] underline">
-                            {isSelected ? 'Đang xem' : 'Xem chi tiết'}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
+          <div className="overflow-x-auto border border-purple-100 rounded-2xl">
+            <table className="w-full text-sm min-w-[760px]">
+              <thead className="bg-slate-50 text-xs text-slate-500">
+                <tr>
+                  <th className="text-left font-semibold px-4 py-2.5">Phiên bản</th>
+                  <th className="text-left font-semibold px-4 py-2.5">Trạng thái</th>
+                  <th className="text-right font-semibold px-4 py-2.5">Doanh thu</th>
+                  <th className="text-right font-semibold px-4 py-2.5">Chi phí K</th>
+                  <th className="text-right font-semibold px-4 py-2.5">Phải trả L</th>
+                  <th className="text-right font-semibold px-4 py-2.5">Lợi nhuận</th>
+                  <th className="px-4 py-2.5"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {options.map((opt: any) => (
+                  <React.Fragment key={opt.optionId}>
+                    <tr className="bg-purple-50/50">
+                      <td colSpan={7} className="px-4 py-2 font-bold text-slate-900">{opt.name} <span className="font-normal text-xs text-slate-500">· {opt.versions?.length || 0} phiên bản</span></td>
+                    </tr>
+                    {(opt.versions ?? []).map((ver: any) => {
+                      const isSelected = ver.quoteId === currentVersion?.quoteId;
+                      return (
+                        <tr key={ver.quoteId} onClick={() => setSelectedQuoteId(ver.quoteId)} className={'border-t cursor-pointer ' + (isSelected ? 'bg-purple-50 ring-1 ring-inset ring-purple-300' : 'hover:bg-purple-50/30')}>
+                          <td className="px-4 py-2.5 font-semibold text-slate-800 whitespace-nowrap">V{ver.number}{ver.isBaseline && <span className="ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold text-[10px]">★ PHƯƠNG ÁN CHỐT</span>}</td>
+                          <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{ver.status}</td>
+                          <td className="px-4 py-2.5 text-right whitespace-nowrap">{money(ver.pnl?.revenueBeforeTax)}</td>
+                          <td className="px-4 py-2.5 text-right whitespace-nowrap">{money(ver.pnl?.totalK)}</td>
+                          <td className="px-4 py-2.5 text-right whitespace-nowrap">{money(ver.pnl?.totalPayableL)}</td>
+                          <td className={'px-4 py-2.5 text-right font-bold whitespace-nowrap ' + ((ver.pnl?.profit ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-700')}>{money(ver.pnl?.profit)}</td>
+                          <td className="px-4 py-2.5 text-purple-700 font-semibold text-xs underline whitespace-nowrap">{isSelected ? 'Đang xem' : 'Xem chi tiết'}</td>
+                        </tr>
+                      );
+                    })}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
         </div>
@@ -805,7 +820,7 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-purple-700">Khối 3 — Chi tiết phiên bản</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-purple-700">Chi tiết phiên bản</span>
             <h4 className="font-bold text-slate-900 text-lg">Xem chi tiết P&L từng phiên bản báo giá</h4>
           </div>
           {allVersions.length > 0 && (
@@ -836,7 +851,7 @@ function ProjectFinancePnlPanel({ projectId }: { projectId: string }) {
         {currentVersion ? (
           openDetail ? (
           <PnlBlock
-            title={`Dashboard P&L theo nguồn chi phí (Giai đoạn C) — ${currentVersion.optionName} / V${currentVersion.number}`}
+            title={`Chi tiết P&L — ${currentVersion.optionName} / V${currentVersion.number}`}
             pnl={currentVersion.pnl}
           />
           ) : null
@@ -1513,7 +1528,7 @@ export default function WorkspaceShell() {
 
                     {/* Tab Views Content */}
                     {projectView === 'overview' && (
-                      <ProjectOverviewPanel project={selected} members={members} isAdmin={user.role === 'admin'} onSwitchTab={(tab) => handleNavigateWithGuard(() => setProjectView(tab))} onProjectChanged={refresh} />
+                      <ProjectOverviewPanel project={selected} members={members} isAdmin={user.role === 'admin'} onSwitchTab={(tab) => handleNavigateWithGuard(() => setProjectView(tab))} onProjectChanged={refresh} onOpenPhase={(phaseId) => handleNavigateWithGuard(() => { setActivePhaseId(phaseId); setProjectView('shortlist'); })} />
                     )}
                     {projectView === 'shortlist' && (
                       <ProjectShortlistPanel

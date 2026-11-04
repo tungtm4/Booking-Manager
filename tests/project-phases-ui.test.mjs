@@ -5,10 +5,13 @@ import { readFileSync } from 'node:fs';
 const panel = readFileSync(new URL('../src/components/ProjectShortlistPanel.tsx', import.meta.url), 'utf8');
 const shell = readFileSync(new URL('../src/components/WorkspaceShell.tsx', import.meta.url), 'utf8');
 const proposal = readFileSync(new URL('../src/components/ProjectProposal.tsx', import.meta.url), 'utf8');
+const breakdown = readFileSync(new URL('../src/components/PhaseBreakdownBlock.tsx', import.meta.url), 'utf8');
 
 test('panel có đủ luồng phase của Đợt 9A', () => {
   assert.ok(panel.includes("'/phases'"), 'panel phải tải danh sách phase');
-  assert.ok(panel.includes('/api/ai/breakdown-phases'), 'panel phải gọi AI-1 bóc tách phase');
+  assert.ok(breakdown.includes('/api/ai/breakdown-phases'), 'khối bóc tách phải gọi AI-1');
+  assert.ok(shell.includes('PhaseBreakdownBlock'), 'AI-1 đặt ở tab Tổng quan theo flow 04/11/2026');
+  assert.ok(!panel.includes('/api/ai/breakdown-phases'), 'tab Đối tác không còn khối AI-1 (đã chuyển về Tổng quan)');
   assert.ok(panel.includes('phaseId: activePhase?.id'), 'thêm KOL từ thư viện phải gắn phase đang chọn');
   assert.ok(panel.includes('/phase`'), 'phải có thao tác chuyển phase cho KOL');
   assert.ok(panel.includes('/remove`'), 'phải có thao tác xoá KOL khỏi dự án');

@@ -44,6 +44,12 @@ async function fixture(work:(f:any)=>Promise<void>){
     // Một giấy tờ thật (PNG 1x1 giải mã được) để ghim vào hợp đồng.
     const up=await call('/partners/kol/partner-1/documents',{name:'cccd.png',mime:'image/png',dataBase64:PNG_1X1},admin);
     assert.equal(up.status,200);
+    // Quy định 04/11/2026: hợp đồng chỉ lập cho đối tác đã có trong danh sách cơ
+    // bản của dự án — fixture đưa partner-1 (cả KOL và Community) vào cả 2 dự án.
+    for(const pidX of [pidA,pidB]){
+      assert.equal((await call(`/projects/${pidX}/shortlist/add`,{partnerType:'kol',ids:['partner-1']},admin)).status,200);
+      assert.equal((await call(`/projects/${pidX}/shortlist/add`,{partnerType:'community',ids:['partner-1']},admin)).status,200);
+    }
     await work({call,raw,pidA,pidB,cookies,docId:up.body.document.id,profile});
   }finally{server.close();}
 }
@@ -294,5 +300,19 @@ test('A2 fix UI (PM review): sửa hợp đồng đã ký — gửi lại đúng
     const noDocs=await call(`/contracts/${c.id}`,{revision:sameDocs.body.contract.revision,note:'Ghi chú khác'},pm);
     assert.equal(noDocs.status,200);
     assert.deepEqual(noDocs.body.contract.documents.map((d:any)=>d.id),[docId]);
+  });
+});
+
+test('A2 contracts: cổng dự án — đối tác chưa có trong danh sách cơ bản thì không tạo được hợp đồng',async()=>{
+  await fixture(async({call,cookies})=>{
+    const {admin,pm}=cookies;
+    const pidC=(await call('/projects',{name:'Dự án C',client:'Khách',campaign:'C'},admin)).body.id;
+    await call(`/projects/${pidC}/members`,{email:'pm@example.test',role:'pm'},admin);
+    const blocked=await call(`/projects/${pidC}/contracts`,{partnerType:'kol',partnerId:'partner-1',contractNumber:'C-01',snapshot:snapFull,money:{basis:'net',amount:1000000,taxRate:7,taxMode:'trong_gia_gop'}},pm);
+    assert.equal(blocked.status,400);
+    assert.ok(String(blocked.body.message).includes('danh sách cơ bản'));
+    await call(`/projects/${pidC}/shortlist/add`,{partnerType:'kol',ids:['partner-1']},admin);
+    const ok=await call(`/projects/${pidC}/contracts`,{partnerType:'kol',partnerId:'partner-1',contractNumber:'C-01',snapshot:snapFull,money:{basis:'net',amount:1000000,taxRate:7,taxMode:'trong_gia_gop'}},pm);
+    assert.equal(ok.status,200,JSON.stringify(ok.body));
   });
 });

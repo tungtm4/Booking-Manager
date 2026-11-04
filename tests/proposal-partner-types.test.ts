@@ -181,8 +181,9 @@ test('UI: ProjectShortlistPanel có ô nhập số lượng KOL/Community cần 
   const panelCode = readFileSync(new URL('../src/components/ProjectShortlistPanel.tsx', import.meta.url), 'utf8');
   assert.ok(panelCode.includes('Số KOL cần'), 'panel BriefExtrasFields có ô Số KOL cần');
   assert.ok(panelCode.includes('Số Community cần'), 'panel BriefExtrasFields có ô Số Community cần');
-  assert.ok(panelCode.includes('kolTargetCount: d.kolTargetCount'), 'AI draft tạo phase truyền kolTargetCount');
-  assert.ok(panelCode.includes('communityTargetCount: d.communityTargetCount'), 'AI draft tạo phase truyền communityTargetCount');
+  const breakdownCode = readFileSync(new URL('../src/components/PhaseBreakdownBlock.tsx', import.meta.url), 'utf8');
+  assert.ok(breakdownCode.includes('kolTargetCount: d.kolTargetCount'), 'AI draft tạo phase truyền kolTargetCount');
+  assert.ok(breakdownCode.includes('communityTargetCount: d.communityTargetCount'), 'AI draft tạo phase truyền communityTargetCount');
 });
 
 test('Hồi quy (Muse kiểm chứng Đợt 14): tìm KOL ở màn Đề xuất không cắt kết quả theo số lượng brief', () => {

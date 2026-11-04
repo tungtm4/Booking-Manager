@@ -14,6 +14,52 @@ const field='w-full rounded-lg border border-slate-300 px-3 py-2 bg-white text-s
 const button='rounded-lg bg-indigo-600 text-white px-3 py-2 font-semibold text-sm disabled:opacity-50';
 const statusLabel:Record<string,string>={draft:'Bản nháp',submitted:'Chờ duyệt',approved:'Đã duyệt',changes_requested:'Cần chỉnh sửa'};
 const money=(v:number|null|undefined)=>v==null?'Chưa đủ dữ liệu':formatMoneyInput(v)+' ₫';
+// Dòng phân bổ phẳng (đối tác × hạng mục/dịch vụ) cho màn tạo phương án từ phase:
+// cùng một nguồn dữ liệu cho cả bảng hiển thị lẫn các tổng tiền.
+function allocLinesForPhase(ph:any,rows:any[],alloc:Record<string,number>){
+  const b=ph.brief;const lines:any[]=[];
+  for(const r of rows){
+    const isComm=r.partnerType==='community';
+    const keys=isComm?(r.profile.dichVu??[]).map((sv:any)=>({key:sv.id,label:sv.ten+' ('+sv.donVi+')'})):(b?.deliverables?.length?b.deliverables.map((d:any)=>({key:d.format,label:PRICE_FORMAT_LABELS[d.format as keyof typeof PRICE_FORMAT_LABELS]??d.format})):Object.entries(PRICE_FORMAT_LABELS).map(([k,v])=>({key:k,label:v})));
+    for(const {key,label} of keys){
+      const price=r.prices?.[key];const qty=alloc[r.id+':'+key]??0;
+      lines.push({rowId:r.id,name:r.profile.ten,isComm,key,label,priceValue:price?.value??null,priceStatus:price?.status,qty,total:price?.value!=null?price.value*qty:null});
+    }
+  }
+  return lines;
+}
+// Xuất Excel bản báo khách — CÙNG cấu trúc cột với bản in/PDF (chỉ giá bán, không lộ giá mua).
+async function exportQuoteExcel(customer:any,groups:any[]){
+  const XLSX=await import('xlsx');
+  const aoa:any[][]=[];
+  aoa.push(['BÁO GIÁ CHIẾN DỊCH']);
+  aoa.push(['Khách hàng',customer.client]);
+  aoa.push(['Chiến dịch',customer.campaign]);
+  aoa.push(['Phiên bản','V'+customer.version]);
+  aoa.push([]);
+  aoa.push(['STT','Phase','Đối tác','Hạng mục','ĐVT','SL','Đơn giá','Thành tiền']);
+  let stt=0;let grand=0;
+  for(const g of groups){
+    for(const i of g.items){stt++;grand+=(i.total??0);aoa.push([stt,g.phase||'',i.creator,i.description,i.unit??'',i.quantity,i.sellUnitPrice,i.total]);}
+    if(g.showHeader)aoa.push(['','','','Tiểu tổng '+(g.phase||'nhóm'),'','', '',g.subtotal]);
+  }
+  aoa.push([]);
+  aoa.push(['','','','','','','Tổng cộng (trước chiết khấu & phí)',grand]);
+  aoa.push(['','','','','','','Chiết khấu',customer.discount]);
+  aoa.push(['','','','','','','Agency fee',customer.agencyFee]);
+  aoa.push(['','','','','','','Trước thuế',customer.revenueBeforeTax]);
+  aoa.push(['','','','','','','Thuế',customer.tax]);
+  aoa.push(['','','','','','','TỔNG THANH TOÁN',customer.totalWithTax]);
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:6},{wch:24},{wch:26},{wch:44},{wch:8},{wch:8},{wch:16},{wch:18}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Báo giá');
+  const safe=String(customer.campaign||'bao-gia').replace(/[\/:*?"<>|]+/g,'-').slice(0,60);
+  const out=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+  const url=URL.createObjectURL(new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+  const a=document.createElement('a');a.href=url;a.download=`bao-gia-${safe}-V${customer.version}.xlsx`;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),5000);
+}
 // Vấn đề giá của các dòng ĐƯỢC TÍNH vào báo giá (dòng bỏ chọn không gây chặn).
 // Khớp quy tắc ở server: mọi dòng KOL/Community và dòng dịch vụ comment thuê ngoài phải
 // có giá đầu vào đã xác nhận — dòng từ danh sách xét theo priceSnapshot, dòng nhập tay
@@ -353,29 +399,31 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
           if(b.kpiComments)targetLines.push(`Comments (KPI): mục tiêu ${b.kpiComments.toLocaleString('vi-VN')} — chỉ mua qua dòng dịch vụ comment bên dưới, theo số lượng bạn chọn`);
           if(b.kpiBuzz)targetLines.push(`Buzz (KPI): mục tiêu ${b.kpiBuzz.toLocaleString('vi-VN')} (like + share + comment; comments đã nằm trong buzz)`);
         }
+        const allocLines=allocLinesForPhase(ph,rows,alloc);
+        const phaseAllocTotal=allocLines.reduce((a,l)=>a+(l.total??0),0);
         return <div key={ph.id} className="bg-white border rounded-xl p-3 space-y-2">
           <p className="text-sm font-semibold">{ph.name} <span className="font-normal text-slate-500">· {rows.length} ứng viên trong danh sách sơ bộ</span></p>
           {targetLines.length>0&&<ul className="text-xs text-slate-600 space-y-0.5">{targetLines.map((t,i)=><li key={i}>· {t}</li>)}</ul>}
           {!rows.length&&<p className="text-xs text-slate-500">Phase chưa có ứng viên. Thêm đối tác vào danh sách sơ bộ ở tab Đối tác & Phase.</p>}
-          {rows.map((r:any)=>{
-            const isComm=r.partnerType==='community';
-            const keys=isComm?(r.profile.dichVu??[]).map((s:any)=>({key:s.id,label:s.ten+' ('+s.donVi+')'})):(b?.deliverables?.length?b.deliverables.map((d:any)=>({key:d.format,label:PRICE_FORMAT_LABELS[d.format as keyof typeof PRICE_FORMAT_LABELS]??d.format})):Object.entries(PRICE_FORMAT_LABELS).map(([k,v])=>({key:k,label:v})));
-            return <div key={r.id} className="border-t pt-2">
-              <p className="text-sm font-medium">{r.profile.ten} <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100">{isComm?'Community':'KOL'}</span></p>
-              {isComm&&!(r.profile.dichVu??[]).length&&<p className="text-xs text-slate-500">Chưa có dịch vụ trong hồ sơ — bổ sung bảng giá ở Kho Community.</p>}
-              <div className="flex flex-wrap gap-2 mt-1">
-                {keys.map(({key,label}:{key:string;label:string})=>{
-                  const price=r.prices?.[key];
-                  return <label key={key} className="text-xs bg-slate-50 border rounded-lg px-2 py-1.5">
-                    {label} · {price?(price.value===null?'chưa có giá':formatMoneyInput(price.value)+' ₫'+(price.status==='confirmed'?' · đã xác nhận':' · chưa xác nhận')):'—'}
-                    <input aria-label={`Phân bổ ${label} cho ${r.profile.ten}`} className="block w-24 mt-1 rounded border border-slate-300 px-2 py-1 bg-white" type="number" min={0} step={1} value={alloc[r.id+':'+key]??''} placeholder="0 = không phân bổ" onChange={e=>{const v=e.target.value===''?0:Math.max(0,Math.floor(Number(e.target.value)||0));setAlloc(prev=>({...prev,[r.id+':'+key]:v}));}}/>
-                  </label>;
-                })}
-              </div>
-            </div>;
-          })}
+          {rows.filter((r:any)=>r.partnerType==='community'&&!(r.profile.dichVu??[]).length).map((r:any)=><p key={'nodv-'+r.id} className="text-xs text-slate-500">{r.profile.ten}: chưa có dịch vụ trong hồ sơ — bổ sung bảng giá ở Kho Community.</p>)}
+          {allocLines.length>0&&<div className="overflow-x-auto"><table className="w-full text-sm min-w-[680px]">
+            <thead><tr className="border-b text-left text-xs text-slate-500"><th className="py-1.5 pr-2">Đối tác</th><th className="py-1.5 pr-2">Hạng mục / Dịch vụ</th><th className="py-1.5 pr-2 text-right">Giá đầu vào</th><th className="py-1.5 pr-2 text-center">SL phân bổ</th><th className="py-1.5 text-right">Thành tiền</th></tr></thead>
+            <tbody>
+              {allocLines.map(l=>(
+                <tr key={l.rowId+':'+l.key} className={'border-b '+(l.qty===0?'opacity-50':'')}>
+                  <td className="py-1.5 pr-2 font-medium">{l.name} <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 font-normal">{l.isComm?'Community':'KOL'}</span></td>
+                  <td className="py-1.5 pr-2">{l.label}</td>
+                  <td className="py-1.5 pr-2 text-right whitespace-nowrap">{l.priceValue===null?'chưa có giá':formatMoneyInput(l.priceValue)+' ₫'}<span className="block text-[11px] text-slate-500">{l.priceValue===null?'':l.priceStatus==='confirmed'?'đã xác nhận':'chưa xác nhận'}</span></td>
+                  <td className="py-1.5 pr-2 text-center"><input aria-label={'Phân bổ '+l.label+' cho '+l.name} className="w-24 rounded border border-slate-300 px-2 py-1 bg-white text-center" type="number" min={0} step={1} value={alloc[l.rowId+':'+l.key]??''} placeholder="0" onChange={e=>{const v=e.target.value===''?0:Math.max(0,Math.floor(Number(e.target.value)||0));setAlloc(prev=>({...prev,[l.rowId+':'+l.key]:v}));}}/></td>
+                  <td className="py-1.5 text-right font-medium whitespace-nowrap">{l.total===null?'—':money(l.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot><tr><td colSpan={4} className="py-2 text-right font-semibold">Tiểu tổng phase (giá đầu vào):</td><td className="py-2 text-right font-bold whitespace-nowrap">{money(phaseAllocTotal)}</td></tr></tfoot>
+          </table></div>}
         </div>;
       })}
+      {fromPhaseIds.length>0&&(()=>{const grandAlloc=fromPhaseIds.reduce((sum,pid3)=>{const phx=phases.find((x:any)=>x.id===pid3);if(!phx)return sum;const rws=shortlistRows.filter((r:any)=>(r.phaseId??phases[0]?.id)===phx.id);return sum+allocLinesForPhase(phx,rws,alloc).reduce((a,l)=>a+(l.total??0),0);},0);const commentBuy=commentLines.reduce((a,c)=>a+(c.buyUnitPrice!=null?c.buyUnitPrice*c.quantity:0),0);return <div className="bg-indigo-600 text-white rounded-xl px-4 py-3 flex flex-wrap gap-x-6 gap-y-1 text-sm"><span>Tổng chi phí phân bổ (giá đầu vào): <strong>{money(grandAlloc)}</strong></span>{commentLines.length>0&&<span>Dịch vụ comment: <strong>{money(commentBuy)}</strong></span>}<span>Tổng cộng dự kiến: <strong>{money(grandAlloc+commentBuy)}</strong></span><span className="text-indigo-100 text-xs self-center">Cập nhật ngay khi sửa số lượng — đây là chi phí mua dự kiến của phương án sắp tạo.</span></div>;})()}
       <div className="bg-white border rounded-xl p-3 space-y-2">
         <p className="text-sm font-semibold">Dịch vụ comment thuê ngoài (tuỳ chọn, theo phase)</p>
         <p className="text-xs text-slate-500">Tổng comments mục tiêu của brief, số comments thuê ngoài và số đã nghiệm thu là ba con số khác nhau. Không mặc định mua toàn bộ mục tiêu; không tự chia đều cho từng bài. Nếu gói Community đã bao gồm comments, ghi rõ ở ô “phần đã bao gồm” để tránh tính trùng.</p>
@@ -452,7 +500,11 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
           <td className="p-3 w-24"><input aria-label="Số lượng hạng mục" type="number" min={1} step={1} className={field} value={i.quantity} disabled={!editable||!manage} onChange={e=>updateItem(i.id,'quantity',Number(e.target.value))}/></td>
           <td className="p-3 min-w-40"><input aria-label={'Giá đầu vào '+(i.creator||'mới')} className={field} inputMode="numeric" placeholder="Chưa có giá" disabled={!editable||Boolean(i.shortlistId)} value={formatMoneyInput(i.buyUnitPrice??'')} onChange={e=>{const n=parseMoneyInput(e.target.value);updateItem(i.id,'buyUnitPrice',n===''?null:n);}}/><p className="text-xs text-slate-500 mt-2">{i.shortlistId?(i.buyUnitPrice===null?'Chưa có giá đầu vào · ':i.priceSnapshot?.status==='confirmed'?`Đã xác nhận${i.priceSnapshot.source?' · nguồn: '+i.priceSnapshot.source:''} · `:'Giá đầu vào chưa xác nhận · '):needsConfirm(i)?(i.buyUnitPrice===null?'Chưa có giá đầu vào · ':manualBuyConfirmed(i)?`Đã xác nhận giá đầu vào · nguồn: ${i.buyConfirmation!.source}${i.buyConfirmation!.checkedByName?' · '+i.buyConfirmation!.checkedByName:''} · ${formatDateTimeVN(i.buyConfirmation!.checkedAt)} · `:i.buyConfirmation?'Giá đã thay đổi sau khi xác nhận — cần xác nhận lại · ':'Giá đầu vào chưa xác nhận · '):''}Thành tiền: {i.buyUnitPrice===null?'Chờ giá':money(i.buyUnitPrice*i.quantity)}</p>{editable&&!i.shortlistId&&needsConfirm(i)&&i.buyUnitPrice!==null&&!manualBuyConfirmed(i)&&<div className="mt-2 space-y-1">{dirty?<p className="text-xs text-amber-700">Lưu báo giá trước, rồi xác nhận giá của dòng nhập tay này.</p>:<div className="flex gap-1"><input aria-label={'Nguồn kiểm tra giá '+(i.creator||'mới')} className={field+' text-xs'} placeholder="Nguồn kiểm tra giá…" maxLength={200} value={confirmSources[i.id]??''} onChange={e=>setConfirmSources(prev=>({...prev,[i.id]:e.target.value}))}/><button type="button" className="border rounded-lg px-2 py-1 text-xs whitespace-nowrap bg-white" disabled={busy} onClick={()=>{const src=(confirmSources[i.id]??'').trim();if(!src){setError('Nhập nguồn kiểm tra giá trước khi xác nhận.');return;}run(async()=>{const r=await request(`${base}/quotes/${quote.id}/confirm-buy`,{itemId:i.id,source:src,revision:quote.revision});await refresh(r.quote.id);setNotice(`Đã xác nhận giá đầu vào cho dòng “${i.creator||'dòng nhập tay'}”.`);});}}>Xác nhận giá</button></div>}</div>}{costCell(i)}</td>
           {manage&&<td className="p-3 min-w-40"><input aria-label={'Giá báo khách '+(i.creator||'mới')} className={field} inputMode="numeric" placeholder="PM nhập giá bán" disabled={!editable} value={formatMoneyInput(i.sellUnitPrice??'')} onChange={e=>{const n=parseMoneyInput(e.target.value);updateItem(i.id,'sellUnitPrice',n===''?null:n);}}/><p className="text-xs text-slate-500 mt-2">Thành tiền: {i.sellUnitPrice==null?'Chưa có giá bán':money(i.sellUnitPrice*i.quantity)}</p></td>}{manage&&<td className="p-3 min-w-36">{i.buyUnitPrice===null||i.sellUnitPrice==null?'Chưa đủ giá':money((i.sellUnitPrice-i.buyUnitPrice)*i.quantity)}</td>}
-        </tr>)}</tbody></table>{items.length===0&&<p className="p-6 text-slate-500">Chưa có hạng mục. Thêm dòng hoặc lấy từ báo giá cũ nếu bạn là Admin.</p>}</div>
+        </tr>)}</tbody><tfoot><tr className="bg-slate-50 border-t-2 font-semibold">
+          {manage?<><td colSpan={3} className="p-3 text-right">Tổng {items.filter(i=>i.included).length} dòng đang tính:</td><td className="p-3 whitespace-nowrap">{money(items.filter(i=>i.included).reduce((a,i)=>a+(i.buyUnitPrice!=null?i.buyUnitPrice*i.quantity:0),0))}</td><td className="p-3 whitespace-nowrap">{money(items.filter(i=>i.included).reduce((a,i)=>a+(i.sellUnitPrice!=null?i.sellUnitPrice*i.quantity:0),0))}</td><td className="p-3 whitespace-nowrap">{money(items.filter(i=>i.included).reduce((a,i)=>a+((i.sellUnitPrice!=null&&i.buyUnitPrice!=null)?(i.sellUnitPrice-i.buyUnitPrice)*i.quantity:0),0))}</td></>
+          :<><td colSpan={3} className="p-3 text-right">Tổng giá đầu vào ({items.filter(i=>i.included).length} dòng đang tính):</td><td className="p-3 whitespace-nowrap">{money(items.filter(i=>i.included).reduce((a,i)=>a+(i.buyUnitPrice!=null?i.buyUnitPrice*i.quantity:0),0))}</td></>}
+        </tr></tfoot></table>{items.length===0&&<p className="p-6 text-slate-500">Chưa có hạng mục. Thêm dòng hoặc lấy từ báo giá cũ nếu bạn là Admin.</p>}</div>
+        {items.some(i=>i.included)&&(()=>{const byPhase=new Map<string,{buy:number;sell:number}>();for(const i of items){if(!i.included)continue;const k=i.phase||'Không ghi phase';const cur=byPhase.get(k)??{buy:0,sell:0};cur.buy+=i.buyUnitPrice!=null?i.buyUnitPrice*i.quantity:0;cur.sell+=i.sellUnitPrice!=null?i.sellUnitPrice*i.quantity:0;byPhase.set(k,cur);}return <div className="flex flex-wrap gap-2 text-xs text-slate-600"><span className="font-semibold text-slate-700">Tiểu tổng theo phase:</span>{[...byPhase.entries()].map(([k,v])=><span key={k} className="bg-slate-50 border rounded-full px-2.5 py-1">{k}: mua {money(v.buy)}{manage?' · bán '+money(v.sell):''}</span>)}</div>;})()}
         {manage&&<div className="grid sm:grid-cols-3 gap-3"><label className="text-sm">Chiết khấu khách hàng<select aria-label="Cách chiết khấu" className={field} disabled={!editable} value={discount.mode} onChange={e=>{setDiscount({mode:e.target.value,value:0});setDirty(true);}}><option value="fixed">Số tiền VND</option><option value="percent">Phần trăm</option></select><input aria-label="Giá trị chiết khấu" className={field} disabled={!editable} inputMode="decimal" value={discount.mode==='fixed'?formatMoneyInput(discount.value):discount.value} onChange={e=>{setDiscount({...discount,value:discount.mode==='fixed'?(parseMoneyInput(e.target.value)||0):Number(e.target.value)});setDirty(true);}}/></label>
           <label className="text-sm">Agency fee — sau chiết khấu<select aria-label="Cách tính agency fee" className={field} disabled={!editable} value={fee.mode} onChange={e=>{setFee({mode:e.target.value,value:0});setDirty(true);}}><option value="percent">Phần trăm</option><option value="fixed">Số tiền VND</option></select><input aria-label="Giá trị agency fee" className={field} inputMode="decimal" disabled={!editable} value={fee.mode==='fixed'?formatMoneyInput(fee.value):fee.value} onChange={e=>{setFee({...fee,value:fee.mode==='fixed'?(parseMoneyInput(e.target.value)||0):Number(e.target.value)});setDirty(true);}}/></label>
           <label className="text-sm">Thuế suất (%) — PM xác nhận<input aria-label="Thuế suất" type="number" min={0} max={100} step="0.01" className={field} value={tax} disabled={!editable} onChange={e=>{setTax(Number(e.target.value));setDirty(true);}}/><span className="text-xs text-slate-500">Không mặc định áp dụng mức thuế cho mọi dự án.</span></label>
@@ -470,7 +522,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
         </div>
         {dirty&&<p className="text-sm text-amber-800">Có chỉnh sửa chưa lưu. Hãy bấm Lưu báo giá để cập nhật.</p>}
         {isAdmin&&editable&&<section className="border rounded-xl p-4 space-y-3"><h3 className="font-semibold">Lấy hạng mục từ SOW cũ trên trình duyệt</h3><p className="text-xs text-slate-500">Chỉ sao chép vào phương án đang mở, không xóa bản cũ. Giữ giá SOW cũ là giá báo khách; giá đầu vào để trống chờ xác nhận. Không sao chép chiết khấu/phụ phí cũ tự động.</p><select aria-label="Chọn báo giá cũ" className={field} value={legacyId} onChange={e=>setLegacyId(e.target.value)}><option value="">Chọn báo giá cũ…</option>{legacyQuotes.map(q=><option key={q.id} value={q.id}>{q.tenChienDich} — {q.maBaoGia}</option>)}</select><button className="border rounded-lg px-3 py-2 text-sm" disabled={!legacyId||busy} onClick={()=>{const old=legacyQuotes.find(q=>q.id===legacyId);if(!old)return;setItems(prev=>[...prev,...old.items.map(i=>({id:crypto.randomUUID(),creator:i.kolName,description:i.formatLabel+(i.ghiChu?' · '+i.ghiChu:''),phase:'',kind:'kol',quantity:i.soLuong,buyUnitPrice:null,sellUnitPrice:i.donGia,included:true}))]);setDirty(true);setLegacyId('');setNotice('Đã lấy các dòng vào bản nháp. Kiểm tra rồi bấm Lưu báo giá.');}}>Lấy hạng mục vào phương án này</button></section>}
-        {customer&&<section className="border rounded-xl p-5 bg-white"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Bản xem trước báo khách</h3><button type="button" className={button} onClick={()=>setShowPrint(true)}>In / Lưu PDF</button></div><p>{customer.client} · {customer.campaign} · V{customer.version}</p><table className="w-full text-sm mt-4"><thead><tr className="border-b"><th className="text-left">Hạng mục</th><th>SL</th><th>Đơn giá</th><th>Thành tiền</th></tr></thead><tbody>{customerGroups.map((g:any)=>{return <React.Fragment key={g.phase||'__'}>{(g.showHeader)&&<tr className="bg-slate-50"><td colSpan={4} className="py-2 font-semibold">{g.phase?('Phase: '+g.phase):'Hạng mục khác'}</td></tr>}{g.items.map((i:any,index:number)=><tr key={index} className="border-b"><td className="py-2">{i.creator} — {i.description}{i.note&&<span className="block text-xs text-slate-500 whitespace-pre-line mt-0.5">{i.note}</span>}{i.commentsIncluded!==undefined&&<span className="block text-xs text-slate-500 mt-0.5">Tổng số comment bao gồm: {i.commentsIncluded!==null?i.commentsIncluded.toLocaleString('vi-VN'):'Chưa xác định'}{i.scopeNote?` · Phạm vi: ${i.scopeNote}`:''}</span>}</td><td className="text-center">{i.quantity}{i.unit?' '+i.unit:''}</td><td className="text-center">{money(i.sellUnitPrice)}</td><td className="text-right">{money(i.total)}</td></tr>)}{(g.showHeader)&&<tr className="border-b"><td colSpan={3} className="py-1 text-right text-xs text-slate-500">Tiểu tổng {g.phase||'nhóm'}:</td><td className="py-1 text-right font-medium">{money(g.subtotal)}</td></tr>}</React.Fragment>})}</tbody></table><div className="mt-4 text-sm text-right"><p>Chiết khấu: {money(customer.discount)}</p><p>Agency fee: {money(customer.agencyFee)}</p><p>Trước thuế: {money(customer.revenueBeforeTax)}</p><p>Thuế: {money(customer.tax)}</p><strong>Tổng thanh toán: {money(customer.totalWithTax)}</strong></div></section>}
+        {customer&&<section className="border rounded-xl p-5 bg-white"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Bản xem trước báo khách</h3><span className="flex gap-2"><button type="button" className="border rounded-lg px-3 py-2 text-sm bg-white cursor-pointer hover:bg-slate-50" onClick={()=>exportQuoteExcel(customer,customerGroups)}>Xuất Excel</button><button type="button" className={button} onClick={()=>setShowPrint(true)}>In / Lưu PDF</button></span></div><p>{customer.client} · {customer.campaign} · V{customer.version}</p><table className="w-full text-sm mt-4"><thead><tr className="border-b"><th className="text-left">Hạng mục</th><th>SL</th><th>Đơn giá</th><th>Thành tiền</th></tr></thead><tbody>{customerGroups.map((g:any)=>{return <React.Fragment key={g.phase||'__'}>{(g.showHeader)&&<tr className="bg-slate-50"><td colSpan={4} className="py-2 font-semibold">{g.phase?('Phase: '+g.phase):'Hạng mục khác'}</td></tr>}{g.items.map((i:any,index:number)=><tr key={index} className="border-b"><td className="py-2">{i.creator} — {i.description}{i.note&&<span className="block text-xs text-slate-500 whitespace-pre-line mt-0.5">{i.note}</span>}{i.commentsIncluded!==undefined&&<span className="block text-xs text-slate-500 mt-0.5">Tổng số comment bao gồm: {i.commentsIncluded!==null?i.commentsIncluded.toLocaleString('vi-VN'):'Chưa xác định'}{i.scopeNote?` · Phạm vi: ${i.scopeNote}`:''}</span>}</td><td className="text-center">{i.quantity}{i.unit?' '+i.unit:''}</td><td className="text-center">{money(i.sellUnitPrice)}</td><td className="text-right">{money(i.total)}</td></tr>)}{(g.showHeader)&&<tr className="border-b"><td colSpan={3} className="py-1 text-right text-xs text-slate-500">Tiểu tổng {g.phase||'nhóm'}:</td><td className="py-1 text-right font-medium">{money(g.subtotal)}</td></tr>}</React.Fragment>})}</tbody></table><div className="mt-4 text-sm text-right"><p>Chiết khấu: {money(customer.discount)}</p><p>Agency fee: {money(customer.agencyFee)}</p><p>Trước thuế: {money(customer.revenueBeforeTax)}</p><p>Thuế: {money(customer.tax)}</p><strong>Tổng thanh toán: {money(customer.totalWithTax)}</strong></div></section>}
         {costItem&&quote&&<CostSourceDialog projectId={projectId} quoteId={quote.id} revision={quote.revision} item={costItem} onClose={()=>setCostItemId(null)} onApplied={async()=>{setCostItemId(null);await refresh(quote.id);setNotice('Đã áp dụng nguồn chi phí cho dòng. Số liệu là snapshot — hồ sơ/hợp đồng đổi sau này không tự đổi dòng đã lưu.');}}/>}
         {showPrint&&customer&&<div className="fixed inset-0 z-50 bg-black/50 overflow-y-auto print:bg-white print:overflow-visible">
           <style>{`@media print{body *{visibility:hidden}.quote-print-doc,.quote-print-doc *{visibility:visible}.quote-print-doc{position:absolute;inset:0;padding:0!important}@page{margin:14mm}}`}</style>

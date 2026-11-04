@@ -32,7 +32,7 @@ app.use('/api/workspace', workspace.router);
 // Module KOL/SOW cũ chưa có projectId: chỉ Admin được dùng đến khi migration hoàn tất.
 // Ngoại lệ (Đợt 9, Cách A): hai endpoint AI brief chỉ cần đăng nhập — thành viên dự án dùng để
 // bóc phase từ brief tổng và đề xuất KOL theo brief phase; việc ghi dữ liệu vẫn qua quyền workspace.
-const MEMBER_AI_PATHS = new Set(['/ai/parse-brief', '/ai/breakdown-phases']);
+const MEMBER_AI_PATHS = new Set(['/ai/parse-brief', '/ai/breakdown-phases', '/ai/extract-signing']);
 app.use('/api', (req, res, next) => {
   const user = workspace.sessionUser(req);
   if (!user) return res.status(401).json({success:false,message:'Vui lòng đăng nhập.'});
@@ -811,6 +811,79 @@ QUY TẮC:
   } catch (error: any) {
     console.error('Breakdown phases error:', error);
     return res.status(500).json({ success: false, message: 'AI không bóc tách được brief lúc này. Vui lòng thử lại hoặc tạo phase thủ công.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// API: Bóc tách thông tin pháp nhân / bên ký từ văn bản hoặc ảnh (CCCD, giấy
+// ĐKKD, ảnh thông tin đối tác) — dùng cho form hợp đồng và hồ sơ ký kết trong
+// kho. Kết quả CHỈ là bản nháp để người dùng xem trước từng trường rồi mới
+// điền vào form; endpoint này không lưu gì.
+// ----------------------------------------------------------------------------
+app.post('/api/ai/extract-signing', async (req, res) => {
+  try {
+    const { text, imageBase64, imageMimeType } = req.body ?? {};
+    if ((!text || typeof text !== 'string' || !text.trim()) && !imageBase64) {
+      return res.status(400).json({ success: false, message: 'Dán nội dung văn bản hoặc đính kèm ảnh giấy tờ để AI bóc tách.' });
+    }
+    if (!aiClient) {
+      return res.json({ success: false, useFallback: true, message: 'Chưa cấu hình GEMINI_API_KEY trên server. Vui lòng nhập thông tin thủ công.' });
+    }
+    const systemInstruction = `Bạn trích xuất thông tin pháp nhân / bên ký hợp đồng tại Việt Nam từ văn bản hoặc ảnh giấy tờ (CCCD, giấy đăng ký kinh doanh, giấy đăng ký hộ kinh doanh, thông tin tài khoản ngân hàng).
+
+QUY TẮC:
+1. CHỈ trích xuất thông tin CÓ THẬT trong nội dung; trường nào không có thì để chuỗi rỗng — TUYỆT ĐỐI KHÔNG BỊA.
+2. signingForm: 'cong_ty' nếu là công ty/doanh nghiệp, 'hkd' nếu là hộ kinh doanh, 'ca_nhan' nếu là cá nhân; không rõ thì để chuỗi rỗng.
+3. legalName: tên pháp lý đầy đủ (tên công ty/HKD hoặc họ tên cá nhân trên giấy tờ).
+4. representative: người đại diện pháp luật / chủ HKD / chủ tài khoản đại diện ký.
+5. taxCode: mã số thuế (thường 10 hoặc 13 ký tự số, có thể có gạch nối ở chi nhánh).
+6. idNumber: số CCCD (cá nhân) hoặc số giấy chứng nhận đăng ký kinh doanh (công ty/HKD).
+7. bankAccountNumber: giữ nguyên dãy số, bỏ khoảng trắng.
+8. certEmail: email nhận chứng từ/thông báo nếu xuất hiện.`;
+    const contents: any[] = [];
+    if (imageBase64) {
+      const mime = imageMimeType || 'image/png';
+      const cleanBase64 = String(imageBase64).replace(/^data:image\/\w+;base64,/, '');
+      contents.push({ inlineData: { mimeType: mime, data: cleanBase64 } });
+    }
+    contents.push({ text: `Hãy trích xuất thông tin bên ký theo cấu trúc JSON đã quy định.${text ? `\n--- NỘI DUNG VĂN BẢN ---\n${text}\n----------------------` : ' (Thông tin nằm trong ảnh đính kèm)'}` });
+    const str = { type: Type.STRING };
+    const response = await callAiWithRetry(() => aiClient!.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents,
+      config: {
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            legalName: str, signingForm: str, representative: str, taxCode: str, idNumber: str,
+            address: str, certEmail: str, bankName: str, bankBranch: str, bankAccountName: str, bankAccountNumber: str,
+          },
+        },
+      },
+    }));
+    const outputText = response.text || '{}';
+    let parsed: any = {};
+    try { parsed = JSON.parse(outputText); } catch { parsed = JSON.parse(outputText.replace(/```json/g, '').replace(/```/g, '').trim()); }
+    const cap = (v: any, n: number) => String(v ?? '').trim().slice(0, n);
+    const data = {
+      legalName: cap(parsed.legalName, 200),
+      signingForm: ['ca_nhan', 'hkd', 'cong_ty'].includes(parsed.signingForm) ? parsed.signingForm : '',
+      representative: cap(parsed.representative, 200),
+      taxCode: cap(parsed.taxCode, 50),
+      idNumber: cap(parsed.idNumber, 50),
+      address: cap(parsed.address, 300),
+      certEmail: cap(parsed.certEmail, 200),
+      bankName: cap(parsed.bankName, 100),
+      bankBranch: cap(parsed.bankBranch, 200),
+      bankAccountName: cap(parsed.bankAccountName, 200),
+      bankAccountNumber: cap(parsed.bankAccountNumber, 50).replace(/\s+/g, ''),
+    };
+    return res.json({ success: true, data });
+  } catch (err: any) {
+    console.warn('Yêu cầu AI (pháp nhân) thất bại', { tamThoi: isTemporaryAiError(err) });
+    return res.json({ success: false, useFallback: true, message: aiFailureMessage(err) });
   }
 });
 

@@ -175,6 +175,7 @@ test('B đợt 1 — phân bổ hợp đồng: đúng dự án/đối tác/trạ
     const cMain=await mkContract(pidA,'partner-1','HD-CHINH',true);
     assert.equal(cMain.money.gross,53763441);assert.equal(cMain.money.tax,3763441);
     const cOtherPartner=await mkContract(pidA,'partner-2','HD-KHAC',true);
+    await call(`/projects/${pidB}/shortlist/add`,{ids:['partner-1']},pm);
     const cOtherProject=await mkContractPm(pidB,'partner-1','HD-DUANB');
     const cCancelled=await mkContract(pidA,'partner-1','HD-HUY',false);
     assert.equal((await call(`/contracts/${cCancelled.id}`,{revision:cCancelled.revision,status:'cancelled'},bookinga)).status,200);

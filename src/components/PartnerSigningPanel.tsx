@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { SigningExtractBox } from './SigningExtractBox';
 import { formatDateTimeVN } from '../utils/formatters';
 import { LatestRequestGuard } from '../utils/latestRequestGuard';
 
@@ -234,6 +235,9 @@ export function PartnerSigningPanel({ partnerType, partnerId, onDirtyChange }: {
       <p className="text-xs text-slate-500">Thông tin dùng chung trong kho đối tác nội bộ để tự điền khi lập hợp đồng. Khi lập hợp đồng, hệ thống sẽ chụp một bản riêng cho hợp đồng đó — sửa tại đây không làm thay đổi hợp đồng đã lập. Mọi trường đều không bắt buộc.</p>
       {error && <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error} <button type="button" className="underline" onClick={reloadAll}>Tải lại toàn bộ</button></p>}
       {notice && <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">{notice}</p>}
+      {canEdit && (
+        <SigningExtractBox disabled={busy} onApply={picked => { setForm(f => ({ ...f, ...picked })); applyDirty(true); setNotice('Đã điền thông tin từ AI bóc tách vào hồ sơ — kiểm tra lại rồi bấm Lưu.'); }} />
+      )}
       <fieldset disabled={!canEdit || busy} className="grid sm:grid-cols-2 gap-3">
         <label className="text-sm">Tên pháp lý<input className={field} value={form.legalName} maxLength={200} onChange={e => set('legalName', e.target.value)} placeholder="Tên cá nhân / HKD / công ty trên giấy tờ" /></label>
         <label className="text-sm">Hình thức ký

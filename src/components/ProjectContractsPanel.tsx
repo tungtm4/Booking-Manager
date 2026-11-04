@@ -3,6 +3,7 @@ import { formatVND, formatDateVN, formatDateTimeVN } from '../utils/formatters';
 import { formatMoneyInput, parseMoneyInput } from '../utils/moneyInput';
 import { LatestRequestGuard } from '../utils/latestRequestGuard';
 import { computeContractMoney, type ContractTaxMode } from '../domain/contractMoney';
+import { SigningExtractBox } from './SigningExtractBox';
 
 // ===== Giai đoạn A2 — Mục Hợp đồng trong dự án =====
 // Booking nhập/sửa hợp đồng + đợt thanh toán của dự án được giao; PM có quyền tương tự
@@ -84,6 +85,7 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
   const suggestionGuardRef = useRef<LatestRequestGuard | null>(null);
   if (!suggestionGuardRef.current) suggestionGuardRef.current = new LatestRequestGuard();
   const [detail, setDetail] = useState<any | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [detailError, setDetailError] = useState('');
 
   const loadList = async () => {
@@ -94,14 +96,27 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
   useEffect(() => {
     (async () => {
       try {
-        const [cat, comm] = await Promise.all([request('/catalog'), request('/communities')]);
-        const list: any[] = [];
-        for (const k of cat.kols ?? []) list.push({ key: `kol:${k.id}`, label: `KOL · ${k.ten ?? k.id}`, type: 'kol', id: k.id, profile: k });
-        for (const c of comm.communities ?? []) list.push({ key: `community:${c.id}`, label: `Community · ${c.ten ?? c.id}`, type: 'community', id: c.id, profile: c });
-        setPartners(list);
+        // Chỉ chọn được đối tác ĐÃ CÓ trong danh sách cơ bản của dự án (server cũng
+        // chặn khi tạo) — nhãn kèm tên phase để phân biệt đối tác ở nhiều phase.
+        const [sl, ph] = await Promise.all([
+          request(`/projects/${projectId}/shortlist`),
+          request(`/projects/${projectId}/phases`).catch(() => ({ phases: [] })),
+        ]);
+        const phaseList = ph.phases ?? [];
+        const phaseName = new Map(phaseList.map((x: any) => [x.id, x.name]));
+        const firstPhaseId = phaseList[0]?.id;
+        const seen = new Map<string, any>();
+        for (const r of sl.rows ?? []) {
+          const key = `${r.partnerType}:${r.catalogId}`;
+          const phName = phaseName.get(r.phaseId ?? firstPhaseId) ?? '';
+          const cur = seen.get(key);
+          if (!cur) seen.set(key, { key, label: `${r.partnerType === 'community' ? 'Community' : 'KOL'} · ${r.profile?.ten ?? r.catalogId}${phName ? ' — ' + phName : ''}`, type: r.partnerType, id: r.catalogId, profile: r.profile });
+          else if (phName && !cur.label.includes(phName)) cur.label += ', ' + phName;
+        }
+        setPartners([...seen.values()]);
       } catch { /* danh sách đối tác không tải được — form tạo sẽ báo rõ */ }
     })();
-  }, []);
+  }, [projectId]);
 
   const openDetail = async (id: string) => {
     setDetailError('');
@@ -110,11 +125,13 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
   };
 
   const startCreate = () => {
+    setPreviewOpen(false);
     suggestionGuardRef.current?.invalidate(); setSuggestionPending(false);
     setForm({ ...blankForm }); initialFormRef.current = JSON.stringify({ ...blankForm });
     setFormError(''); setSuggestionLabel(''); setDocOptions([]);
   };
   const startEdit = async (c: any) => {
+    setPreviewOpen(false);
     setFormError('');
     try {
       const d = (await request(`/contracts/${c.id}`)).contract;
@@ -142,6 +159,7 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
   const formDirty = form !== null && JSON.stringify(form) !== initialFormRef.current;
   const closeForm = () => {
     if (formDirty && !window.confirm(CONTRACT_UNSAVED_MESSAGE)) return;
+    setPreviewOpen(false);
     suggestionGuardRef.current?.invalidate(); setSuggestionPending(false);
     setForm(null); setFormError('');
   };
@@ -244,7 +262,7 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
         setDetail(d.contract);
         setNotice('Đã tạo hợp đồng (trạng thái Nháp). Kiểm tra đủ thông tin rồi đánh dấu Đã ký ở phần chi tiết.');
       }
-      setForm(null);
+      setForm(null); setPreviewOpen(false);
       await loadList();
     } catch (e: any) { setFormError(e.message); }
     setBusy(false);
@@ -315,9 +333,12 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
         <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto p-4" onClick={closeForm}>
           <div className="bg-white rounded-2xl w-full max-w-3xl p-6 my-8" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-1">
-              <h3 className="font-bold text-lg">{form.contractId ? 'Sửa hợp đồng' : 'Tạo hợp đồng mới'}</h3>
+              <h3 className="font-bold text-lg">{previewOpen ? 'Xem trước hợp đồng' : form.contractId ? 'Sửa hợp đồng' : 'Tạo hợp đồng mới'}</h3>
               <button className="text-slate-500 px-2" aria-label="Đóng form hợp đồng" onClick={closeForm}>✕</button>
             </div>
+            {previewOpen ? (
+              <ContractFormPreview form={form} partnerLabel={selectedPartner?.label ?? ''} moneyPreview={preview} />
+            ) : (<>
             {form.contractId && form.status !== 'draft' && (
               <p className="text-sm text-amber-800 bg-amber-50 rounded-lg px-3 py-2 mb-3">Hợp đồng đã ký: thông tin bên ký, giá/thuế, số hợp đồng, ngày ký và giấy tờ đã ghim bị khóa (server sẽ chặn). Chỉ sửa được tên/ghi chú/ngày thực hiện/link file.</p>
             )}
@@ -326,9 +347,10 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
               {!form.contractId && (
                 <label className="sm:col-span-2 text-sm">Đối tác *
                   <select className={field} value={form.partnerKey} onChange={e => applyPartnerSuggestion(e.target.value)}>
-                    <option value="">— Chọn KOL hoặc Community trong kho —</option>
+                    <option value="">— Chọn đối tác đã có trong dự án —</option>
                     {partners.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
                   </select>
+                  {partners.length === 0 && <span className="block text-xs text-amber-700 mt-1">Dự án chưa có đối tác nào trong danh sách cơ bản. Thêm đối tác ở tab Đối tác & Phase trước — hợp đồng chỉ lập cho đối tác đã có trong dự án.</span>}
                 </label>
               )}
               <label className="text-sm">Số hợp đồng<input className={field} disabled={!!form.contractId && form.status !== 'draft'} value={form.contractNumber} onChange={e => set({ contractNumber: e.target.value })} /></label>
@@ -339,6 +361,9 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
               <label className="text-sm">Link file hợp đồng<input className={field} value={form.fileLink} onChange={e => set({ fileLink: e.target.value })} placeholder="Link Drive (nếu có)" /></label>
             </div>
             <h4 className="font-semibold mt-5 mb-2">Thông tin bên ký (snapshot của hợp đồng này)</h4>
+            <div className="mb-3">
+              <SigningExtractBox disabled={!!form.contractId && form.status !== 'draft'} onApply={picked => set(picked as Partial<FormState>)} />
+            </div>
             <div className="grid sm:grid-cols-2 gap-3">
               <label className="text-sm">Tên pháp lý<input className={field} disabled={!!form.contractId && form.status !== 'draft'} value={form.legalName} onChange={e => set({ legalName: e.target.value })} /></label>
               <label className="text-sm">Hình thức ký
@@ -415,14 +440,85 @@ export function ProjectContractsPanel({ projectId }: { projectId: string }) {
               </div>
             )}
             <label className="block text-sm mt-5">Ghi chú<textarea className={field} rows={2} value={form.note} onChange={e => set({ note: e.target.value })} /></label>
+            </>)}
             {formError && <p className="mt-3 text-sm text-red-700">{formError}</p>}
             <div className="flex gap-2 mt-5">
-              <button className={button} disabled={busy} onClick={saveForm}>{form.contractId ? 'Lưu hợp đồng' : 'Tạo hợp đồng (Nháp)'}</button>
-              <button className={ghost} disabled={busy} onClick={closeForm}>Huỷ</button>
+              {previewOpen ? (<>
+                <button className={ghost} disabled={busy} onClick={() => setPreviewOpen(false)}>← Quay lại sửa</button>
+                <button className={button} disabled={busy} onClick={saveForm}>{form.contractId ? 'Lưu hợp đồng' : 'Tạo hợp đồng (Nháp)'}</button>
+              </>) : (<>
+                <button className={button} disabled={busy} onClick={() => {
+                  if (!form.contractId && !form.partnerKey) { setFormError('Chọn đối tác cho hợp đồng trước khi xem trước.'); return; }
+                  setFormError(''); setPreviewOpen(true);
+                }}>Xem trước hợp đồng</button>
+                <button className={ghost} disabled={busy} onClick={closeForm}>Huỷ</button>
+              </>)}
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Bước 2 của form hợp đồng: XEM TRƯỚC toàn bộ những gì sẽ lưu — đối tác, số/tên,
+// ngày tháng, snapshot bên ký, khối tiền đã quy đổi và cảnh báo trường quan
+// trọng còn trống — trước khi bấm Tạo/Lưu (yêu cầu 04/11/2026).
+function ContractFormPreview({ form, partnerLabel, moneyPreview }: { form: FormState; partnerLabel: string; moneyPreview: any }) {
+  const warnings: string[] = [];
+  if (!form.contractNumber.trim()) warnings.push('Chưa có số hợp đồng');
+  if (!form.legalName.trim()) warnings.push('Thiếu tên pháp lý bên ký');
+  if (!form.representative.trim()) warnings.push('Thiếu người đại diện');
+  if (form.signingForm === 'cong_ty' || form.signingForm === 'hkd') { if (!form.taxCode.trim()) warnings.push('Bên ký là công ty/HKD nhưng chưa có mã số thuế'); }
+  if (form.signingForm === 'ca_nhan' && !form.idNumber.trim()) warnings.push('Bên ký là cá nhân nhưng chưa có số CCCD');
+  if (!form.bankAccountNumber.trim()) warnings.push('Chưa có số tài khoản nhận tiền');
+  if (!form.signDate) warnings.push('Chưa có ngày ký');
+  const row = (k: string, v: string) => (
+    <div className="flex gap-2 py-1 border-b border-slate-100 last:border-0"><span className="min-w-40 text-slate-500">{k}</span><span className="font-medium text-slate-800">{v || '—'}</span></div>
+  );
+  const formLabel = FORM_OPTIONS.find(o => o.value === form.signingForm)?.label ?? form.signingForm;
+  return (
+    <div className="space-y-4 text-sm">
+      <p className="text-slate-600">Đây là toàn bộ nội dung sẽ lưu vào hợp đồng. Kiểm tra kỹ — đặc biệt là thông tin bên ký và khối tiền đã quy đổi — rồi bấm {form.contractId ? '“Lưu hợp đồng”' : '“Tạo hợp đồng (Nháp)”'} phía dưới, hoặc quay lại sửa.</p>
+      {warnings.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl px-3 py-2">
+          <p className="font-semibold">Cần kiểm tra ({warnings.length}):</p>
+          <ul className="list-disc list-inside">{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+        </div>
+      )}
+      <div>
+        <h4 className="font-semibold mb-1">Thông tin hợp đồng</h4>
+        {!form.contractId && row('Đối tác', partnerLabel)}
+        {row('Số hợp đồng', form.contractNumber)}
+        {row('Tên hợp đồng', form.contractName)}
+        {row('Ngày ký', form.signDate ? formatDateVN(form.signDate) : '')}
+        {row('Thời gian thực hiện', `${form.startDate ? formatDateVN(form.startDate) : '—'} → ${form.endDate ? formatDateVN(form.endDate) : '—'}`)}
+        {row('Link file hợp đồng', form.fileLink)}
+        {row('Giấy tờ ghim kèm', form.documentIds.length ? form.documentIds.length + ' giấy tờ' : 'Không ghim')}
+        {form.note && row('Ghi chú', form.note)}
+      </div>
+      <div>
+        <h4 className="font-semibold mb-1">Bên ký</h4>
+        {row('Tên pháp lý', form.legalName)}
+        {row('Hình thức ký', formLabel)}
+        {row('Người đại diện', form.representative)}
+        {row('Mã số thuế', form.taxCode)}
+        {row('Số CCCD / ĐKKD', form.idNumber)}
+        {row('Địa chỉ', form.address)}
+        {row('Email nhận chứng từ', form.certEmail)}
+        {row('Ngân hàng', [form.bankName, form.bankBranch].filter(Boolean).join(' — '))}
+        {row('Chủ tài khoản', form.bankAccountName)}
+        {row('Số tài khoản', form.bankAccountNumber)}
+      </div>
+      <div>
+        <h4 className="font-semibold mb-1">Giá trị & thuế</h4>
+        {form.amountText ? (<>
+          {row('Số tiền đã nhập', `${form.amountText} ₫ (theo ${form.basis === 'net' ? 'NET' : 'GROSS'})`)}
+          {moneyPreview
+            ? <p className="mt-2 bg-emerald-50 text-emerald-900 rounded-lg px-3 py-2 font-medium">NET {formatVND(moneyPreview.net)} · Thuế {formatVND(moneyPreview.tax)} · Tổng phải chi (GROSS) {formatVND(moneyPreview.gross)}</p>
+            : <p className="mt-2 bg-amber-50 text-amber-800 rounded-lg px-3 py-2">Chưa tính được tiền quy đổi: cần suất thuế hợp lệ và cách tính thuế.</p>}
+        </>) : <p className="text-slate-600">Chưa nhập giá — hợp đồng nháp được phép thiếu giá, nhưng chưa thể đánh dấu Đã ký.</p>}
+      </div>
     </div>
   );
 }
@@ -433,6 +529,7 @@ function ContractDetail({ detail, onClose, onEdit, onStatus, onChanged, onError 
 }) {
   const [instForm, setInstForm] = useState({ name: '', mode: 'amount' as 'amount' | 'percent', valueText: '', milestone: '', expectedDate: '', note: '' });
   const [editingInst, setEditingInst] = useState<any | null>(null);
+  const [showPrint, setShowPrint] = useState(false);
   const [busy, setBusy] = useState(false);
   const run = async (fn: () => Promise<any>) => {
     setBusy(true);
@@ -469,6 +566,7 @@ function ContractDetail({ detail, onClose, onEdit, onStatus, onChanged, onError 
           <p className="text-sm text-slate-500">{detail.contractName || ''} · {detail.partnerType === 'kol' ? 'KOL' : 'Community'} · Trạng thái: {detail.statusLabel}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button className={ghost} onClick={() => setShowPrint(true)}>Xuất file hợp đồng</button>
           {detail.status !== 'cancelled' && <button className={ghost} onClick={onEdit}>Sửa hợp đồng</button>}
           {detail.status === 'draft' && <button className={button} onClick={() => onStatus('signed')}>Đánh dấu đã ký</button>}
           {detail.status === 'signed' && <button className={button} onClick={() => onStatus('completed')}>Hoàn tất</button>}
@@ -565,6 +663,68 @@ function ContractDetail({ detail, onClose, onEdit, onStatus, onChanged, onError 
         </div>
       )}
       <p className="text-xs text-slate-400 mt-3">Phiên bản {detail.revision} · Cập nhật {formatDateTimeVN(detail.updatedAt)}</p>
+      {showPrint && (
+        <div className="fixed inset-0 z-50 bg-black/50 overflow-y-auto print:bg-white print:overflow-visible">
+          <style>{`@media print{body *{visibility:hidden}.contract-print-doc,.contract-print-doc *{visibility:visible}.contract-print-doc{position:absolute;inset:0;padding:0!important}@page{margin:14mm}}`}</style>
+          <div className="min-h-full py-6 px-3">
+            <div className="max-w-3xl mx-auto mb-3 flex justify-between items-center print:hidden">
+              <span className="text-white font-semibold text-sm">Bản in hợp đồng — {detail.contractNumber || 'chưa có số'}</span>
+              <span className="flex gap-2"><button type="button" className={button} onClick={() => window.print()}>In / Lưu PDF</button><button type="button" className="rounded-lg bg-white px-3 py-2 text-sm font-semibold" onClick={() => setShowPrint(false)}>Đóng</button></span>
+            </div>
+            <div className="contract-print-doc max-w-3xl mx-auto bg-white text-slate-800 p-8 sm:p-10 shadow print:shadow-none text-sm leading-relaxed">
+              <h1 className="text-xl font-bold text-center">HỢP ĐỒNG DỊCH VỤ</h1>
+              <p className="text-center mt-1">Số: {detail.contractNumber || '……………'} {detail.contractName ? '· ' + detail.contractName : ''}</p>
+              <p className="text-center text-slate-600">Ngày ký: {detail.signDate ? formatDateVN(detail.signDate) : '………………'}</p>
+              <div className="mt-6 space-y-4">
+                <div>
+                  <p className="font-bold">BÊN A (Bên thuê dịch vụ)</p>
+                  <p>Tên đơn vị: …………………………………………………………………………</p>
+                  <p>Đại diện: ………………………………… · Mã số thuế: …………………………………</p>
+                  <p>Địa chỉ: …………………………………………………………………………</p>
+                  <p className="text-xs text-slate-500">(Thông tin pháp lý Bên A chưa được lưu trong hệ thống — điền tay trước khi ký, hoặc bổ sung ở hồ sơ đơn vị.)</p>
+                </div>
+                <div>
+                  <p className="font-bold">BÊN B (Bên cung cấp dịch vụ)</p>
+                  <p>Tên pháp lý: <strong>{detail.snapshot.legalName || '………………………'}</strong> ({FORM_OPTIONS.find(o => o.value === detail.snapshot.signingForm)?.label ?? '………………………'})</p>
+                  <p>Đối tác: {detail.partnerName || detail.partnerId} · {detail.partnerType === 'kol' ? 'KOL / Creator' : 'Community'}</p>
+                  <p>Đại diện: {detail.snapshot.representative || '………………………'} · Mã số thuế: {detail.snapshot.taxCode || '………………………'} · CCCD/ĐKKD: {detail.snapshot.idNumber || '………………………'}</p>
+                  <p>Địa chỉ: {detail.snapshot.address || '………………………'}</p>
+                  <p>Email nhận chứng từ: {detail.snapshot.certEmail || '………………………'}</p>
+                  <p>Ngân hàng: {detail.snapshot.bankName || '………………………'}{detail.snapshot.bankBranch ? ' — ' + detail.snapshot.bankBranch : ''} · Chủ tài khoản: {detail.snapshot.bankAccountName || '………………………'} · Số tài khoản: {detail.snapshot.bankAccountNumber || '………………………'}</p>
+                </div>
+              </div>
+              <h2 className="font-bold mt-6">Điều 1. Thời gian thực hiện</h2>
+              <p>Từ {detail.startDate ? formatDateVN(detail.startDate) : '………………'} đến {detail.endDate ? formatDateVN(detail.endDate) : '………………'}.</p>
+              <h2 className="font-bold mt-4">Điều 2. Giá trị hợp đồng & thuế</h2>
+              {detail.money ? (
+                <table className="w-full mt-2 border-collapse">
+                  <tbody>
+                    <tr className="border-b"><td className="py-1.5">Số tiền nhập theo {detail.money.basis === 'net' ? 'NET (thực nhận)' : 'GROSS (đã gồm thuế)'}</td><td className="py-1.5 text-right font-medium">{formatVND(detail.money.enteredAmount)}</td></tr>
+                    <tr className="border-b"><td className="py-1.5">NET (giá trị dịch vụ trước thuế)</td><td className="py-1.5 text-right font-medium">{formatVND(detail.money.net)}</td></tr>
+                    <tr className="border-b"><td className="py-1.5">Thuế ({detail.money.taxRate}% — {detail.money.taxMode === 'trong_gia_gop' ? 'nằm trong giá gộp' : detail.money.taxMode === 'tren_net' ? 'cộng trên giá net' : 'không thuế'})</td><td className="py-1.5 text-right font-medium">{formatVND(detail.money.tax)}</td></tr>
+                    <tr><td className="py-1.5 font-bold">TỔNG PHẢI CHI (GROSS)</td><td className="py-1.5 text-right font-bold">{formatVND(detail.money.gross)}</td></tr>
+                  </tbody>
+                </table>
+              ) : <p>Chưa xác định giá trị hợp đồng.</p>}
+              <h2 className="font-bold mt-4">Điều 3. Đợt thanh toán</h2>
+              {detail.installments.length > 0 ? (
+                <table className="w-full mt-2 border-collapse">
+                  <thead><tr className="border-b text-left"><th className="py-1.5">Đợt</th><th className="py-1.5">Mốc điều kiện</th><th className="py-1.5">Dự kiến</th><th className="py-1.5 text-right">Số tiền</th></tr></thead>
+                  <tbody>{detail.installments.map((i: any) => (
+                    <tr key={i.id} className="border-b"><td className="py-1.5">{i.name || 'Đợt thanh toán'}</td><td className="py-1.5">{i.milestone || '—'}</td><td className="py-1.5">{i.expectedDate ? formatDateVN(i.expectedDate) : '—'}</td><td className="py-1.5 text-right">{formatVND(i.amount)}</td></tr>
+                  ))}</tbody>
+                </table>
+              ) : <p>Thanh toán theo thoả thuận của hai bên (chưa chia đợt trong hệ thống).</p>}
+              {detail.note && (<><h2 className="font-bold mt-4">Ghi chú</h2><p className="whitespace-pre-line">{detail.note}</p></>)}
+              <div className="grid grid-cols-2 gap-6 mt-10 text-center">
+                <div><p className="font-bold">ĐẠI DIỆN BÊN A</p><p className="text-slate-500">(Ký, ghi rõ họ tên, đóng dấu)</p><div className="h-24"></div><p>……………………………</p></div>
+                <div><p className="font-bold">ĐẠI DIỆN BÊN B</p><p className="text-slate-500">(Ký, ghi rõ họ tên, đóng dấu nếu có)</p><div className="h-24"></div><p>{detail.snapshot.representative || '………………………'}</p></div>
+              </div>
+              <p className="text-xs text-slate-400 mt-8">Bản xuất từ hệ thống Booking Manager — trạng thái hợp đồng: {detail.statusLabel}. Các điều khoản chi tiết khác theo thoả thuận đính kèm của hai bên.</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

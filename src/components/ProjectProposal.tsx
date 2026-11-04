@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { passesProposalThreshold, rankKolsForRecommendation, PROPOSAL_MIN_CATEGORY_SCORE, PROPOSAL_MIN_TOTAL_SCORE } from '../utils/recommendationEngine';
+import { canonicalCategory, CANONICAL_CATEGORIES } from '../domain/categories';
 import { toggleRangeSelection } from '../utils/rangeSelection';
 import { LatestRequestGuard } from '../utils/latestRequestGuard';
 import { PRICE_FORMAT_LABELS, type PriceFormatKey, type RecommendationScore } from '../types/kol';
@@ -251,6 +252,7 @@ export function ProjectProposal({
   embedded = false,
   onAdded,
   onOpenProject,
+  onEditCriteriaExternal,
 }: {
   initialProjectId?: string;
   initialPhaseId?: string;
@@ -259,6 +261,7 @@ export function ProjectProposal({
   embedded?: boolean;
   onAdded?: () => void;
   onOpenProject?: (projectId: string) => void;
+  onEditCriteriaExternal?: () => void;
 }) {
   const [projects, setProjects] = useState<any[]>([]), [projectId, setProjectId] = useState(propProjectId ?? initialProjectId ?? '');
   const [phases, setPhases] = useState<any[]>([]), [phaseId, setPhaseId] = useState(propPhaseId ?? initialPhaseId ?? '');
@@ -322,6 +325,9 @@ export function ProjectProposal({
   const [resultsPageSize, setResultsPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   // Số hồ sơ KOL bị ẩn vì dưới ngưỡng điểm phù hợp tối thiểu (để báo minh bạch).
   const [kolBelowThreshold, setKolBelowThreshold] = useState(0);
+  const [belowResults, setBelowResults] = useState<RecommendationScore[]>([]);
+  const [belowPage, setBelowPage] = useState(1);
+  const [showBelow, setShowBelow] = useState(false);
 
   // Kết quả Community
   const [commResults, setCommResults] = useState<any[] | null>(null);
@@ -389,6 +395,9 @@ export function ProjectProposal({
     resetSelectionAnchors();
     setResults(null);
     setKolBelowThreshold(0);
+    setBelowResults([]);
+    setBelowPage(1);
+    setShowBelow(false);
     setSelectedIds([]);
     setResultsPage(1);
     setCommResults(null);
@@ -595,6 +604,7 @@ export function ProjectProposal({
     resetSelectionAnchors();
     setSelectedIds([]);
     setResultsPage(1);
+    setBelowPage(1);
     setCommSelected([]);
     setCommPage(1);
     setNotice('');
@@ -621,9 +631,11 @@ export function ProjectProposal({
       // đếm và báo ngay dưới tiêu đề nhóm để người dùng biết danh sách đã lọc.
       const qualified = ranked.filter(passesProposalThreshold);
       setKolBelowThreshold(ranked.length - qualified.length);
+      setBelowResults(ranked.filter(r => !passesProposalThreshold(r)));
       setResults(qualified);
     } else {
       setKolBelowThreshold(0);
+      setBelowResults([]);
       setResults(null);
     }
 
@@ -775,6 +787,7 @@ export function ProjectProposal({
   };
 
   const paged = results ? paginateItems(results, resultsPage, resultsPageSize) : null;
+  const belowPaged = belowResults.length ? paginateItems(belowResults, belowPage, resultsPageSize) : null;
   const selectedKols = (results ?? []).filter(r => selectedIds.includes(r.kol.id));
   const commPaged = commResults ? paginateItems(commResults, commPage, resultsPageSize) : null;
   const pillarCounts = kpiTopics && kpiTopics > 0 ? pillarPostCounts(kpiTopics, pillars) : [];
@@ -896,7 +909,7 @@ export function ProjectProposal({
             Brief của phase đã được lưu. Bạn có thể tìm đối tác ngay hoặc chỉnh sửa tiêu chí bên dưới.
           </div>
         )}
-        {embedded && !criteriaOpen ? (
+        {embedded ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-slate-600">
             <span>Lĩnh vực: <strong className="text-slate-800">{linhVuc || 'Tất cả'}</strong></span>
             <span>·</span>
@@ -907,7 +920,9 @@ export function ProjectProposal({
             <span>Ngân sách phase: <strong className="text-slate-800">{totalBudget ? formatVND(Number(totalBudget)) : '—'}</strong></span>
             <span>·</span>
             <span>Hạng mục tính điểm: <strong className="text-slate-800">{PRICE_FORMAT_LABELS[formatKey]}</strong></span>
-            <button type="button" className="text-indigo-700 underline text-sm cursor-pointer" onClick={() => setCriteriaOpen(true)}>Chỉnh tiêu chí tìm kiếm</button>
+            {onEditCriteriaExternal
+              ? <button type="button" className="text-indigo-700 underline text-sm cursor-pointer" onClick={onEditCriteriaExternal}>Sửa brief của phase (Bước 1)</button>
+              : <button type="button" className="text-indigo-700 underline text-sm cursor-pointer" onClick={() => setCriteriaOpen(true)}>Chỉnh tiêu chí tìm kiếm</button>}
             <button type="button" className={button} disabled={(!pool.length && !commPool.length) || parsing} onClick={search}>Tìm đối tác phù hợp</button>
           </div>
         ) : (
@@ -1305,12 +1320,18 @@ export function ProjectProposal({
         )}
       </section>
 
+      {linhVuc.trim() && !canonicalCategory(linhVuc.trim()) && (
+        <p className="text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-3 py-2">
+          ⚠️ Lĩnh vực “{linhVuc.trim()}” chưa có trong danh mục chuẩn ({CANONICAL_CATEGORIES.map(c => c.name).join(', ')}). Hồ sơ trong kho được gắn theo danh mục này — nếu không hồ sơ nào khớp, kết quả tìm sẽ là 0. Hãy sửa lĩnh vực trong brief của phase về một lĩnh vực chuẩn gần nhất, hoặc để trống nếu muốn tìm rộng.
+        </p>
+      )}
+
       {/* KẾT QUẢ ĐỀ XUẤT */}
       {searched && (
         <section className="bg-white border rounded-2xl p-5 space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
             <div>
-              <h2 className="text-lg font-semibold">3. Kết quả đề xuất</h2>
+              <h2 className="text-lg font-semibold">{embedded ? 'Kết quả đề xuất' : '3. Kết quả đề xuất'}</h2>
               <p className="text-xs text-slate-500">
                 Đã chọn: {selectedIds.length} KOL · {commSelected.length} Community (tổng {selectedIds.length + commSelected.length} đối tác)
               </p>
@@ -1336,6 +1357,12 @@ export function ProjectProposal({
                 <p className="text-xs text-slate-500 -mt-1">
                   Chỉ hiện hồ sơ đạt ngưỡng phù hợp: tổng điểm từ {PROPOSAL_MIN_TOTAL_SCORE}/80 và điểm lĩnh vực từ {PROPOSAL_MIN_CATEGORY_SCORE}/40.{kolBelowThreshold > 0 ? ` Đã ẩn ${kolBelowThreshold.toLocaleString('vi-VN')} hồ sơ dưới ngưỡng.` : ''}
                 </p>
+              )}
+              {kolBelowThreshold > 0 && (
+                <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+                  <input type="checkbox" checked={showBelow} onChange={e => setShowBelow(e.target.checked)} />
+                  Hiện cả hồ sơ dưới ngưỡng ({kolBelowThreshold.toLocaleString('vi-VN')})
+                </label>
               )}
               {results && selectedIds.length > 0 && (
                 <button
@@ -1406,6 +1433,78 @@ export function ProjectProposal({
                       </p>
                     )}
                   </div>
+                  {belowResults.length > 0 && results.length === 0 && (
+                    <div className="space-y-2">
+                      <h4 className="font-semibold text-sm text-slate-800">Gần đạt nhất — chưa qua ngưỡng (hiện {Math.min(5, belowResults.length)} / {belowResults.length.toLocaleString('vi-VN')} hồ sơ)</h4>
+                      <div className="divide-y border border-amber-200 rounded-xl px-3 bg-amber-50/40">
+                        {belowResults.slice(0, 5).map(rec => {
+                          const kol = rec.kol;
+                          const maxFol = Math.max(0, ...(kol.nenTang ?? []).map((c: any) => c.soFollower ?? 0));
+                          const price = kol.bangGia?.[formatKey];
+                          return (
+                            <label key={kol.id} className="flex gap-3 py-3 cursor-pointer items-start">
+                              <input type="checkbox" aria-label={'Chọn KOL ' + kol.ten} className="mt-1" disabled={busy} checked={selectedIds.includes(kol.id)} onClick={e => toggle(kol.id, e.shiftKey)} onChange={() => {}} />
+                              <span className="flex-1 min-w-0">
+                                <span className="flex flex-wrap items-baseline gap-2">
+                                  <strong>{kol.ten}</strong>
+                                  <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">{rec.tongDiem} điểm — Dưới ngưỡng</span>
+                                  {rec.vuotNganSach && <span className="text-xs text-amber-700">Vượt ngân sách/KOL</span>}
+                                </span>
+                                <span className="block text-xs text-slate-600 mt-0.5">
+                                  Điểm thành phần: Lĩnh vực {rec.diemLinhVuc}/40 · Giá {rec.diemGia}/30 · Hợp tác {rec.diemHopTac}/10 — cần tổng ≥ {PROPOSAL_MIN_TOTAL_SCORE} và lĩnh vực ≥ {PROPOSAL_MIN_CATEGORY_SCORE}
+                                </span>
+                                <span className="block text-xs text-slate-500">
+                                  {(kol.linhVuc ?? []).join(', ')} · {formatFollowers(maxFol)} follower · {PRICE_FORMAT_LABELS[formatKey]}: {price != null ? formatVND(price) : 'Chưa có giá'}
+                                </span>
+                                {rec.lyDo?.length > 0 && (
+                                  <span className="block text-xs text-slate-500 truncate" title={rec.lyDo.join(' · ')}>{rec.lyDo.slice(0, 2).join(' · ')}</span>
+                                )}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-slate-500">Các hồ sơ này chưa đạt ngưỡng nên không tự hiện trong danh sách đạt chuẩn. Anh vẫn tick chọn để đưa vào phase nếu thấy phù hợp, hoặc nới lỏng tiêu chí (lĩnh vực / follower / ngân sách) rồi tìm lại.</p>
+                    </div>
+                  )}
+                  {belowResults.length > 0 && results.length > 0 && showBelow && (
+                    <div className="space-y-2">
+                      <h4 className="font-semibold text-sm text-slate-800">Hồ sơ dưới ngưỡng ({belowResults.length.toLocaleString('vi-VN')})</h4>
+                      <div className="divide-y border border-amber-200 rounded-xl px-3 bg-amber-50/40">
+                        {(belowPaged?.pageItems ?? []).map(rec => {
+                          const kol = rec.kol;
+                          const maxFol = Math.max(0, ...(kol.nenTang ?? []).map((c: any) => c.soFollower ?? 0));
+                          const price = kol.bangGia?.[formatKey];
+                          return (
+                            <label key={kol.id} className="flex gap-3 py-3 cursor-pointer items-start">
+                              <input type="checkbox" aria-label={'Chọn KOL ' + kol.ten} className="mt-1" disabled={busy} checked={selectedIds.includes(kol.id)} onClick={e => toggle(kol.id, e.shiftKey)} onChange={() => {}} />
+                              <span className="flex-1 min-w-0">
+                                <span className="flex flex-wrap items-baseline gap-2">
+                                  <strong>{kol.ten}</strong>
+                                  <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">{rec.tongDiem} điểm — Dưới ngưỡng</span>
+                                  {rec.vuotNganSach && <span className="text-xs text-amber-700">Vượt ngân sách/KOL</span>}
+                                </span>
+                                <span className="block text-xs text-slate-600 mt-0.5">
+                                  Điểm thành phần: Lĩnh vực {rec.diemLinhVuc}/40 · Giá {rec.diemGia}/30 · Hợp tác {rec.diemHopTac}/10
+                                </span>
+                                <span className="block text-xs text-slate-500">
+                                  {(kol.linhVuc ?? []).join(', ')} · {formatFollowers(maxFol)} follower · {PRICE_FORMAT_LABELS[formatKey]}: {price != null ? formatVND(price) : 'Chưa có giá'}
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      {belowPaged && belowPaged.totalItems > 0 && (
+                        <div className="flex flex-wrap items-center gap-2 text-sm pt-1">
+                          <span className="text-slate-500">Hiển thị {belowPaged.startIndex + 1}–{belowPaged.endIndex} / {belowPaged.totalItems.toLocaleString('vi-VN')} hồ sơ dưới ngưỡng</span>
+                          <button type="button" className="border rounded-lg px-3 py-1 disabled:opacity-50 cursor-pointer" disabled={!belowPaged.hasPrev} onClick={() => setBelowPage(belowPaged.page - 1)}>Trang trước</button>
+                          <span>Trang {belowPaged.page}/{belowPaged.totalPages}</span>
+                          <button type="button" className="border rounded-lg px-3 py-1 disabled:opacity-50 cursor-pointer" disabled={!belowPaged.hasNext} onClick={() => setBelowPage(belowPaged.page + 1)}>Trang sau</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {paged && paged.totalItems > 0 && (
                     <div className="flex flex-wrap items-center gap-2 text-sm pt-1">
                       <span className="text-slate-500">

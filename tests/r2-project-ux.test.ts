@@ -22,9 +22,14 @@ test('R2-P2 — Tab Báo giá không còn form sửa thông tin dự án; Tổng
 test('R2-P3 — Tiêu chí đề xuất thu gọn mặc định khi nhúng trong tab Đối tác', () => {
   const proposal = read('../src/components/ProjectProposal.tsx');
   assert.ok(proposal.includes('criteriaOpen'), 'Phải có trạng thái thu gọn/mở rộng tiêu chí');
-  assert.ok(proposal.includes('Chỉnh tiêu chí tìm kiếm'), 'Phải có nút mở biểu mẫu tiêu chí đầy đủ');
+  assert.ok(proposal.includes('Chỉnh tiêu chí tìm kiếm'), 'Vẫn còn nút mở biểu mẫu tiêu chí (chế độ độc lập / dự phòng)');
   assert.ok(proposal.includes('Thu gọn tiêu chí'), 'Phải có nút thu gọn lại');
-  assert.ok(proposal.includes('embedded && !criteriaOpen'), 'Dải tóm tắt chỉ áp dụng khi nhúng (embedded)');
+  // Từ 04/11/2026: khi nhúng, LUÔN hiện dải tóm tắt và brief phase chỉ sửa ở
+  // Bước 1 của tab Đối tác — không còn form tiêu chí thứ hai trong phần tìm.
+  assert.ok(proposal.includes('{embedded ? ('), 'Khi nhúng luôn hiện dải tóm tắt tiêu chí');
+  assert.ok(proposal.includes('onEditCriteriaExternal'), 'Nút sửa tiêu chí khi nhúng phải trỏ về nơi sửa duy nhất (Bước 1)');
+  const panel2 = read('../src/components/ProjectShortlistPanel.tsx');
+  assert.ok(panel2.includes('onEditCriteriaExternal'), 'Tab Đối tác truyền handler sửa brief phase ở Bước 1');
   const panel = read('../src/components/ProjectShortlistPanel.tsx');
   assert.ok(panel.includes('Cách tính chi phí của danh sách sơ bộ'), 'Đoạn giải thích dài phải được gom vào mục thu gọn');
   assert.ok(panel.includes('Danh sách này dùng để làm gì?'), 'Đoạn giải thích ở danh sách phải được gom vào mục thu gọn');

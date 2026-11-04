@@ -349,6 +349,8 @@ test('UX-4.4 (M7.4 Tiền hợp đồng): Theo dõi độc lập theo trạng th
       ],
     }, admin);
 
+    await call(`/projects/${pid}/shortlist/add`, { ids: ['k1', 'k2', 'k3'] }, admin);
+
     // Hợp đồng 1: Hiệu lực (signed) 30.000.000, trả 10.000.000
     const c1 = await call(`/projects/${pid}/contracts`, {
       partnerType: 'kol',

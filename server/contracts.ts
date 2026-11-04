@@ -152,6 +152,10 @@ export function installContracts(router:Router,db:DatabaseSync,projectAccess:(u:
     const type=b.partnerType,id=b.partnerId;
     if(!(PARTNER_TYPES as readonly string[]).includes(type)||typeof id!=='string'||!id)return res.status(400).json({message:'Chọn đối tác (KOL hoặc Community) cho hợp đồng.'});
     if(!partnerRow(u.organization_id,type,id))return res.status(404).json({message:'Không tìm thấy đối tác trong kho.'});
+    // Hợp đồng chỉ lập cho đối tác ĐÃ CÓ trong danh sách cơ bản của dự án (quyết định
+    // 04/11/2026): muốn ký với ai thì thêm đối tác vào dự án ở tab Đối tác & Phase trước.
+    const inProject=db.prepare('SELECT 1 FROM project_shortlist WHERE project_id=? AND partner_type=? AND catalog_id=?').get(projectId,type,id);
+    if(!inProject)return res.status(400).json({message:'Đối tác chưa có trong danh sách cơ bản của dự án này. Thêm đối tác vào dự án ở tab Đối tác & Phase trước khi tạo hợp đồng.'});
     const snapshot=sanitizeSnapshot(b.snapshot??{});
     if(!snapshot)return res.status(400).json({message:'Kiểm tra lại thông tin bên ký (độ dài, hình thức ký, email chứng từ).'});
     const money=sanitizeMoney(b.money);
