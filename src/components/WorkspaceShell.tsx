@@ -1545,7 +1545,7 @@ export default function WorkspaceShell() {
                       />
                     )}
                     {projectView === 'quotes' && (
-                      <ProjectQuotesPanel key={selected.id} projectId={selected.id} isAdmin={user.role === 'admin'} onProjectChanged={refresh} onDirtyChange={setIsDirty} />
+                      <ProjectQuotesPanel key={selected.id} projectId={selected.id} isAdmin={user.role === 'admin'} onProjectChanged={refresh} onDirtyChange={setIsDirty} onOpenShortlist={() => handleNavigateWithGuard(() => setProjectView('shortlist'))} />
                     )}
                     {projectView === 'contracts' && <ProjectContractsPanel key={selected.id} projectId={selected.id} />}
                     {projectView === 'pnl' && (

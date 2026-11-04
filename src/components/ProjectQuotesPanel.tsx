@@ -286,7 +286,14 @@ function CostSourceDialog({projectId,quoteId,revision,item,onClose,onApplied}:{p
   </div>;
 }
 
-export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyChange}:{projectId:string;isAdmin:boolean;onProjectChanged:()=>Promise<void>;onDirtyChange?:(dirty:boolean)=>void}){
+// Gọn danh sách tên dài (khối phase chưa chốt SOW từng liệt kê đủ 24 tên thành 1 đoạn
+// chữ không đọc nổi): hiện tối đa `max` tên đầu, phần còn lại gộp "và N người nữa".
+export function summarizeNameList(names: string[], max = 5): string {
+  if (names.length <= max) return names.join(', ');
+  return names.slice(0, max).join(', ') + ` và ${names.length - max} người nữa`;
+}
+
+export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyChange,onOpenShortlist}:{projectId:string;isAdmin:boolean;onProjectChanged:()=>Promise<void>;onDirtyChange?:(dirty:boolean)=>void;onOpenShortlist?:()=>void}){
   const [data,setData]=useState<any>(null),[quote,setQuote]=useState<any>(null),[items,setItems]=useState<Item[]>([]);
   const [discount,setDiscount]=useState<any>({mode:'fixed',value:0}),[fee,setFee]=useState<any>({mode:'percent',value:0}),[tax,setTax]=useState(0);
   const [optionId,setOptionId]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[dirty,setDirty]=useState(false);
@@ -485,8 +492,14 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
             </tbody>
             <tfoot><tr><td colSpan={6} className="py-2 text-right font-semibold">Tiểu tổng phase (giá đầu vào):</td><td className="py-2 text-right font-bold whitespace-nowrap">{money(phaseAllocTotal)}</td></tr></tfoot>
           </table></div>}
-          {unSowRows.length>0&&<p className="text-xs text-amber-700">Chưa chốt SOW: {unSowRows.map((r:any)=>r.profile.ten).join(', ')} — chốt SOW ở Bước 3 (tab Đối tác & Phase) để có dòng phân bổ.</p>}
-          {emptySowRows.length>0&&<p className="text-xs text-slate-500">SOW đã chốt trống (không làm hạng mục nào): {emptySowRows.map((r:any)=>r.profile.ten).join(', ')}.</p>}
+          {unSowRows.length>0&&<div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs text-amber-700" title={unSowRows.map((r:any)=>r.profile.ten).join(', ')}><strong>{unSowRows.length} ứng viên chưa chốt SOW</strong> nên chưa có dòng phân bổ: {summarizeNameList(unSowRows.map((r:any)=>r.profile.ten))}.</p>
+            {onOpenShortlist&&<button type="button" onClick={onOpenShortlist} className="text-xs px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer">Đi chốt SOW ở Bước 3</button>}
+          </div>}
+          {emptySowRows.length>0&&<div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs text-slate-500" title={emptySowRows.map((r:any)=>r.profile.ten).join(', ')}><strong>{emptySowRows.length} ứng viên đã chốt SOW trống</strong> (không làm hạng mục nào): {summarizeNameList(emptySowRows.map((r:any)=>r.profile.ten))}.</p>
+            {onOpenShortlist&&<button type="button" onClick={onOpenShortlist} className="text-xs px-2.5 py-1 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold cursor-pointer">Đi chốt SOW ở Bước 3</button>}
+          </div>}
         </div>;
       })}
       {fromPhaseIds.length>0&&(()=>{const grandAlloc=fromPhaseIds.reduce((sum,pid3)=>{const phx=phases.find((x:any)=>x.id===pid3);if(!phx)return sum;const rws=shortlistRows.filter((r:any)=>(r.phaseId??phases[0]?.id)===phx.id);return sum+allocLinesForPhase(phx,rws,alloc).reduce((a,l)=>a+(l.total??0),0);},0);const commentBuy=commentLines.reduce((a,c)=>a+(c.buyUnitPrice!=null?c.buyUnitPrice*c.quantity:0),0);const grandSell=fromPhaseIds.reduce((sum,pid3)=>{const phx=phases.find((x:any)=>x.id===pid3);if(!phx)return sum;const rws=shortlistRows.filter((r:any)=>(r.phaseId??phases[0]?.id)===phx.id);return sum+allocLinesForPhase(phx,rws,alloc).reduce((a,l)=>a+(!l.included&&sellAlloc[l.rowId+':'+l.key]!=null?sellAlloc[l.rowId+':'+l.key]!*l.qty:0),0);},0)+commentLines.reduce((a,c)=>a+(c.sellUnitPrice!=null?c.sellUnitPrice*c.quantity:0),0);return <div className="bg-indigo-600 text-white rounded-xl px-4 py-3 flex flex-wrap gap-x-6 gap-y-1 text-sm"><span>Tổng chi phí phân bổ (giá đầu vào): <strong>{money(grandAlloc)}</strong></span><span>Tổng giá báo khách đã điền: <strong>{money(grandSell)}</strong></span>{commentLines.length>0&&<span>Dịch vụ comment: <strong>{money(commentBuy)}</strong></span>}<span>Tổng cộng dự kiến: <strong>{money(grandAlloc+commentBuy)}</strong></span><span className="text-indigo-100 text-xs self-center">Chi phí mua dự kiến của phương án sắp tạo.</span></div>;})()}
