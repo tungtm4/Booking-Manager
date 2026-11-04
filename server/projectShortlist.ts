@@ -41,6 +41,11 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
       db.exec('COMMIT');
     }catch(e){db.exec('ROLLBACK');throw e;}
   }
+  // SOW theo từng creator trong phase (chốt ở Bước 3): JSON [{key, qty, included}]
+  // trên từng dòng shortlist KOL; NULL = chưa chốt. key là format giá hoặc 'story'
+  // (hạng mục kèm theo, không có format giá riêng).
+  const slCols2=(db.prepare('PRAGMA table_info(project_shortlist)').all() as any[]).map((r:any)=>r.name);
+  if(!slCols2.includes('sow_json'))db.exec('ALTER TABLE project_shortlist ADD COLUMN sow_json TEXT');
   // Migration Đợt 9: dự án chưa có phase nào → tạo phase mặc định giữ brief + shortlist hiện tại.
   const phaseless=db.prepare('SELECT p.id FROM projects p WHERE NOT EXISTS (SELECT 1 FROM project_phases ph WHERE ph.project_id=p.id)').all() as any[];
   for(const p of phaseless){
@@ -305,6 +310,32 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     if(phaseId!==null){if(typeof phaseId!=='string')return res.status(400).json({message:'Phase không hợp lệ.'});const ph=db.prepare('SELECT id FROM project_phases WHERE id=? AND project_id=?').get(phaseId,pid);if(!ph)return res.status(400).json({message:'Phase không thuộc dự án này.'});}
     db.prepare('UPDATE project_shortlist SET phase_id=? WHERE id=?').run(phaseId,row.id);audit(u.id,'move_shortlist_phase',row.id);res.json({success:true});
   });
+  // Chốt SOW của một creator trong phase của dòng đó (Bước 3). sow=null là xoá chốt.
+  // Chỉ áp dụng cho KOL — Community phân bổ theo dịch vụ của brief như hiện tại.
+  function sanitizeSow(v:any){
+    if(v===null)return null;
+    if(!Array.isArray(v)||v.length>7)return undefined;
+    const seen=new Set<string>();const out:any[]=[];
+    for(const e of v){
+      if(!e||typeof e!=='object'||Array.isArray(e))return undefined;
+      const key=e.key;
+      if(typeof key!=='string'||(key!=='story'&&!formats.includes(key))||seen.has(key))return undefined;
+      seen.add(key);
+      const qty=e.qty===undefined?null:e.qty;
+      if(qty!==null&&(!Number.isSafeInteger(qty)||qty<1||qty>100000))return undefined;
+      const included=key==='story'?true:e.included===true;
+      out.push({key,qty,included});
+    }
+    return out;
+  }
+  router.post('/projects/:id/shortlist/:rowId/sow',(req,res)=>{
+    const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền cập nhật danh sách dự án.'});
+    const row=db.prepare('SELECT * FROM project_shortlist WHERE id=? AND project_id=?').get(req.params.rowId,pid) as any;if(!row)return res.status(404).json({message:'Không tìm thấy đối tác trong dự án.'});
+    if((row.partner_type??'kol')==='community')return res.status(400).json({message:'SOW theo creator chỉ áp dụng cho KOL. Community phân bổ theo dịch vụ của brief.'});
+    if(req.body?.revision!==row.revision)return res.status(409).json({message:'Dòng đã thay đổi. Tải lại trước khi lưu SOW.'});
+    const sow=sanitizeSow(req.body?.sow);if(sow===undefined)return res.status(400).json({message:'SOW không hợp lệ: tối đa 7 hạng mục, mỗi hạng mục một lần, số lượng nguyên dương.'});
+    db.prepare('UPDATE project_shortlist SET sow_json=?,revision=revision+1 WHERE id=? AND revision=?').run(sow===null?null:JSON.stringify(sow),row.id,row.revision);audit(u.id,'set_shortlist_sow',row.id);res.json({success:true});
+  });
   router.get('/projects/:id/shortlist',(req,res)=>{
     const u=res.locals.user,pid=req.params.id;if(!access(u,pid))return res.status(403).json({message:'Bạn không có quyền xem dự án này.'});
     const b=db.prepare('SELECT * FROM project_briefs WHERE project_id=?').get(pid) as any;
@@ -315,7 +346,7 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     // Community được tìm từ KHO COMMUNITY riêng — không bao giờ thay bằng danh sách Creator.
     const communityCatalog=db.prepare('SELECT profile_json FROM community_catalog WHERE organization_id=? ORDER BY rowid').all(u.organization_id).map((r:any)=>JSON.parse(r.profile_json));
     const communityMatches=communityCatalog.filter((p:any)=>assessCommunity(p,brief).matches);
-    const rows=db.prepare('SELECT * FROM project_shortlist WHERE project_id=? ORDER BY rowid').all(pid).map((r:any)=>({id:r.id,catalogId:r.catalog_id,partnerType:r.partner_type??'kol',profile:(()=>{const {engagementRate,...p}=JSON.parse(r.profile_json);return p;})(),prices:JSON.parse(r.prices_json),revision:r.revision,phaseId:r.phase_id??null}));
+    const rows=db.prepare('SELECT * FROM project_shortlist WHERE project_id=? ORDER BY rowid').all(pid).map((r:any)=>({id:r.id,catalogId:r.catalog_id,partnerType:r.partner_type??'kol',profile:(()=>{const {engagementRate,...p}=JSON.parse(r.profile_json);return p;})(),prices:JSON.parse(r.prices_json),sow:r.sow_json?(()=>{try{return JSON.parse(r.sow_json);}catch{return null;}})():null,revision:r.revision,phaseId:r.phase_id??null}));
     res.json({brief,briefRevision:b?.revision??0,canManage:access(u,pid,true),canImport:u.organization_role==='admin',catalogCount:catalog.length,matches,rows,communityCount:communityCatalog.length,communityMatches});
   });
   router.post('/projects/:id/brief',(req,res)=>{
@@ -402,7 +433,7 @@ export function installProjectShortlist(router:Router,db:DatabaseSync,access:(u:
     if(!q)return res.status(404).json({message:'Không tìm thấy báo giá.'});
     if(!['draft','changes_requested'].includes(q.status)||q.revision!==req.body.revision)return res.status(409).json({message:'Báo giá đã thay đổi hoặc bị khóa. Hãy tạo phiên bản mới hoặc tải lại.'});
     const p=JSON.parse(q.payload_json);let updated=0,missingPrice=0,unconfirmedPrice=0,skipped=0;
-    for(const i of p.items){if(!i.shortlistId)continue;const row=db.prepare('SELECT prices_json FROM project_shortlist WHERE id=? AND project_id=?').get(i.shortlistId,pid) as any;const price=row?JSON.parse(row.prices_json)[i.serviceId||i.format]:null;
+    for(const i of p.items){if(!i.shortlistId||i.bundled)continue;const row=db.prepare('SELECT prices_json FROM project_shortlist WHERE id=? AND project_id=?').get(i.shortlistId,pid) as any;const price=row?JSON.parse(row.prices_json)[i.serviceId||i.format]:null;
       // Lấy giá mới nhất kèm trạng thái xác nhận vào bản nháp; dòng chưa xác nhận vẫn được lấy
       // nhưng cổng giá ở bước gửi duyệt/duyệt sẽ chặn cho tới khi xác nhận đủ.
       if(!price){skipped++;continue;}

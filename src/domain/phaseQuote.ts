@@ -31,8 +31,11 @@ export interface AllocatedLine {
   creator: string;
   phase: string;
   partnerType: 'kol' | 'community';
-  key: string; // KOL: format key; Community: serviceId
+  key: string; // KOL: format key (hoặc 'story' cho hạng mục kèm theo); Community: serviceId
   description: string;
+  /** Hạng mục KÈM THEO trong SOW của creator: giá đầu vào tính 0, trạng thái coi như
+   *  đã xác nhận (không chặn cổng giá), bản khách hiện "Đã bao gồm". */
+  bundled?: boolean;
   serviceName?: string;
   unit?: string;
   conditions?: string;
@@ -51,6 +54,7 @@ export interface AllocatedQuoteItem {
   buyUnitPrice: number | null;
   sellUnitPrice: number | null;
   included: boolean;
+  bundled?: boolean;
   shortlistId: string;
   format: string;
   serviceId?: string;
@@ -73,9 +77,13 @@ export function buildAllocatedQuoteItems(
   let unconfirmedPrice = 0;
   for (const line of lines) {
     if (!Number.isSafeInteger(line.quantity) || line.quantity <= 0) continue;
-    const price = line.price ?? WAITING_PRICE;
-    if (price.value === null) missingPrice++;
-    else if (price.status !== 'confirmed') unconfirmedPrice++;
+    const price = line.bundled
+      ? { value: 0, status: 'confirmed' as const, source: 'Kèm theo trong SOW', checkedAt: null, checkedBy: null }
+      : (line.price ?? WAITING_PRICE);
+    if (!line.bundled) {
+      if (price.value === null) missingPrice++;
+      else if (price.status !== 'confirmed') unconfirmedPrice++;
+    }
     items.push({
       id: idGen(),
       creator: line.creator,
@@ -85,8 +93,9 @@ export function buildAllocatedQuoteItems(
       partnerType: line.partnerType,
       quantity: line.quantity,
       buyUnitPrice: price.value,
-      sellUnitPrice: null,
+      sellUnitPrice: line.bundled ? 0 : null,
       included: true,
+      ...(line.bundled ? { bundled: true } : {}),
       shortlistId: line.shortlistId,
       format: line.partnerType === 'kol' ? line.key : '',
       ...(line.partnerType === 'community' ? { serviceId: line.key } : {}),
@@ -109,6 +118,10 @@ export interface SuggestRowInput {
   partnerType: 'kol' | 'community';
   /** Community: các dịch vụ hồ sơ có (key = serviceId). KOL: để trống — dùng format của brief. */
   services: { key: string; name: string }[];
+  /** SOW đã chốt của creator trong phase (null/không có = chưa chốt, gợi ý như cũ).
+   *  Có SOW: chỉ gợi ý các hạng mục KHÔNG kèm theo nằm trong SOW; hạng mục kèm theo
+   *  (kể cả 'story') gợi ý đúng số lượng đã chốt trong SOW. */
+  sow?: { key: string; qty: number | null; included: boolean }[] | null;
 }
 
 export interface SuggestPhaseInput {
@@ -156,14 +169,19 @@ export function suggestAllocations(phases: SuggestPhaseInput[]): SuggestedAlloca
     if (!ph.brief) continue;
     const kolRows = ph.rows.filter(r => r.partnerType === 'kol');
     const commRows = ph.rows.filter(r => r.partnerType === 'community');
-    // KOL x hạng mục Creator của brief
+    // KOL x hạng mục Creator của brief — có SOW thì chỉ gợi ý cho creator có hạng mục
+    // đó trong SOW (và lấy số lượng riêng của creator khi scope là mỗi KOL).
     for (const d of ph.brief.deliverables) {
       if (!(d.format in PRICE_FORMAT_LABELS)) continue;
+      const eligible = kolRows.filter(r => !r.sow || r.sow.some(e => e.key === d.format && !e.included));
       if (ph.brief.deliverableScope === 'per_kol') {
-        for (const r of kolRows) push(ph.phaseId, r.shortlistId, d.format, d.quantity);
+        for (const r of eligible) {
+          const own = r.sow?.find(e => e.key === d.format && !e.included)?.qty;
+          push(ph.phaseId, r.shortlistId, d.format, own ?? d.quantity);
+        }
       } else {
-        const qs = distributeCampaignQuantity(d.quantity, kolRows.length);
-        kolRows.forEach((r, i) => push(ph.phaseId, r.shortlistId, d.format, qs[i] ?? 0));
+        const qs = distributeCampaignQuantity(d.quantity, eligible.length);
+        eligible.forEach((r, i) => push(ph.phaseId, r.shortlistId, d.format, qs[i] ?? 0));
       }
       // Community: hạng mục "post" gợi ý sang dịch vụ đăng bài của Community (nếu hồ sơ có)
       if (d.format === 'post') {
@@ -177,6 +195,12 @@ export function suggestAllocations(phases: SuggestPhaseInput[]): SuggestedAlloca
           }
         }
       }
+    }
+    // Hạng mục KÈM THEO trong SOW (kể cả 'story' — hạng mục không có format giá):
+    // gợi ý đúng số lượng đã chốt cho từng creator, không phụ thuộc scope của brief.
+    for (const r of kolRows) {
+      if (!r.sow) continue;
+      for (const e of r.sow) if (e.included) push(ph.phaseId, r.shortlistId, e.key, e.qty ?? 1);
     }
     // Community x dịch vụ của brief (brief.services)
     for (const s of ph.brief.services) {

@@ -21,6 +21,9 @@ export interface ProjectQuoteItem {
   // Dòng dịch vụ comment thuê ngoài PHẢI xác nhận giá đầu vào như dòng KOL nhập tay.
   // Cờ này do server đặt khi tạo dòng — client không tự đặt/gỡ được qua bản lưu.
   needsBuyConfirmation?:boolean;
+  // Hạng mục KÈM THEO trong SOW (kể cả 'story'): giá mua/bán 0, snapshot đã xác nhận,
+  // bản khách hiện "Đã bao gồm". Trường do server đặt khi tạo từ phân bổ — bản lưu khôi phục.
+  bundled?:boolean;
   // Ghi chú HẠNG MỤC — nội dung phạm vi/điều kiện của riêng dòng này, ĐƯỢC xuất cho
   // khách (bản báo khách + bản in/PDF). Khác với conditions/nguồn giá là thông tin
   // nội bộ không xuất cho khách. Khi đưa dịch vụ vào phương án, ghi chú được chụp từ
@@ -259,7 +262,7 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
       if(req.body.payload.items.some((i:any)=>!originalItems.some(o=>o.id===i.id)&&('shortlistId' in i||'priceSnapshot' in i)))return res.status(400).json({message:'Hãy chọn KOL từ danh sách chung để lấy giá đã xác nhận.'});
       const current=project(pid);
       p={client:current.client_name,campaign:current.campaign_name||current.name,items:cleanItems(req.body.payload.items),discount:req.body.payload.discount,agencyFee:req.body.payload.agencyFee,taxRate:req.body.payload.taxRate};
-      p.items=p.items.map(i=>{const old=originalItems.find(o=>o.id===i.id);return old?.shortlistId?{...i,kind:old.kind,creator:old.creator,buyUnitPrice:old.buyUnitPrice,shortlistId:old.shortlistId,format:old.format,priceSnapshot:old.priceSnapshot,...(old.serviceId?{serviceId:old.serviceId,serviceName:old.serviceName,unit:old.unit,conditions:old.conditions,partnerType:old.partnerType}:{})}:i;});
+      p.items=p.items.map(i=>{const old=originalItems.find(o=>o.id===i.id);return old?.shortlistId?{...i,kind:old.kind,creator:old.creator,buyUnitPrice:old.buyUnitPrice,shortlistId:old.shortlistId,format:old.format,priceSnapshot:old.priceSnapshot,...(old.bundled?{bundled:true}:{}),...(old.serviceId?{serviceId:old.serviceId,serviceName:old.serviceName,unit:old.unit,conditions:old.conditions,partnerType:old.partnerType}:{})}:i;});
       // Các trường server sở hữu của dòng nhập tay: KHÔNG nhận từ payload của client.
       // needsBuyConfirmation luôn lấy từ bản đã lưu; xác nhận giá chỉ giữ lại
       // khi giá đầu vào không đổi — đổi giá là mất xác nhận và phải xác nhận lại.
@@ -416,7 +419,7 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
       const ph=byId.get(id);const b=briefOf(ph);
       const rows=db.prepare('SELECT * FROM project_shortlist WHERE project_id=? AND (phase_id=? OR (phase_id IS NULL AND ?=?)) ORDER BY rowid').all(pid,id,id,firstPhaseId)
         .filter((r:any)=>!onlyRows||onlyRows.has(r.id))
-        .map((r:any)=>{const prof=JSON.parse(r.profile_json);return {shortlistId:r.id,partnerType:(r.partner_type??'kol') as 'kol'|'community',services:(prof.dichVu??[]).map((s:any)=>({key:s.id,name:s.ten}))};});
+        .map((r:any)=>{const prof=JSON.parse(r.profile_json);return {shortlistId:r.id,partnerType:(r.partner_type??'kol') as 'kol'|'community',services:(prof.dichVu??[]).map((s:any)=>({key:s.id,name:s.ten})),sow:r.sow_json?(()=>{try{return JSON.parse(r.sow_json);}catch{return null;}})():null};});
       return {phaseId:id,brief:b?{deliverableScope:b.deliverableScope,deliverables:b.deliverables.map((d:any)=>({format:d.format,quantity:d.quantity})),services:b.services}:null,rows};
     });
     // Gợi ý CHỈ là bản nháp phân bổ trả về cho PM xem/sửa — không tạo phương án, không lưu.
@@ -447,8 +450,16 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
         if(!svc||!price)return res.status(400).json({message:`Dịch vụ đã chọn không thuộc hồ sơ Community “${prof.ten}”.`});
         lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'community',key:a.key,description:svc.ten,serviceName:svc.ten,unit:svc.donVi,...(svc.dieuKien?{conditions:svc.dieuKien}:{}),quantity:a.quantity,price});
       }else{
-        if(!(a.key in PRICE_FORMAT_LABELS)||!price)return res.status(400).json({message:`Hạng mục đã chọn không hợp lệ cho KOL “${prof.ten}”.`});
-        lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'kol',key:a.key,description:PRICE_FORMAT_LABELS[a.key as PriceFormatKey],quantity:a.quantity,price});
+        const bundled=a.included===true;
+        if(a.key==='story'){
+          // Story là hạng mục KÈM THEO (anh chốt 04/11/2026): không có format giá
+          // riêng trong kho — chỉ nhận khi đánh dấu kèm theo.
+          if(!bundled)return res.status(400).json({message:'Story chỉ là hạng mục kèm theo — hãy đánh dấu kèm theo khi phân bổ.'});
+          lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'kol',key:'story',description:'Story',quantity:a.quantity,price:{value:null,status:'waiting',source:'',checkedAt:null,checkedBy:null},bundled:true});
+        }else{
+          if(!(a.key in PRICE_FORMAT_LABELS)||!price)return res.status(400).json({message:`Hạng mục đã chọn không hợp lệ cho KOL “${prof.ten}”.`});
+          lines.push({shortlistId:row.id,creator:prof.ten,phase:phaseNameOf(row.phase_id),partnerType:'kol',key:a.key,description:PRICE_FORMAT_LABELS[a.key as PriceFormatKey],quantity:a.quantity,price,...(bundled?{bundled:true}:{})});
+        }
       }
     }
     const built=buildAllocatedQuoteItems(lines,()=>randomUUID());
@@ -742,6 +753,6 @@ export function installProjectQuotes(router:Router,db:DatabaseSync,access:(user:
     // nội dung dành cho khách), đơn vị, số lượng, giá bán; với dòng dịch vụ comment
     // có thêm phạm vi và tổng số comment bao gồm. Không lộ giá mua, điều kiện nội bộ
     // (conditions), nguồn xác nhận, P&L hay bất kỳ thông tin nội bộ nào khác.
-    res.json({version:q.number,client:p.client,campaign:p.campaign,items:p.items.filter(i=>i.included).map(i=>({creator:i.creator,description:i.description,phase:i.phase,quantity:i.quantity,unit:i.unit??null,serviceName:i.serviceName??null,partnerType:i.partnerType??(i.kind==='kol'?'kol':i.kind==='community'?'community':'other'),...(i.note?{note:i.note}:{}),...(isCommentServiceLine(i)?{scopeNote:i.commentInfo?.scopeNote??'',commentsIncluded:includedCommentsOf(i)}:{}),sellUnitPrice:i.sellUnitPrice,total:i.quantity*i.sellUnitPrice!})),subtotal:f.knownSellTotal,discount:f.discount,agencyFee:f.agencyFee,revenueBeforeTax:f.revenueBeforeTax,taxRate:p.taxRate,tax:f.tax,totalWithTax:f.totalWithTax});
+    res.json({version:q.number,client:p.client,campaign:p.campaign,items:p.items.filter(i=>i.included).map(i=>({creator:i.creator,description:i.description,phase:i.phase,quantity:i.quantity,unit:i.unit??null,serviceName:i.serviceName??null,partnerType:i.partnerType??(i.kind==='kol'?'kol':i.kind==='community'?'community':'other'),...(i.bundled?{bundled:true}:{}),...(i.note?{note:i.note}:{}),...(isCommentServiceLine(i)?{scopeNote:i.commentInfo?.scopeNote??'',commentsIncluded:includedCommentsOf(i)}:{}),sellUnitPrice:i.sellUnitPrice,total:i.quantity*i.sellUnitPrice!})),subtotal:f.knownSellTotal,discount:f.discount,agencyFee:f.agencyFee,revenueBeforeTax:f.revenueBeforeTax,taxRate:p.taxRate,tax:f.tax,totalWithTax:f.totalWithTax});
   });
 }
