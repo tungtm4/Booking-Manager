@@ -164,17 +164,20 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
     <div className="space-y-6">
       <div className="grid md:grid-cols-2 gap-6">
         <div className="bg-white p-5 rounded-2xl border border-purple-100 shadow-sm space-y-3">
-          <div className="flex items-center justify-between">
-            <div><span className="text-[11px] font-semibold uppercase tracking-wider text-purple-700">Bước 1 · Thông tin & thành viên</span><h3 className="font-bold text-slate-900 text-lg">Thông tin chiến dịch & Khách hàng</h3></div>
-            <div className="flex items-center gap-2">
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-purple-700">Bước 1 · Thông tin & thành viên</span>
+              <span className="px-2 py-0.5 text-[11px] font-semibold rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                {project.canManage ? 'PM / Quản lý' : 'Booking'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-bold text-slate-900 text-lg">Thông tin chiến dịch & Khách hàng</h3>
               {canEdit && !editingInfo && (
-                <button type="button" onClick={startEditInfo} className="px-2.5 py-1 text-xs font-semibold rounded-full bg-white text-purple-700 border border-purple-200 hover:bg-purple-50 cursor-pointer">
+                <button type="button" onClick={startEditInfo} className="text-xs text-[#7C3AED] font-semibold hover:underline cursor-pointer whitespace-nowrap">
                   Chỉnh sửa
                 </button>
               )}
-              <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-purple-50 text-purple-700 border border-purple-200">
-                {project.canManage ? 'PM / Quản lý' : 'Booking'}
-              </span>
             </div>
           </div>
           {editingInfo ? (
@@ -228,27 +231,27 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
           </h3>
           <ul className="space-y-2 text-sm">
             {missingPriceRows.length > 0 && (
-              <li className="flex items-center justify-between p-2.5 bg-amber-50/80 rounded-xl text-amber-900 text-xs font-medium border border-amber-200/50">
+              <li className="flex items-center justify-between gap-2 p-2.5 bg-amber-50/80 rounded-xl text-amber-900 text-xs font-medium border border-amber-200/50">
                 <span>⚠️ {missingPriceRows.length} đối tác trong danh sách sơ bộ chưa có giá đầu vào.</span>
-                <button onClick={() => onSwitchTab('shortlist')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer">Xử lý ngay</button>
+                <button onClick={() => onSwitchTab('shortlist')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer whitespace-nowrap shrink-0">Xử lý ngay</button>
               </li>
             )}
             {unconfirmedPriceRows.length > 0 && (
-              <li className="flex items-center justify-between p-2.5 bg-amber-50/80 rounded-xl text-amber-900 text-xs font-medium border border-amber-200/50">
+              <li className="flex items-center justify-between gap-2 p-2.5 bg-amber-50/80 rounded-xl text-amber-900 text-xs font-medium border border-amber-200/50">
                 <span>⚠️ {unconfirmedPriceRows.length} đối tác có giá chưa xác nhận nguồn.</span>
-                <button onClick={() => onSwitchTab('shortlist')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer">Xác nhận</button>
+                <button onClick={() => onSwitchTab('shortlist')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer whitespace-nowrap shrink-0">Xác nhận</button>
               </li>
             )}
             {draftQuotes.length > 0 && (
-              <li className="flex items-center justify-between p-2.5 bg-blue-50/80 rounded-xl text-blue-900 text-xs font-medium border border-blue-200/50">
+              <li className="flex items-center justify-between gap-2 p-2.5 bg-blue-50/80 rounded-xl text-blue-900 text-xs font-medium border border-blue-200/50">
                 <span>📄 {draftQuotes.length} bản nháp phương án/báo giá đang chờ hoàn thiện/gửi duyệt.</span>
-                <button onClick={() => onSwitchTab('quotes')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer">Xem phương án</button>
+                <button onClick={() => onSwitchTab('quotes')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer whitespace-nowrap shrink-0">Xem phương án</button>
               </li>
             )}
             {pendingContractApprovals.length > 0 && (
-              <li className="flex items-center justify-between p-2.5 bg-purple-50/80 rounded-xl text-purple-900 text-xs font-medium border border-purple-200/50">
+              <li className="flex items-center justify-between gap-2 p-2.5 bg-purple-50/80 rounded-xl text-purple-900 text-xs font-medium border border-purple-200/50">
                 <span>📑 {pendingContractApprovals.length} hợp đồng chưa trình ký hoặc chờ đối tác chốt.</span>
-                <button onClick={() => onSwitchTab('contracts')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer">Xem hợp đồng</button>
+                <button onClick={() => onSwitchTab('contracts')} className="text-purple-700 underline font-semibold ml-2 cursor-pointer whitespace-nowrap shrink-0">Xem hợp đồng</button>
               </li>
             )}
             {missingPriceRows.length === 0 && unconfirmedPriceRows.length === 0 && draftQuotes.length === 0 && pendingContractApprovals.length === 0 && (
@@ -465,20 +468,20 @@ function ProjectOverviewPanel({ project, members, isAdmin, onSwitchTab, onProjec
           <p className="text-sm text-slate-500 italic p-4 bg-slate-50 rounded-xl text-center">Chưa có Phase nào được khởi tạo. Bóc tách Phase bằng AI ở trên, hoặc tạo Phase thủ công ở tab Đối tác & Phase.</p>
         ) : (
           <div className="grid md:grid-cols-2 gap-4">
-            {phases.map((ph: any) => {
+            {phases.map((ph: any, phIdx: number) => {
               const deliverableScope = ph.brief?.deliverableScope;
               const deliverables = ph.brief?.deliverables || [];
               const services = ph.brief?.services || [];
               return (
                 <div key={ph.id} className="p-4 rounded-xl border border-purple-100 bg-purple-50/20 space-y-3">
                   <div className="flex items-center justify-between">
-                    <strong className="text-slate-900 font-bold text-base">{ph.name}</strong>
+                    <strong className="text-slate-900 font-bold text-base">Phase {phIdx + 1} · {ph.name}</strong>
                     <span className="text-xs font-semibold px-2 py-0.5 rounded bg-purple-100 text-purple-800">{ph.kind || 'phase'}</span>
                   </div>
                   {ph.description && <p className="text-xs text-slate-600 line-clamp-2">{ph.description}</p>}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="text-xs text-slate-500">{(data?.shortlist?.rows ?? []).filter((r: any) => r.phaseId === ph.id || (!r.phaseId && phases[0]?.id === ph.id)).length} đối tác trong danh sách cơ bản</span>
-                    <button type="button" onClick={() => (onOpenPhase ? onOpenPhase(ph.id) : onSwitchTab('shortlist'))} className="text-xs text-[#7C3AED] font-semibold hover:underline cursor-pointer">Mở phase này ở Đối tác & Phase →</button>
+                    <button type="button" onClick={() => (onOpenPhase ? onOpenPhase(ph.id) : onSwitchTab('shortlist'))} className="text-xs text-[#7C3AED] font-semibold hover:underline cursor-pointer whitespace-nowrap">Mở phase này ở Đối tác & Phase →</button>
                   </div>
                   <div className="text-xs space-y-1 pt-2 border-t border-purple-100/60">
                     <div className="flex justify-between text-slate-500">

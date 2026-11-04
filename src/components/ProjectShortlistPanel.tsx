@@ -662,12 +662,12 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
         <section className="border rounded-xl p-4 space-y-2">
           <h4 className="font-semibold">Tổng quan dự án theo phase (góc nhìn PM)</h4>
           <div className="divide-y text-sm">
-            {phases.map((ph: any) => {
+            {phases.map((ph: any, phIdx: number) => {
               const r = phaseCandidates(ph);
               return (
                 <div key={ph.id} className="py-2 flex flex-wrap gap-x-4 gap-y-1 items-baseline justify-between">
-                  <span className="font-medium">{ph.name} <span className="font-normal text-slate-500">· {PHASE_KIND_LABELS[ph.kind as keyof typeof PHASE_KIND_LABELS]} · {r.kol} KOL · {r.community} Community</span></span>
-                  <span>Ngân sách phase: <strong>{ph.budget != null ? formatVND(ph.budget) : 'Chưa nhập'}</strong> · <span className="text-slate-500">Chưa phân bổ công việc — chưa đủ cơ sở tính chi phí triển khai</span></span>
+                  <span className="font-medium">Phase {phIdx + 1} · {ph.name} <span className="font-normal text-slate-500">· {PHASE_KIND_LABELS[ph.kind as keyof typeof PHASE_KIND_LABELS]} · {r.kol} KOL · {r.community} Community</span></span>
+                  <span>Ngân sách phase: <strong>{ph.budget != null ? formatVND(ph.budget) : 'Chưa nhập'}</strong></span>
                 </div>
               );
             })}
@@ -698,15 +698,15 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h4 className="font-semibold">Bước 1 · Phase & brief của phase ({phases.length})</h4>
         </div>
-        <p className="text-xs text-slate-500">Mỗi phase là một bài toán riêng: loại đối tác, brief riêng, ngân sách riêng. Brief của phase chỉ sửa tại đây — phần tìm ở Bước 2 dùng đúng brief này. Phase mới tạo ở cuối mục này hoặc bóc tách bằng AI ở tab Tổng quan.</p>
+        <p className="text-xs text-slate-500">Brief của phase chỉ sửa tại đây; Bước 2 tìm theo đúng brief này.</p>
         {phases.length === 0 && <p className="text-sm text-slate-500">Dự án chưa có phase. Tạo phase đầu tiên ở cuối mục này, hoặc dùng AI bóc tách từ brief chung ở tab Tổng quan (Bước 3).</p>}
         {phases.length > 0 && (
           <div className="flex flex-wrap gap-2">
-            {phases.map((ph: any) => {
+            {phases.map((ph: any, phIdx: number) => {
               const r = phaseCandidates(ph);
               return (
                 <button type="button" key={ph.id} disabled={busy} onClick={() => selectPhase(ph.id)} className={'rounded-lg border px-3 py-2 text-sm cursor-pointer ' + (activePhase?.id === ph.id ? 'border-indigo-600 bg-indigo-50 font-semibold' : 'bg-white hover:bg-slate-50')}>
-                  {ph.name} · {r.total} ứng viên
+                  Phase {phIdx + 1} · {ph.name} · {r.total} ứng viên
                 </button>
               );
             })}
@@ -1122,7 +1122,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
                         setNotice('Đã chuyển KOL sang ' + phaseNameOf(target) + '.');
                       });
                     }}>
-                      {phases.map((ph: any) => <option key={ph.id} value={ph.id}>{ph.name}</option>)}
+                      {phases.map((ph: any, phIdx: number) => <option key={ph.id} value={ph.id}>Phase {phIdx + 1} · {ph.name}</option>)}
                     </select>
                   </label>
                 )}
@@ -1180,7 +1180,7 @@ export function ProjectShortlistPanel({ projectId, onOpenQuotes, onOpenOverview,
                         setNotice('Đã chuyển Community sang ' + phaseNameOf(targetPhase) + '.');
                       });
                     }}>
-                      {phases.map((ph: any) => <option key={ph.id} value={ph.id}>{ph.name}</option>)}
+                      {phases.map((ph: any, phIdx: number) => <option key={ph.id} value={ph.id}>Phase {phIdx + 1} · {ph.name}</option>)}
                     </select>
                   </label>
                 )}

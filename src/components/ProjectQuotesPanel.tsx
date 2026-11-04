@@ -381,9 +381,9 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
     </form>}
     {manage&&phases.length>0&&(showCreateFromPhase||fromPhaseIds.length>0||commentLines.length>0||Object.keys(alloc).length>0)&&<section className="p-4 border border-indigo-200 bg-indigo-50/50 rounded-xl space-y-3">
       <h3 className="font-semibold">Tạo phương án từ phase — theo phân bổ PM chọn</h3>
-      <p className="text-xs text-slate-500">Danh sách sơ bộ chỉ là ỨNG VIÊN: hệ thống không tự đưa toàn bộ ứng viên vào phương án và không tự chia đều SOW. PM chọn đối tác, dịch vụ/hạng mục và số lượng thực tế cho từng dòng; tổng chi phí của phương án lấy từ phân bổ này. KPI của brief (topics/comments/buzz) là mục tiêu đối chiếu — không tự thành dòng chi phí.</p>
+      <p className="text-xs text-slate-500">Tick chọn đối tác và điền số lượng — chỉ dòng đã chọn mới vào phương án.</p>
       <div className="flex flex-wrap gap-2">
-        {phases.map((ph:any)=><label key={ph.id} className="flex items-center gap-1 text-sm bg-white border rounded-lg px-2 py-1"><input type="checkbox" checked={fromPhaseIds.includes(ph.id)} onChange={()=>setFromPhaseIds(prev=>prev.includes(ph.id)?prev.filter(x=>x!==ph.id):[...prev,ph.id])}/>{ph.name}</label>)}
+        {phases.map((ph:any,phIdx:number)=><label key={ph.id} className="flex items-center gap-1 text-sm bg-white border rounded-lg px-2 py-1"><input type="checkbox" checked={fromPhaseIds.includes(ph.id)} onChange={()=>setFromPhaseIds(prev=>prev.includes(ph.id)?prev.filter(x=>x!==ph.id):[...prev,ph.id])}/>{phIdx+1}. {ph.name}</label>)}
       </div>
       {fromPhaseIds.map(pid2=>{
         const ph=phases.find((x:any)=>x.id===pid2);if(!ph)return null;
@@ -401,16 +401,32 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
         }
         const allocLines=allocLinesForPhase(ph,rows,alloc);
         const phaseAllocTotal=allocLines.reduce((a,l)=>a+(l.total??0),0);
+        const phaseNo=phases.findIndex((x:any)=>x.id===ph.id)+1;
+        const suggestQty=(l:any)=>{
+          if(!b)return 1;
+          if(!l.isComm){const d=(b.deliverables??[]).find((x:any)=>x.format===l.key);if(d){if(b.deliverableScope==='campaign'){const others=allocLines.filter((o:any)=>o.key===l.key&&o.rowId!==l.rowId).reduce((a:number,o:any)=>a+o.qty,0);const rem=d.quantity-others;return rem>0?rem:1;}return Math.max(1,d.quantity);}return 1;}
+          const svc=(b.services??[]).find((x:any)=>x.scope==='phase'&&(l.label.toLowerCase().includes(x.name.toLowerCase())||x.name.toLowerCase().includes(l.label.split(' (')[0].toLowerCase())));
+          if(svc){const others=allocLines.filter((o:any)=>o.isComm&&o.rowId!==l.rowId).reduce((a:number,o:any)=>a+o.qty,0);const rem=svc.quantity-others;return rem>0?rem:1;}
+          return 1;
+        };
+        const selectedPartners=new Set(allocLines.filter(l=>l.qty>0).map(l=>l.rowId)).size;
+        const toggleLine=(l:any,on:boolean)=>setAlloc(prev=>({...prev,[l.rowId+':'+l.key]:on?suggestQty(l):0}));
+        const selectAllLines=()=>setAlloc(prev=>{const next={...prev};for(const l of allocLines){if((next[l.rowId+':'+l.key]??0)===0)next[l.rowId+':'+l.key]=suggestQty(l);}return next;});
+        const clearAllLines=()=>setAlloc(prev=>{const next={...prev};for(const l of allocLines)next[l.rowId+':'+l.key]=0;return next;});
         return <div key={ph.id} className="bg-white border rounded-xl p-3 space-y-2">
-          <p className="text-sm font-semibold">{ph.name} <span className="font-normal text-slate-500">· {rows.length} ứng viên trong danh sách sơ bộ</span></p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold">Phase {phaseNo} · {ph.name} <span className="font-normal text-slate-500">· {rows.length} ứng viên trong danh sách sơ bộ</span></p>
+            {allocLines.length>0&&<span className="flex items-center gap-2 text-xs"><span className="text-slate-500">Đã chọn {selectedPartners}/{rows.length} đối tác</span><button type="button" className="text-indigo-700 font-semibold hover:underline cursor-pointer" onClick={selectAllLines}>Chọn tất cả</button><button type="button" className="text-slate-500 font-semibold hover:underline cursor-pointer" onClick={clearAllLines}>Bỏ chọn</button></span>}
+          </div>
           {targetLines.length>0&&<ul className="text-xs text-slate-600 space-y-0.5">{targetLines.map((t,i)=><li key={i}>· {t}</li>)}</ul>}
           {!rows.length&&<p className="text-xs text-slate-500">Phase chưa có ứng viên. Thêm đối tác vào danh sách sơ bộ ở tab Đối tác & Phase.</p>}
           {rows.filter((r:any)=>r.partnerType==='community'&&!(r.profile.dichVu??[]).length).map((r:any)=><p key={'nodv-'+r.id} className="text-xs text-slate-500">{r.profile.ten}: chưa có dịch vụ trong hồ sơ — bổ sung bảng giá ở Kho Community.</p>)}
           {allocLines.length>0&&<div className="overflow-x-auto"><table className="w-full text-sm min-w-[680px]">
-            <thead><tr className="border-b text-left text-xs text-slate-500"><th className="py-1.5 pr-2">Đối tác</th><th className="py-1.5 pr-2">Hạng mục / Dịch vụ</th><th className="py-1.5 pr-2 text-right">Giá đầu vào</th><th className="py-1.5 pr-2 text-center">SL phân bổ</th><th className="py-1.5 text-right">Thành tiền</th></tr></thead>
+            <thead><tr className="border-b text-left text-xs text-slate-500"><th className="py-1.5 pr-2 w-10">Chọn</th><th className="py-1.5 pr-2">Đối tác</th><th className="py-1.5 pr-2">Hạng mục / Dịch vụ</th><th className="py-1.5 pr-2 text-right">Giá đầu vào</th><th className="py-1.5 pr-2 text-center">SL phân bổ</th><th className="py-1.5 text-right">Thành tiền</th></tr></thead>
             <tbody>
               {allocLines.map(l=>(
                 <tr key={l.rowId+':'+l.key} className={'border-b '+(l.qty===0?'opacity-50':'')}>
+                  <td className="py-1.5 pr-2"><input type="checkbox" aria-label={'Chọn '+l.name+' — '+l.label} checked={l.qty>0} onChange={e=>toggleLine(l,e.target.checked)} className="w-4 h-4 cursor-pointer"/></td>
                   <td className="py-1.5 pr-2 font-medium">{l.name} <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 font-normal">{l.isComm?'Community':'KOL'}</span></td>
                   <td className="py-1.5 pr-2">{l.label}</td>
                   <td className="py-1.5 pr-2 text-right whitespace-nowrap">{l.priceValue===null?'chưa có giá':formatMoneyInput(l.priceValue)+' ₫'}<span className="block text-[11px] text-slate-500">{l.priceValue===null?'':l.priceStatus==='confirmed'?'đã xác nhận':'chưa xác nhận'}</span></td>
@@ -419,19 +435,19 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
                 </tr>
               ))}
             </tbody>
-            <tfoot><tr><td colSpan={4} className="py-2 text-right font-semibold">Tiểu tổng phase (giá đầu vào):</td><td className="py-2 text-right font-bold whitespace-nowrap">{money(phaseAllocTotal)}</td></tr></tfoot>
+            <tfoot><tr><td colSpan={5} className="py-2 text-right font-semibold">Tiểu tổng phase (giá đầu vào):</td><td className="py-2 text-right font-bold whitespace-nowrap">{money(phaseAllocTotal)}</td></tr></tfoot>
           </table></div>}
         </div>;
       })}
-      {fromPhaseIds.length>0&&(()=>{const grandAlloc=fromPhaseIds.reduce((sum,pid3)=>{const phx=phases.find((x:any)=>x.id===pid3);if(!phx)return sum;const rws=shortlistRows.filter((r:any)=>(r.phaseId??phases[0]?.id)===phx.id);return sum+allocLinesForPhase(phx,rws,alloc).reduce((a,l)=>a+(l.total??0),0);},0);const commentBuy=commentLines.reduce((a,c)=>a+(c.buyUnitPrice!=null?c.buyUnitPrice*c.quantity:0),0);return <div className="bg-indigo-600 text-white rounded-xl px-4 py-3 flex flex-wrap gap-x-6 gap-y-1 text-sm"><span>Tổng chi phí phân bổ (giá đầu vào): <strong>{money(grandAlloc)}</strong></span>{commentLines.length>0&&<span>Dịch vụ comment: <strong>{money(commentBuy)}</strong></span>}<span>Tổng cộng dự kiến: <strong>{money(grandAlloc+commentBuy)}</strong></span><span className="text-indigo-100 text-xs self-center">Cập nhật ngay khi sửa số lượng — đây là chi phí mua dự kiến của phương án sắp tạo.</span></div>;})()}
+      {fromPhaseIds.length>0&&(()=>{const grandAlloc=fromPhaseIds.reduce((sum,pid3)=>{const phx=phases.find((x:any)=>x.id===pid3);if(!phx)return sum;const rws=shortlistRows.filter((r:any)=>(r.phaseId??phases[0]?.id)===phx.id);return sum+allocLinesForPhase(phx,rws,alloc).reduce((a,l)=>a+(l.total??0),0);},0);const commentBuy=commentLines.reduce((a,c)=>a+(c.buyUnitPrice!=null?c.buyUnitPrice*c.quantity:0),0);return <div className="bg-indigo-600 text-white rounded-xl px-4 py-3 flex flex-wrap gap-x-6 gap-y-1 text-sm"><span>Tổng chi phí phân bổ (giá đầu vào): <strong>{money(grandAlloc)}</strong></span>{commentLines.length>0&&<span>Dịch vụ comment: <strong>{money(commentBuy)}</strong></span>}<span>Tổng cộng dự kiến: <strong>{money(grandAlloc+commentBuy)}</strong></span><span className="text-indigo-100 text-xs self-center">Chi phí mua dự kiến của phương án sắp tạo.</span></div>;})()}
       <div className="bg-white border rounded-xl p-3 space-y-2">
         <p className="text-sm font-semibold">Dịch vụ comment thuê ngoài (tuỳ chọn, theo phase)</p>
-        <p className="text-xs text-slate-500">Tổng comments mục tiêu của brief, số comments thuê ngoài và số đã nghiệm thu là ba con số khác nhau. Không mặc định mua toàn bộ mục tiêu; không tự chia đều cho từng bài. Nếu gói Community đã bao gồm comments, ghi rõ ở ô “phần đã bao gồm” để tránh tính trùng.</p>
+        <p className="text-xs text-slate-500">Chỉ mua đúng số comments nhập ở đây. Ghi rõ phần đã bao gồm trong gói Community để tránh tính trùng.</p>
         <div className="grid sm:grid-cols-3 gap-2">
           <label className="text-xs">Phase áp dụng
             <select aria-label="Phase cho dòng comment" className={field} value={commentDraft.phase} onChange={e=>setCommentDraft({...commentDraft,phase:e.target.value})}>
               <option value="">Chọn phase…</option>
-              {phases.filter((ph:any)=>fromPhaseIds.includes(ph.id)).map((ph:any)=><option key={ph.id} value={ph.name}>{ph.name}{ph.brief?.kpiComments?` (mục tiêu ${ph.brief.kpiComments.toLocaleString('vi-VN')} comments)`:''}</option>)}
+              {phases.filter((ph:any)=>fromPhaseIds.includes(ph.id)).map((ph:any)=><option key={ph.id} value={ph.name}>{'Phase '+(phases.findIndex((x:any)=>x.id===ph.id)+1)+' · '+ph.name}{ph.brief?.kpiComments?` (mục tiêu ${ph.brief.kpiComments.toLocaleString('vi-VN')} comments)`:''}</option>)}
             </select>
           </label>
           <label className="text-xs">Nhà cung cấp
