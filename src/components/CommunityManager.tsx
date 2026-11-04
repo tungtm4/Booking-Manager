@@ -405,7 +405,7 @@ export function CommunityManager({
               <label className="block text-xs font-semibold text-slate-600 mb-1">Loại Community</label>
               <select
                 aria-label="Lọc loại Community"
-                className="w-full px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden cursor-pointer"
+                className="w-full h-[38px] px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden cursor-pointer"
                 value={loaiFilter}
                 onChange={(e) => {
                   setLoaiFilter(e.target.value);
@@ -422,7 +422,7 @@ export function CommunityManager({
               <label className="block text-xs font-semibold text-slate-600 mb-1">Sắp Xếp Theo</label>
               <select
                 aria-label="Sắp xếp Community"
-                className="w-full px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden cursor-pointer"
+                className="w-full h-[38px] px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden cursor-pointer"
                 value={sortBy}
                 onChange={(e) => { setSortBy(e.target.value as CommunitySortKey); setPage(1); }}
               >
@@ -469,7 +469,7 @@ export function CommunityManager({
                   placeholder="Vd: 20.000.000"
                   value={formatMoneyInput(maxBudget)}
                   onChange={(e) => { const v = parseMoneyInput(e.target.value); setMaxBudget(v === '' ? '' : v); setPage(1); }}
-                  className="w-full pl-3 pr-8 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
+                  className="w-full h-[38px] pl-3 pr-8 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
                 />
                 <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">đ</span>
               </div>
@@ -486,7 +486,7 @@ export function CommunityManager({
                   placeholder="Min (vd 100.000)"
                   value={formatMoneyInput(minScale)}
                   onChange={(e) => { const v = parseMoneyInput(e.target.value); setMinScale(v === '' ? '' : v); setPage(1); }}
-                  className="w-1/2 px-2.5 py-1.5 bg-white text-slate-800 text-xs border border-slate-200 rounded-lg"
+                  className="flex-1 min-w-0 h-[38px] px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
                 />
                 <span className="text-slate-400 text-xs">-</span>
                 <input
@@ -496,13 +496,15 @@ export function CommunityManager({
                   placeholder="Max"
                   value={formatMoneyInput(maxScale)}
                   onChange={(e) => { const v = parseMoneyInput(e.target.value); setMaxScale(v === '' ? '' : v); setPage(1); }}
-                  className="w-1/2 px-2.5 py-1.5 bg-white text-slate-800 text-xs border border-slate-200 rounded-lg"
+                  className="flex-1 min-w-0 h-[38px] px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
                 />
               </div>
             </div>
 
             {/* Checkbox hiện Community chưa có giá */}
-            <div className="flex items-center pt-5">
+            <div>
+              <span aria-hidden="true" className="block text-xs font-semibold mb-1 invisible">Tùy chọn</span>
+              <div className="flex items-center h-[38px]">
               <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700">
                 <input
                   type="checkbox"
@@ -512,6 +514,7 @@ export function CommunityManager({
                 />
                 <span>Hiện cả Community chưa có giá dịch vụ</span>
               </label>
+              </div>
             </div>
           </div>
 

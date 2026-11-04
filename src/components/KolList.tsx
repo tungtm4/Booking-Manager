@@ -612,7 +612,7 @@ export const KolList: React.FC<KolListProps> = ({
               <select
                 value={selectedPlatform}
                 onChange={(e) => setSelectedPlatform(e.target.value as PlatformType | 'all')}
-                className="w-full px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
+                className="w-full h-[38px] px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
               >
                 <option value="all">Tất cả nền tảng</option>
                 <option value="TikTok">TikTok</option>
@@ -628,7 +628,7 @@ export const KolList: React.FC<KolListProps> = ({
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as SortOption)}
-                className="w-full px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
+                className="w-full h-[38px] px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
               >
                 <option value="newest">Mới cập nhật nhất</option>
                 <option value="followers_desc">Followers cao nhất</option>
@@ -673,7 +673,7 @@ export const KolList: React.FC<KolListProps> = ({
                   placeholder="Vd: 20.000.000"
                   value={formatMoneyInput(maxBudget)}
                   onChange={(e) => setMaxBudget(parseMoneyInput(e.target.value))}
-                  className="w-full pl-3 pr-8 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
+                  className="w-full h-[38px] pl-3 pr-8 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
                 />
                 <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">đ</span>
               </div>
@@ -685,7 +685,7 @@ export const KolList: React.FC<KolListProps> = ({
               <select
                 value={budgetFormat}
                 onChange={(e) => setBudgetFormat(e.target.value as PriceFormatKey)}
-                className="w-full px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
+                className="w-full h-[38px] px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
               >
                 {Object.entries(PRICE_FORMAT_LABELS).map(([k, label]) => (
                   <option key={k} value={k}>
@@ -705,7 +705,7 @@ export const KolList: React.FC<KolListProps> = ({
                   placeholder="Min (vd 100.000)"
                   value={formatMoneyInput(minFollowers)}
                   onChange={(e) => setMinFollowers(parseMoneyInput(e.target.value))}
-                  className="w-1/2 px-2.5 py-1.5 bg-white text-slate-800 text-xs border border-slate-200 rounded-lg"
+                  className="flex-1 min-w-0 h-[38px] px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
                 />
                 <span className="text-slate-400 text-xs">-</span>
                 <input
@@ -714,13 +714,15 @@ export const KolList: React.FC<KolListProps> = ({
                   placeholder="Max"
                   value={formatMoneyInput(maxFollowers)}
                   onChange={(e) => setMaxFollowers(parseMoneyInput(e.target.value))}
-                  className="w-1/2 px-2.5 py-1.5 bg-white text-slate-800 text-xs border border-slate-200 rounded-lg"
+                  className="flex-1 min-w-0 h-[38px] px-3 py-2 bg-white text-slate-800 text-sm border border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-hidden"
                 />
               </div>
             </div>
 
             {/* Checkbox hiện KOL chưa có giá */}
-            <div className="flex items-center pt-5">
+            <div>
+              <span aria-hidden="true" className="block text-xs font-semibold mb-1 invisible">Tùy chọn</span>
+              <div className="flex items-center h-[38px]">
               <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700">
                 <input
                   type="checkbox"
@@ -730,6 +732,7 @@ export const KolList: React.FC<KolListProps> = ({
                 />
                 <span>Hiện cả KOL chưa có giá format này</span>
               </label>
+              </div>
             </div>
           </div>
 
