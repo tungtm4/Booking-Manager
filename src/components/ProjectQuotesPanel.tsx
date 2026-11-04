@@ -456,8 +456,9 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
           {targetLines.length>0&&<ul className="text-xs text-slate-600 space-y-0.5">{targetLines.map((t,i)=><li key={i}>· {t}</li>)}</ul>}
           {!rows.length&&<p className="text-xs text-slate-500">Phase chưa có ứng viên. Thêm đối tác vào danh sách sơ bộ ở tab Đối tác & Phase.</p>}
           {rows.filter((r:any)=>r.partnerType==='community'&&!(r.profile.dichVu??[]).length).map((r:any)=><p key={'nodv-'+r.id} className="text-xs text-slate-500">{r.profile.ten}: chưa có dịch vụ trong hồ sơ — bổ sung bảng giá ở Kho Community.</p>)}
-          {allocLines.length>0&&<div className="overflow-x-auto"><table className="w-full text-sm min-w-[880px]">
-            <thead><tr className="border-b text-left text-xs text-slate-500"><th className="py-1.5 pr-2 w-10">Chọn</th><th className="py-1.5 pr-2">Đối tác</th><th className="py-1.5 pr-2">Hạng mục / Dịch vụ</th><th className="py-1.5 pr-2 text-right">Giá đầu vào</th><th className="py-1.5 pr-2 text-center">SL phân bổ</th><th className="py-1.5 pr-2 text-right bg-indigo-100/70 text-indigo-900">Giá báo khách / đơn vị</th><th className="py-1.5 text-right">Thành tiền</th></tr></thead>
+          {allocLines.length>0&&<div className="overflow-x-auto"><table className="w-full text-[13px] table-fixed">
+            <colgroup><col style={{width:32}}/><col style={{width:'18%'}}/><col/><col style={{width:126}}/><col style={{width:62}}/><col style={{width:130}}/><col style={{width:110}}/></colgroup>
+            <thead><tr className="border-b text-left text-[11px] text-slate-500"><th className="py-1.5 px-1.5">Chọn</th><th className="py-1.5 px-1.5">Đối tác</th><th className="py-1.5 px-1.5">Hạng mục / Dịch vụ</th><th className="py-1.5 px-1.5 text-right whitespace-nowrap">Giá đầu vào</th><th className="py-1.5 px-1.5 text-center">SL phân bổ</th><th className="py-1.5 px-1.5 text-right bg-indigo-100/70 text-indigo-900">Giá báo khách / đơn vị</th><th className="py-1.5 px-1.5 text-right whitespace-nowrap">Thành tiền</th></tr></thead>
             <tbody>
               {groups.map(g=>{
                 const gTotal=g.lines.reduce((a,l)=>a+(l.total??0),0);
@@ -465,19 +466,18 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
                 const gAll=g.lines.length>0&&gSelected===g.lines.length;
                 return <React.Fragment key={g.rowId}>
                   <tr className="bg-slate-50 border-b">
-                    <td className="py-1.5 pr-2"><input type="checkbox" aria-label={'Chọn tất cả hạng mục của '+g.name} checked={gAll} ref={el=>{if(el)el.indeterminate=gSelected>0&&!gAll;}} onChange={e=>toggleGroup(g,e.target.checked)} className="w-4 h-4 cursor-pointer"/></td>
-                    <td colSpan={5} className="py-1.5 pr-2 font-semibold">{g.name} <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 font-normal">{g.isComm?'Community':'KOL'}</span> <span className="text-xs font-normal text-slate-500">· {g.lines.length} hạng mục</span></td>
-                    <td className="py-1.5 text-right font-semibold whitespace-nowrap">{money(gTotal)}</td>
+                    <td className="py-1 px-1.5"><input type="checkbox" aria-label={'Chọn tất cả hạng mục của '+g.name} checked={gAll} ref={el=>{if(el)el.indeterminate=gSelected>0&&!gAll;}} onChange={e=>toggleGroup(g,e.target.checked)} className="w-4 h-4 cursor-pointer"/></td>
+                    <td colSpan={5} className="py-1 px-1.5 font-semibold">{g.name} <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-slate-100 font-normal">{g.isComm?'Community':'KOL'}</span> <span className="text-[11px] font-normal text-slate-500">· {g.lines.length} hạng mục</span></td>
+                    <td className="py-1 px-1.5 text-right font-semibold whitespace-nowrap">{money(gTotal)}</td>
                   </tr>
                   {g.lines.map(l=>(
                     <tr key={l.rowId+':'+l.key} className={'border-b '+(l.qty===0?'opacity-50':'')}>
-                      <td className="py-1.5 pr-2"><input type="checkbox" aria-label={'Chọn '+l.name+' — '+l.label} checked={l.qty>0} onChange={e=>handleLineToggle(l,l.li,e)} className="w-4 h-4 cursor-pointer"/></td>
-                      <td className="py-1.5 pr-2"></td>
-                      <td className="py-1.5 pr-2 pl-4">{l.label}{l.included&&<span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold">Kèm theo</span>}</td>
-                      <td className="py-1.5 pr-2 text-right whitespace-nowrap">{l.included?'0 ₫':l.priceValue===null?'chưa có giá':formatMoneyInput(l.priceValue)+' ₫'}<span className="block text-[11px] text-slate-500">{l.included?'kèm theo trong SOW':l.priceValue===null?'':l.priceStatus==='confirmed'?'đã xác nhận':'chưa xác nhận'}</span></td>
-                      <td className="py-1.5 pr-2 text-center"><input aria-label={'Phân bổ '+l.label+' cho '+l.name} className="w-24 rounded border border-slate-300 px-2 py-1 bg-white text-center" type="number" min={0} step={1} value={alloc[l.rowId+':'+l.key]??''} placeholder="0" onChange={e=>{const v=e.target.value===''?0:Math.max(0,Math.floor(Number(e.target.value)||0));setAlloc(prev=>({...prev,[l.rowId+':'+l.key]:v}));}}/></td>
-                      <td className="py-1.5 pr-2 text-right bg-indigo-50/40">{l.included?<span className="text-xs font-semibold text-amber-700">Đã bao gồm</span>:<input aria-label={'Giá báo khách '+l.label+' cho '+l.name} className="w-32 rounded border border-slate-300 px-2 py-1 bg-white text-right" inputMode="numeric" placeholder="Điền giá bán" value={formatMoneyInput(sellAlloc[l.rowId+':'+l.key]??'')} onChange={e=>{const n=parseMoneyInput(e.target.value);setSellAlloc(prev=>({...prev,[l.rowId+':'+l.key]:n===''?null:n}));}}/>}</td>
-                      <td className="py-1.5 text-right font-medium whitespace-nowrap">{l.total===null?'—':money(l.total)}</td>
+                      <td className="py-1 px-1.5"><input type="checkbox" aria-label={'Chọn '+l.name+' — '+l.label} checked={l.qty>0} onChange={e=>handleLineToggle(l,l.li,e)} className="w-4 h-4 cursor-pointer"/></td>
+                      <td colSpan={2} className="py-1 px-1.5 pl-7 leading-snug">{l.label}{l.included&&<span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold">Kèm theo</span>}</td>
+                      <td className="py-1 px-1.5 text-right whitespace-nowrap">{l.included?'0 ₫':l.priceValue===null?'chưa có giá':formatMoneyInput(l.priceValue)+' ₫'}<span className="block text-[11px] text-slate-500">{l.included?'kèm theo trong SOW':l.priceValue===null?'':l.priceStatus==='confirmed'?'đã xác nhận':'chưa xác nhận'}</span></td>
+                      <td className="py-1 px-1.5 text-center"><input aria-label={'Phân bổ '+l.label+' cho '+l.name} className="w-full rounded border border-slate-300 px-1 py-1 bg-white text-center text-[13px]" type="number" min={0} step={1} value={alloc[l.rowId+':'+l.key]??''} placeholder="0" onChange={e=>{const v=e.target.value===''?0:Math.max(0,Math.floor(Number(e.target.value)||0));setAlloc(prev=>({...prev,[l.rowId+':'+l.key]:v}));}}/></td>
+                      <td className="py-1 px-1.5 text-right bg-indigo-50/40">{l.included?<span className="text-xs font-semibold text-amber-700">Đã bao gồm</span>:<input aria-label={'Giá báo khách '+l.label+' cho '+l.name} className="w-full rounded border border-slate-300 px-1.5 py-1 bg-white text-right text-[13px]" inputMode="numeric" placeholder="Điền giá bán" value={formatMoneyInput(sellAlloc[l.rowId+':'+l.key]??'')} onChange={e=>{const n=parseMoneyInput(e.target.value);setSellAlloc(prev=>({...prev,[l.rowId+':'+l.key]:n===''?null:n}));}}/>}</td>
+                      <td className="py-1 px-1.5 text-right font-medium whitespace-nowrap">{l.total===null?'—':money(l.total)}</td>
                     </tr>
                   ))}
                 </React.Fragment>;
