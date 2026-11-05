@@ -329,7 +329,10 @@ export function fallbackExtractCommunityPrices(text: string): ExtractedCommunity
   const loai: 'page' | 'group' | null = /groups\//i.test(link) || /\b(group|nhom)\b/.test(fsrc) ? 'group' : /\b(fanpage|page)\b/.test(fsrc) ? 'page' : null;
 
   const dichVu: ExtractedCommunityService[] = [];
-  const segments = src.split(/[,;\n•·]+/);
+  // Tách đoạn theo dấu câu NHƯNG không cắt giữa một con số: dấu phẩy nằm giữa hai
+  // chữ số thuộc về số tiền (thập phân kiểu Việt "2,5 triệu" hoặc nhóm nghìn
+  // "2,500,000") — cắt ở đó từng khiến "2,5 triệu" bị đọc thành 2đ (Đợt 2, 05/11).
+  const segments = src.split(/[;\n•·]+|(?<!\d),|,(?!\d)/);
   for (const seg of segments) {
     const f = fold(seg);
     let kw: (typeof SERVICE_KEYWORDS)[number] | undefined;

@@ -107,3 +107,51 @@ test('Hub + cảnh báo + Community AI: mô tả phân biệt rõ, có cảnh b�
   assert.ok(catalog.includes('3. Cập nhật giá hàng loạt'), 'Mục giá hàng loạt Community phải được đánh số lại là 3');
   assert.ok(server.includes('/api/ai/extract-community-prices'), 'Server phải có endpoint bóc tách giá Community');
 });
+
+// --- Đợt 2 (05/11): số thập phân tiền kiểu Việt trong fallback bóc giá Community ---
+// Gốc lỗi: bước tách đoạn cắt ở MỌI dấu phẩy nên "2,5 triệu" bị cắt thành "2" +
+// "5 triệu" và đọc thành 2đ, dù parseMoneyToken xử lý đúng token "2,5".
+test('Đợt 2: "2,5 triệu" đọc thành 2.500.000đ — phẩy/chấm thập phân, đơn vị triệu/nghìn/k', () => {
+  const gia = (text: string, ten: string) => {
+    const [item] = fallbackExtractCommunityPrices(text);
+    return item?.dichVu.find((s) => s.ten === ten)?.gia;
+  };
+  assert.equal(gia('Nhóm Ẩm Thực báo giá: đăng bài 2,5 triệu', 'Đăng bài'), 2500000, 'Phẩy thập phân + triệu');
+  assert.equal(gia('Nhóm Ẩm Thực báo giá: đăng bài 2.5 triệu', 'Đăng bài'), 2500000, 'Chấm thập phân + triệu');
+  assert.equal(gia('Nhóm Ẩm Thực báo giá: đăng bài 2,55 triệu', 'Đăng bài'), 2550000, 'Hai chữ số thập phân');
+  assert.equal(gia('Nhóm Ẩm Thực báo giá: đăng bài 2,5tr', 'Đăng bài'), 2500000, 'Đơn vị tr dính liền');
+  assert.equal(gia('Nhóm Ẩm Thực báo giá: share bài 500 nghìn', 'Share bài'), 500000, 'Đơn vị nghìn');
+  assert.equal(gia('Nhóm Ẩm Thực báo giá: share bài 1,5k', 'Share bài'), 1500, 'Thập phân + k');
+  assert.equal(parseMoneyToken('2,55', 'triệu'), 2550000);
+  assert.equal(parseMoneyToken('1,5', 'k'), 1500);
+});
+
+test('Đợt 2: nhiều dịch vụ trong một câu có phẩy thập phân vẫn tách đúng từng dịch vụ', () => {
+  const [item] = fallbackExtractCommunityPrices('Nhóm Ẩm Thực báo giá: đăng bài 2,5 triệu, ghim bài 1,2 triệu, share bài 500 nghìn');
+  const byName = Object.fromEntries(item.dichVu.map((s) => [s.ten, s.gia]));
+  assert.equal(byName['Đăng bài'], 2500000);
+  assert.equal(byName['Ghim bài'], 1200000);
+  assert.equal(byName['Share bài'], 500000);
+});
+
+test('Đợt 2: số tiền có dấu phân tách hàng nghìn (chấm hoặc phẩy) giữ nguyên giá trị', () => {
+  const gia = (text: string) => fallbackExtractCommunityPrices(text)[0]?.dichVu.find((s) => s.ten === 'Đăng bài')?.gia;
+  assert.equal(gia('Nhóm Ẩm Thực báo giá: đăng bài 2.500.000đ'), 2500000, 'Chấm phân tách nghìn');
+  assert.equal(gia('Nhóm Ẩm Thực báo giá: đăng bài 2,500,000đ'), 2500000, 'Phẩy phân tách nghìn kiểu EN');
+  assert.equal(gia('Nhóm Ẩm Thực báo giá: đăng bài 250.000đ'), 250000, 'Một nhóm nghìn');
+  assert.equal(parseMoneyToken('2,500,000'), 2500000);
+  assert.equal(parseMoneyToken('2.500.000'), 2500000);
+});
+
+test('Đợt 2: ca mơ hồ được chốt theo quy ước nhóm nghìn; ca không hợp lệ không sinh giá', () => {
+  // Mơ hồ: "2,555" — nhóm ĐÚNG 3 chữ số sau dấu tách được hiểu là NHÓM NGHÌN cho cả
+  // phẩy lẫn chấm (nhất quán với "250.000" = 250.000đ và "2,500,000" = 2.500.000đ);
+  // thập phân chỉ gồm 1–2 chữ số. Giá luôn qua màn duyệt nên người dùng thấy trước khi lưu.
+  assert.equal(parseMoneyToken('2,555', 'triệu'), 2555000000, '2,555 triệu = 2.555 nghìn triệu theo quy ước nhóm nghìn');
+  const gia = (text: string) => fallbackExtractCommunityPrices(text)[0]?.dichVu.find((s) => s.ten === 'Đăng bài')?.gia;
+  assert.equal(gia('Nhóm Ẩm Thực báo giá: đăng bài 2,555 triệu'), 2555000000);
+  // Không hợp lệ: không có số tiền đọc được thì không sinh dòng giá cho dịch vụ đó.
+  assert.equal(gia('Nhóm Ẩm Thực báo giá: đăng bài abc triệu'), undefined, 'Chữ thay số -> không có giá');
+  assert.equal(gia('Nhóm Ẩm Thực báo giá: đăng bài liên hệ admin'), undefined, 'Không có số -> không có giá');
+  assert.equal(parseMoneyToken('abc', 'triệu'), null, 'Token không phải số -> null');
+});
