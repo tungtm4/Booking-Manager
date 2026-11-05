@@ -4,6 +4,7 @@ import {formatDateTimeVN} from '../utils/formatters';
 import {StorageService} from '../services/storageService';
 import {PRICE_FORMAT_LABELS} from '../types/kol';
 import {computeContractMoney} from '../domain/contractMoney';
+import {AllocFeeSyncCoordinator} from '../domain/allocFeeSync';
 
 type Item={id:string;creator:string;description:string;phase:string;kind:string;quantity:number;buyUnitPrice:number|null;sellUnitPrice?:number|null;included:boolean;bundled?:boolean;shortlistId?:string;format?:string;priceSnapshot?:any;buyConfirmation?:{value:number;source:string;checkedByName:string;checkedAt:string};partnerType?:string;serviceId?:string;serviceName?:string;unit?:string;conditions?:string;note?:string;internalNote?:string;needsBuyConfirmation?:boolean;commentInfo?:{briefTargetTotal:number|null;scopeNote:string;includedNote:string;pricingMode?:'per_comment'|'package';commentsPerPackage?:number|null;includedComments?:number|null};acceptedQty?:number|null;costSource?:any};
 async function request(path:string,body?:unknown){
@@ -322,6 +323,16 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
   const [loadState,setLoadState]=useState<'loading'|'ready'|'error'>('loading'),[loadError,setLoadError]=useState('');
   const [confirmSources,setConfirmSources]=useState<Record<string,string>>({});
   const [costItemId,setCostItemId]=useState<string|null>(null);
+  const [inFlightSaveCount,setInFlightSaveCount]=useState(0);
+  const [isCreatingFromAlloc,setIsCreatingFromAlloc]=useState(false);
+  const isCreatingFromAllocRef=useRef(false);
+  const projectIdRef=useRef(projectId);
+  useEffect(()=>{projectIdRef.current=projectId;},[projectId]);
+  const coordinatorRef=useRef<AllocFeeSyncCoordinator>(new AllocFeeSyncCoordinator(projectId,(count)=>setInFlightSaveCount(count)));
+  const shortlistRowsRef=useRef<any[]>(shortlistRows);
+  useEffect(()=>{shortlistRowsRef.current=shortlistRows;},[shortlistRows]);
+  const feeDraftRef=useRef<Record<string,number|null>>(feeDraft);
+  useEffect(()=>{feeDraftRef.current=feeDraft;},[feeDraft]);
   const loadSeqRef=useRef(0);
   const allocAnchorRef=useRef<Record<string,number>>({});
   const editorRef=useRef<HTMLElement>(null);
@@ -339,7 +350,7 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
     setData(result);setLoadState('ready');
     // Tải phase độc lập: lỗi ở phần phase không làm mất báo giá đã tải.
     request(base+'/phases').then(r=>{setPhases(r.phases??[]);setFromPhaseIds(prev=>prev.length?prev:(r.phases??[]).map((x:any)=>x.id));}).catch(()=>{});
-    request(base+'/shortlist').then(r=>setShortlistRows(r.rows??[])).catch(()=>{});
+    request(base+'/shortlist').then(r=>{setShortlistRows(r.rows??[]);shortlistRowsRef.current=r.rows??[];}).catch(()=>{});
     const all=result.options.flatMap((o:any)=>o.versions);
     const selected=all.find((q:any)=>q.id===(preferred??quote?.id))??all[0]??null;
     loadQuote(selected);setOptionId(selected?.optionId??'');
@@ -356,26 +367,63 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
       setLoadError(e instanceof Error?e.message:'Không thể tải dữ liệu.');setLoadState('error');
     }
     request(base+'/phases').then(r=>{if(seq===loadSeqRef.current){setPhases(r.phases??[]);setFromPhaseIds((r.phases??[]).map((x:any)=>x.id));}}).catch(()=>{});
-    request(base+'/shortlist').then(r=>{if(seq===loadSeqRef.current)setShortlistRows(r.rows??[]);}).catch(()=>{});
+    request(base+'/shortlist').then(r=>{if(seq===loadSeqRef.current){setShortlistRows(r.rows??[]);shortlistRowsRef.current=r.rows??[];}}).catch(()=>{});
   }
-  useEffect(()=>{setData(null);loadQuote(null);setError('');setNotice('');loadInitial();},[projectId]);
+  useEffect(()=>{
+    coordinatorRef.current.setProjectId(projectId);
+    isCreatingFromAllocRef.current=false;
+    setIsCreatingFromAlloc(false);
+    setData(null);
+    loadQuote(null);
+    setError('');
+    setNotice('');
+    loadInitial();
+  },[projectId]);
   async function run(work:()=>Promise<void>){setBusy(true);setError('');setNotice('');try{await work();}catch(e){setError(e instanceof Error?e.message:'Không thể xử lý.');}finally{setBusy(false);}}
   // Lưu phí PM vừa gõ tại bảng phân bổ vào HỒ SƠ GIÁ CỦA DỰ ÁN (cùng endpoint giá ở
   // Bước 3): gõ phí = chốt phí của deal nên lưu kèm xác nhận, nguồn "Phí chốt tại
   // phân bổ". Xoá trắng ô = chưa có giá (waiting). Lỗi (vd lệch revision) thì nạp lại
   // danh sách để hiển thị giá đúng ở server, không giữ số gõ dở trên màn hình.
+  // Đợt 3: Theo dõi qua coordinator để đảm bảo mọi lưu phí in-flight phải hoàn thành
+  // trước khi tạo phương án; nếu lưu lỗi thì huỷ tạo phương án và báo lỗi rõ ràng.
   async function saveAllocFee(rowId:string,key:string,value:number|null){
     const k=rowId+':'+key;
-    const row=shortlistRows.find(r=>r.id===rowId);if(!row)return;
+    const currentPid=projectIdRef.current;
+    const rows=shortlistRowsRef.current;
+    const row=rows.find(r=>r.id===rowId);if(!row)return;
     if((row.prices?.[key]?.value??null)===value){setFeeDraft(prev=>{const n={...prev};delete n[k];return n;});return;}
+    const creatorName=row.profile?.ten||'Creator';
+    let formatLabel=PRICE_FORMAT_LABELS[key as keyof typeof PRICE_FORMAT_LABELS]||key;
+    if(row.partnerType==='community'){
+      const svc=(row.profile?.dichVu??[]).find((s:any)=>s.id===key);
+      if(svc)formatLabel=svc.ten;
+    }
     try{
-      await request(base+`/shortlist/${rowId}/prices`,{revision:row.revision,format:key,value,source:value===null?'':'Phí chốt tại phân bổ',confirm:value!==null});
-      setShortlistRows(prev=>prev.map(r=>r.id===rowId?{...r,revision:r.revision+1,prices:{...(r.prices??{}),[key]:{value,source:value===null?'':'Phí chốt tại phân bổ',status:value===null?'waiting':'confirmed',checkedAt:value===null?null:new Date().toISOString(),checkedBy:null}}}:r));
-      setFeeDraft(prev=>{const n={...prev};delete n[k];return n;});
-    }catch(e){
+      await coordinatorRef.current.trackSave(
+        k,
+        {rowId,format:key,creatorName,formatLabel,projectId:currentPid},
+        async()=>{
+          const currentRow=shortlistRowsRef.current.find(r=>r.id===rowId)??row;
+          await request(base+`/shortlist/${rowId}/prices`,{revision:currentRow.revision,format:key,value,source:value===null?'':'Phí chốt tại phân bổ',confirm:value!==null});
+          if(projectIdRef.current!==currentPid)return;
+          setShortlistRows(prev=>{
+            const next=prev.map(r=>r.id===rowId?{...r,revision:r.revision+1,prices:{...(r.prices??{}),[key]:{value,source:value===null?'':'Phí chốt tại phân bổ',status:value===null?'waiting':'confirmed',checkedAt:value===null?null:new Date().toISOString(),checkedBy:null}}}:r);
+            shortlistRowsRef.current=next;
+            return next;
+          });
+          setFeeDraft(prev=>{const n={...prev};delete n[k];return n;});
+        }
+      );
+    }catch(e:any){
+      if(projectIdRef.current!==currentPid)return;
       setError(e instanceof Error?e.message:'Không lưu được phí vừa gõ.');
       setFeeDraft(prev=>{const n={...prev};delete n[k];return n;});
-      request(base+'/shortlist').then(r=>setShortlistRows(r.rows??[])).catch(()=>{});
+      request(base+'/shortlist').then(r=>{
+        if(projectIdRef.current===currentPid){
+          setShortlistRows(r.rows??[]);
+          shortlistRowsRef.current=r.rows??[];
+        }
+      }).catch(()=>{});
     }
   }
   if(!data)return loadState==='error'
@@ -587,16 +635,53 @@ export function ProjectQuotesPanel({projectId,isAdmin,onProjectChanged,onDirtyCh
       <div className="flex flex-wrap gap-2 items-center">
         <input aria-label="Tên phương án tạo từ phân bổ" className={field+' sm:w-72'} maxLength={200} value={fromName} onChange={e=>setFromName(e.target.value)} placeholder="Tên phương án, VD: Phương án A — phân bổ R1"/>
         <button type="button" className="border rounded-lg px-3 py-2 text-sm bg-white" disabled={busy||dirty||!fromPhaseIds.length} onClick={()=>run(async()=>{const r=await request(base+'/options/suggest-allocations',{phaseIds:fromPhaseIds});const next:Record<string,number>={};for(const a of r.allocations??[])next[a.shortlistId+':'+a.key]=a.quantity;setAlloc(prev=>({...prev,...next}));setNotice(`Đã điền GỢI Ý phân bổ (${(r.allocations??[]).length} dòng) vào biểu phân bổ bên trên — đây mới là bản nháp gợi ý, chưa áp dụng. Kiểm tra, sửa số lượng rồi bấm “Tạo phương án từ phân bổ đã chọn”.`);})}>Gợi ý phân bổ (xem trước, không tự áp dụng)</button>
-        <button type="button" className={button} disabled={busy||dirty||!fromPhaseIds.length||!fromName.trim()} onClick={()=>run(async()=>{
-          const lineMap=new Map<string,any>();
-          for(const pid3 of fromPhaseIds){const phx=phases.find((x:any)=>x.id===pid3);if(!phx)continue;const rws=shortlistRows.filter((r:any)=>(r.phaseId??phases[0]?.id)===phx.id);for(const l of allocLinesForPhase(phx,rws,alloc,feeDraft))lineMap.set(l.rowId+':'+l.key,l);}
-          const allocations=Object.entries(alloc).filter(([,q])=>q>0).map(([k,q])=>{const [shortlistId,...rest]=k.split(':');const sv=sellAlloc[k];const nt=noteAlloc[k]?.trim();return {shortlistId,key:rest.join(':'),quantity:q,...(sv!=null?{sellUnitPrice:sv}:{}),...(nt?{internalNote:nt}:{})};}).filter(a=>{const row=shortlistRows.find(r=>r.id===a.shortlistId);const phId=row?.phaseId??phases[0]?.id;return phId&&fromPhaseIds.includes(phId);});
-          if(!allocations.length&&!commentLines.length){setError('Hãy phân bổ ít nhất một đối tác/dịch vụ (số lượng lớn hơn 0) hoặc thêm một dòng dịch vụ comment trước khi tạo phương án.');return;}
-          const r=await request(base+'/options/from-phases',{name:fromName.trim(),allocations,commentLines});
-          const mismatches=(r.reconciliation??[]).filter((x:any)=>x.difference!==0).map((x:any)=>`${x.phase} — ${x.label}: đã phân bổ ${x.allocated.toLocaleString('vi-VN')} / mục tiêu ${x.target.toLocaleString('vi-VN')} (${x.difference<0?'thiếu':'vượt'} ${Math.abs(x.difference).toLocaleString('vi-VN')})`);
-          await refresh(r.quoteId);setAlloc({});setSellAlloc({});setFeeDraft({});setNoteAlloc({});setCommentLines([]);setShowCreateFromPhase(false);scrollToEditor();
-          setNotice(`Đã tạo phương án từ phân bổ của PM: ${r.itemCount} dòng báo giá.${r.missingPrice?` ${r.missingPrice} dòng đang thiếu giá đầu vào.`:''}${r.unconfirmedPrice?` ${r.unconfirmedPrice} dòng giá chưa xác nhận.`:''}${mismatches.length?' Đối chiếu mục tiêu — '+mismatches.join('; ')+'.':' Đối chiếu mục tiêu: các hạng mục đã phân bổ khớp mục tiêu.'} Bảng phương án vừa tạo đã mở ngay bên dưới — điền giá ở cột “Giá báo khách / đơn vị” rồi bấm Lưu.`);
-        })}>Tạo phương án từ phân bổ đã chọn</button>
+        <button type="button" className={button} disabled={busy||dirty||!fromPhaseIds.length||!fromName.trim()||inFlightSaveCount>0||isCreatingFromAlloc} onClick={async()=>{
+          if(isCreatingFromAllocRef.current)return;
+          isCreatingFromAllocRef.current=true;
+          setIsCreatingFromAlloc(true);
+          setError('');setNotice('');
+          const opPid=projectIdRef.current;
+          try{
+            const selectedKeys=Object.entries(alloc).filter(([,q])=>q>0).map(([k])=>k);
+            const prep=await coordinatorRef.current.prepareForQuoteCreation({
+              projectId:opPid,
+              selectedKeys,
+              flushDrafts:()=>{
+                for(const k of selectedKeys){
+                  if(Object.prototype.hasOwnProperty.call(feeDraftRef.current,k)){
+                    const [rowId,...rest]=k.split(':');
+                    saveAllocFee(rowId,rest.join(':'),feeDraftRef.current[k]);
+                  }
+                }
+              },
+            });
+            if(!prep.ok){
+              if(projectIdRef.current===opPid)setError(prep.error);
+              return;
+            }
+            if(projectIdRef.current!==opPid)return;
+            const freshShortlist=await request(base+'/shortlist');
+            if(projectIdRef.current!==opPid)return;
+            setShortlistRows(freshShortlist.rows??[]);
+            shortlistRowsRef.current=freshShortlist.rows??[];
+            const freshRows:any[]=freshShortlist.rows??[];
+            const allocations=Object.entries(alloc).filter(([,q])=>q>0).map(([k,q])=>{const [shortlistId,...rest]=k.split(':');const sv=sellAlloc[k];const nt=noteAlloc[k]?.trim();return {shortlistId,key:rest.join(':'),quantity:q,...(sv!=null?{sellUnitPrice:sv}:{}),...(nt?{internalNote:nt}:{})};}).filter(a=>{const row=freshRows.find(r=>r.id===a.shortlistId);const phId=row?.phaseId??phases[0]?.id;return phId&&fromPhaseIds.includes(phId);});
+            if(!allocations.length&&!commentLines.length){setError('Hãy phân bổ ít nhất một đối tác/dịch vụ (số lượng lớn hơn 0) hoặc thêm một dòng dịch vụ comment trước khi tạo phương án.');return;}
+            const r=await request(base+'/options/from-phases',{name:fromName.trim(),allocations,commentLines});
+            if(projectIdRef.current!==opPid)return;
+            const mismatches=(r.reconciliation??[]).filter((x:any)=>x.difference!==0).map((x:any)=>`${x.phase} — ${x.label}: đã phân bổ ${x.allocated.toLocaleString('vi-VN')} / mục tiêu ${x.target.toLocaleString('vi-VN')} (${x.difference<0?'thiếu':'vượt'} ${Math.abs(x.difference).toLocaleString('vi-VN')})`);
+            await refresh(r.quoteId);
+            if(projectIdRef.current!==opPid)return;
+            setAlloc({});setSellAlloc({});setFeeDraft({});setNoteAlloc({});setCommentLines([]);setShowCreateFromPhase(false);scrollToEditor();
+            setNotice(`Đã tạo phương án từ phân bổ của PM: ${r.itemCount} dòng báo giá.${r.missingPrice?` ${r.missingPrice} dòng đang thiếu giá đầu vào.`:''}${r.unconfirmedPrice?` ${r.unconfirmedPrice} dòng giá chưa xác nhận.`:''}${mismatches.length?' Đối chiếu mục tiêu — '+mismatches.join('; ')+'.':' Đối chiếu mục tiêu: các hạng mục đã phân bổ khớp mục tiêu.'} Bảng phương án vừa tạo đã mở ngay bên dưới — điền giá ở cột “Giá báo khách / đơn vị” rồi bấm Lưu.`);
+          }catch(e:any){
+            if(projectIdRef.current===opPid)setError(e instanceof Error?e.message:'Không thể tạo phương án.');
+          }finally{
+            coordinatorRef.current.finishQuoteCreation();
+            isCreatingFromAllocRef.current=false;
+            setIsCreatingFromAlloc(false);
+          }
+        }}>{isCreatingFromAlloc?'Đang tạo phương án…':inFlightSaveCount>0?'Đang lưu phí đầu vào…':'Tạo phương án từ phân bổ đã chọn'}</button>
       </div>
     </section>}
     {data.options.length===0?<p className="p-5 border border-dashed rounded-xl text-slate-500">Chưa có phương án. PM/Admin bổ sung thông tin chiến dịch rồi tạo phương án đầu tiên.</p>:<>
