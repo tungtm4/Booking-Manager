@@ -209,6 +209,15 @@ export const CommunityAiPriceExtractor: React.FC<CommunityAiPriceExtractorProps>
     );
 
   const handleApply = async () => {
+    // Dòng đã chọn Cập nhật nhưng chưa chỉ định hồ sơ: chặn lưu và nói rõ, không
+    // bỏ qua im lặng và tuyệt đối không tự chọn hồ sơ thay người dùng.
+    const updateMissingTarget = rows.filter((r) => r.userDecision === 'update' && !r.targetProfileId && r.item.ten.trim());
+    if (updateMissingTarget.length > 0) {
+      setErrorMessage(
+        `Dòng ${updateMissingTarget.map((r) => `"${r.item.ten}"`).join(', ')} đã chọn Cập nhật nhưng chưa chỉ định hồ sơ. Hãy chọn hồ sơ trong ô "Hồ sơ cập nhật", hoặc đổi quyết định của dòng.`,
+      );
+      return;
+    }
     // Chỉ ghi nhận các dòng đã có quyết định rõ ràng (Tạo mới hoặc Cập nhật)
     const rowsToCreate = rows.filter((r) => r.userDecision === 'create' && r.item.ten.trim());
     const rowsToUpdate = rows.filter((r) => r.userDecision === 'update' && r.targetProfileId && r.item.ten.trim());
@@ -506,13 +515,11 @@ export const CommunityAiPriceExtractor: React.FC<CommunityAiPriceExtractorProps>
                     <button
                       type="button"
                       onClick={() => {
-                        const defaultTarget =
-                          row.targetProfileId ||
-                          matchResult.matchedProfile?.id ||
-                          matchResult.candidates[0]?.id ||
-                          communities[0]?.id ||
-                          null;
-                        setRowDecision(idx, 'update', defaultTarget);
+                        // Chỉ giữ target ĐÃ xác định: hồ sơ khớp link 1-1 do hệ thống
+                        // chỉ định sẵn, hoặc hồ sơ người dùng đã tự chọn trong ô chỉ
+                        // định. TUYỆT ĐỐI không tự lấy ứng viên đầu tiên hay hồ sơ đầu
+                        // tiên của kho — chưa chọn thì để rỗng, chờ người dùng chỉ định.
+                        setRowDecision(idx, 'update', row.targetProfileId || matchResult.matchedProfile?.id || null);
                       }}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
                         isUpdate
@@ -573,6 +580,9 @@ export const CommunityAiPriceExtractor: React.FC<CommunityAiPriceExtractorProps>
                           ))}
                         </optgroup>
                       </select>
+                      {!row.targetProfileId && (
+                        <span className="font-semibold text-amber-700 shrink-0">Chưa chỉ định — chọn hồ sơ rồi mới lưu được</span>
+                      )}
                     </div>
                   )}
 

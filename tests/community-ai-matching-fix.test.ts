@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import express from 'express';
 import { createWorkspace } from '../server/workspace';
 import {
@@ -408,4 +409,75 @@ test('AI Community (Ca 7 & 8): Lưu đúng quyết định Tạo mới / Cập n
     // Không có dịch vụ nào bị áp dụng giá 9.999.999 của dòng 4 chưa quyết định
     const roguePrice = listAfter.some((c: any) => c.dichVu.some((s: any) => s.giaThamKhao === 9999999));
     assert.equal(roguePrice, false, 'Dòng chờ xác nhận tuyệt đối không bị ghi giá vào kho');
+  }));
+
+// ----------------------------------------------------------------------------
+// Ca 9 (QA độc lập bổ sung): Nút "Cập nhật hồ sơ" KHÔNG được tự gán hồ sơ đích —
+// không lấy ứng viên đầu tiên, không lấy hồ sơ đầu tiên của kho; lưu phải bị chặn
+// khi đã chọn Cập nhật mà chưa chỉ định hồ sơ. Khóa bằng test nguồn component.
+// ----------------------------------------------------------------------------
+test('AI Community (Ca 9): Component không còn fallback tự chọn hồ sơ đầu tiên; lưu bị chặn khi Cập nhật chưa chỉ định hồ sơ', () => {
+  const src = readFileSync(new URL('../src/components/CommunityAiPriceExtractor.tsx', import.meta.url), 'utf8');
+  assert.ok(!src.includes('candidates[0]'), 'Không được tự lấy ứng viên đầu tiên làm hồ sơ đích');
+  assert.ok(!src.includes('communities[0]'), 'Không được tự lấy hồ sơ đầu tiên của kho làm hồ sơ đích');
+  assert.ok(
+    src.includes("setRowDecision(idx, 'update', row.targetProfileId || matchResult.matchedProfile?.id || null)"),
+    'Nút Cập nhật chỉ giữ target đã có (khớp 1-1 hoặc người dùng đã chọn), còn lại để rỗng',
+  );
+  assert.ok(src.includes('chưa chỉ định hồ sơ'), 'Lưu phải bị chặn kèm thông báo rõ khi Cập nhật mà chưa chỉ định hồ sơ');
+  assert.ok(src.includes('updateMissingTarget'), 'handleApply phải kiểm tra nhóm dòng Cập nhật thiếu hồ sơ đích trước khi ghi');
+});
+
+// ----------------------------------------------------------------------------
+// Ca 10 (QA độc lập bổ sung): Nhiều ứng viên cùng link — chưa chọn thì cổng lưu
+// không ghi gì; chọn đích danh ứng viên 2 thì chỉ ứng viên 2 được cập nhật qua
+// API thật (in-memory) và tải lại đúng; không ứng viên thì không tồn tại hồ sơ
+// đích hợp lệ nào để tự gán.
+// ----------------------------------------------------------------------------
+test('AI Community (Ca 10): Chưa chọn target thì không ghi; chọn đúng ứng viên 2 thì chỉ ứng viên 2 đổi sau khi tải lại', () =>
+  fixture(async ({ call, cookies }) => {
+    const admin = cookies.admin;
+    const mk = (id: string, ten: string, link: string, gia: number): CommunityProfile => ({
+      id, ten, loai: 'group', nenTang: 'Facebook', link, linhVuc: [], quyMo: 1000, loaiChiSo: 'members',
+      lienHe: { tenNguoiLienHe: '', soDienThoai: '', emailZalo: '', ghiChu: '' },
+      dichVu: [{ id: 's_' + id, ten: 'Đăng bài', moTa: '', donVi: 'bài', giaThamKhao: gia, dieuKien: '', nguon: '', ngayCapNhat: '' }],
+      ngayTao: '2026-01-01T00:00:00.000Z', ngayCapNhat: '2026-01-01T00:00:00.000Z',
+    });
+    // Hồ sơ không liên quan đứng đầu kho + 2 ứng viên trùng link
+    await call('/communities', { profile: mk('first_in_list', 'Hồ Sơ Đầu Kho', 'https://facebook.com/firstinlist', 100000) }, admin);
+    await call('/communities', { profile: mk('cand1', 'Ứng Viên Một', 'https://facebook.com/groups/sharedlink', 111000) }, admin);
+    await call('/communities', { profile: mk('cand2', 'Ứng Viên Hai', 'https://facebook.com/groups/sharedlink', 222000) }, admin);
+    const catalog = (await call('/communities', undefined, admin)).body.communities;
+    assert.equal(catalog.length, 3);
+
+    const item: ExtractedCommunity = {
+      ten: 'Tên Bóc Tách Trùng Link', loai: 'group', nenTang: 'Facebook',
+      link: 'https://facebook.com/groups/sharedlink?utm_source=chat', quyMo: null,
+      dichVu: [{ ten: 'Đăng bài', donVi: 'bài', gia: 3000000, dieuKien: '' }],
+    };
+    const match = evaluateCommunityMatch(catalog, item);
+    assert.equal(match.status, 'multiple_link_matches');
+    assert.equal(match.matchedProfile, null, 'Nhiều ứng viên: không có hồ sơ đích mặc định');
+    assert.deepEqual(match.candidates.map((c: any) => c.id), ['cand1', 'cand2']);
+
+    // Cổng lưu của component: userDecision='update' chỉ được ghi khi targetProfileId có giá trị.
+    const gate = (decision: string | null, target: string | null) => decision === 'update' && Boolean(target);
+    assert.equal(gate('update', null), false, 'Chưa chọn hồ sơ đích -> cổng lưu đóng, không ghi gì');
+    assert.equal(gate('update', 'cand2'), true, 'Đã chọn đích danh ứng viên 2 -> cổng lưu mở đúng hồ sơ đó');
+
+    // Người dùng chọn đích danh cand2 -> cập nhật qua API -> tải lại kiểm chứng
+    const cand2 = catalog.find((c: any) => c.id === 'cand2');
+    const merged = mergeExtractedIntoProfile(cand2, item, new Date().toISOString());
+    const upd = await call('/communities/cand2/update', { profile: merged, revision: cand2.revision }, admin);
+    assert.equal(upd.status, 200);
+    const after = (await call('/communities', undefined, admin)).body.communities;
+    assert.equal(after.find((c: any) => c.id === 'cand2').dichVu[0].giaThamKhao, 3000000, 'Ứng viên 2 nhận giá mới');
+    assert.equal(after.find((c: any) => c.id === 'cand1').dichVu[0].giaThamKhao, 111000, 'Ứng viên 1 giữ nguyên');
+    assert.equal(after.find((c: any) => c.id === 'first_in_list').dichVu[0].giaThamKhao, 100000, 'Hồ sơ đầu kho giữ nguyên');
+
+    // Không ứng viên: không tồn tại hồ sơ đích hợp lệ nào để tự gán
+    const noMatch = evaluateCommunityMatch(catalog, { ...item, ten: 'Cộng Đồng Chưa Từng Có', link: 'https://facebook.com/groups/brandnew' });
+    assert.equal(noMatch.suggestedAction, 'create');
+    assert.equal(noMatch.matchedProfile, null);
+    assert.equal(noMatch.candidates.length, 0, 'Không ứng viên -> không có gì để tự chọn, kể cả hồ sơ đầu kho');
   }));
