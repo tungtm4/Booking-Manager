@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { looksLikeSpreadsheetText } from '../src/utils/tablePasteDetect.ts';
 import {
-  parseMoneyToken, fallbackExtractCommunityPrices, matchExtractedCommunity,
+  parseMoneyToken, isAmbiguousMoneyToken, fallbackExtractCommunityPrices, matchExtractedCommunity,
   mergeExtractedIntoProfile, buildNewCommunityProfile, communityLinkKey,
   type ExtractedCommunity,
 } from '../src/utils/communityAiExtract.ts';
@@ -143,15 +143,46 @@ test('Đợt 2: số tiền có dấu phân tách hàng nghìn (chấm hoặc ph
   assert.equal(parseMoneyToken('2.500.000'), 2500000);
 });
 
-test('Đợt 2: ca mơ hồ được chốt theo quy ước nhóm nghìn; ca không hợp lệ không sinh giá', () => {
-  // Mơ hồ: "2,555" — nhóm ĐÚNG 3 chữ số sau dấu tách được hiểu là NHÓM NGHÌN cho cả
-  // phẩy lẫn chấm (nhất quán với "250.000" = 250.000đ và "2,500,000" = 2.500.000đ);
-  // thập phân chỉ gồm 1–2 chữ số. Giá luôn qua màn duyệt nên người dùng thấy trước khi lưu.
-  assert.equal(parseMoneyToken('2,555', 'triệu'), 2555000000, '2,555 triệu = 2.555 nghìn triệu theo quy ước nhóm nghìn');
+test('Đợt 2: ca không hợp lệ không sinh giá', () => {
   const gia = (text: string) => fallbackExtractCommunityPrices(text)[0]?.dichVu.find((s) => s.ten === 'Đăng bài')?.gia;
-  assert.equal(gia('Nhóm Ẩm Thực báo giá: đăng bài 2,555 triệu'), 2555000000);
-  // Không hợp lệ: không có số tiền đọc được thì không sinh dòng giá cho dịch vụ đó.
   assert.equal(gia('Nhóm Ẩm Thực báo giá: đăng bài abc triệu'), undefined, 'Chữ thay số -> không có giá');
   assert.equal(gia('Nhóm Ẩm Thực báo giá: đăng bài liên hệ admin'), undefined, 'Không có số -> không có giá');
   assert.equal(parseMoneyToken('abc', 'triệu'), null, 'Token không phải số -> null');
+});
+
+test('Đợt 2 (anh chốt lại 05/11): đúng 3 chữ số sau dấu tách + đơn vị thang = MƠ HỒ, không tự quy đổi, gắn cờ cần kiểm tra', () => {
+  // Cả dấu phẩy lẫn dấu chấm, cả triệu/tr/nghìn/k đều mơ hồ — tuyệt đối không ra số,
+  // đặc biệt không thành 2.555.000.000đ.
+  for (const [token, unit] of [['2,555', 'triệu'], ['2.555', 'triệu'], ['2,555', 'tr'], ['2,500', 'nghìn'], ['2,500', 'k'], ['1,234', 'củ']] as const) {
+    assert.equal(isAmbiguousMoneyToken(token, unit), true, `${token} + ${unit} phải bị coi là mơ hồ`);
+    assert.equal(parseMoneyToken(token, unit), null, `${token} + ${unit} không được tự quy đổi`);
+  }
+  // Không kèm đơn vị thang thì giữ quy tắc cũ: nhóm nghìn vẫn đọc bình thường.
+  assert.equal(isAmbiguousMoneyToken('250.000', 'đ'), false, 'Đơn vị đ không phải đơn vị thang');
+  assert.equal(parseMoneyToken('250.000', 'đ'), 250000);
+  assert.equal(parseMoneyToken('250.000'), 250000);
+  assert.equal(parseMoneyToken('2,500,000'), 2500000, 'Hai nhóm nghìn, không đơn vị: không mơ hồ');
+  assert.equal(isAmbiguousMoneyToken('2,5', 'triệu'), false, 'Thập phân 1 chữ số không mơ hồ');
+  assert.equal(isAmbiguousMoneyToken('2,55', 'triệu'), false, 'Thập phân 2 chữ số không mơ hồ');
+
+  // Ở tầng bóc tách: dịch vụ vẫn xuất hiện ở màn duyệt với gia null + token gốc để kiểm tra.
+  const svc = (text: string, ten: string) => fallbackExtractCommunityPrices(text)[0]?.dichVu.find((s) => s.ten === ten);
+  const amb1 = svc('Nhóm Ẩm Thực báo giá: đăng bài 2,555 triệu', 'Đăng bài');
+  assert.ok(amb1, 'Dịch vụ mơ hồ vẫn phải xuất hiện ở màn duyệt');
+  assert.equal(amb1!.gia, null, 'Giá mơ hồ để trống, không tự điền số');
+  assert.equal(amb1!.giaCanKiemTra, '2,555', 'Giữ token gốc để người dùng đối chiếu');
+  const amb2 = svc('Nhóm Ẩm Thực báo giá: đăng bài 2.555 triệu', 'Đăng bài');
+  assert.equal(amb2!.gia, null);
+  assert.equal(amb2!.giaCanKiemTra, '2.555');
+  // Dịch vụ hợp lệ trong cùng tin nhắn vẫn bóc đúng, không bị ca mơ hồ kéo theo.
+  const mixed = fallbackExtractCommunityPrices('Nhóm Ẩm Thực báo giá: đăng bài 2,555 triệu, ghim bài 1,2 triệu')[0];
+  assert.equal(mixed.dichVu.find((s) => s.ten === 'Ghim bài')?.gia, 1200000);
+});
+
+test('Đợt 2: UI preview thể hiện trạng thái cần kiểm tra và chặn lưu khi chưa xử lý', () => {
+  const src = readFileSync(new URL('../src/components/CommunityAiPriceExtractor.tsx', import.meta.url), 'utf8');
+  assert.ok(src.includes('giaCanKiemTra'), 'Component phải đọc cờ cần kiểm tra từ kết quả bóc');
+  assert.ok(src.includes('Cần kiểm tra'), 'Preview phải hiện nhãn Cần kiểm tra cho giá mơ hồ');
+  assert.ok(src.includes('mơ hồ chưa kiểm tra'), 'Lưu phải bị chặn kèm thông báo khi còn giá mơ hồ');
+  assert.ok(src.includes('giaCanKiemTra: undefined'), 'Người dùng sửa ô giá thì cờ cần kiểm tra phải được gỡ');
 });

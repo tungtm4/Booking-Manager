@@ -11,6 +11,10 @@ export interface ExtractedCommunityService {
   donVi: string;
   gia: number | null;
   dieuKien: string;
+  // Token tiền gốc bị MƠ HỒ (đúng 3 chữ số sau dấu phẩy/chấm kèm đơn vị thang) nên
+  // không được tự quy đổi: gia để null, trường này giữ token gốc để UI báo
+  // "cần kiểm tra" — người dùng tự sửa/xác nhận trước khi lưu (anh chốt 05/11).
+  giaCanKiemTra?: string;
 }
 
 export interface ExtractedCommunity {
@@ -282,8 +286,20 @@ export function buildNewCommunityProfile(item: ExtractedCommunity, nowIso: strin
 
 const MONEY_RE = /(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(triệu|trieu|tr|củ|cu|k|nghìn|nghin|đ|d|vnd|đồng|dong)?/i;
 
+// Đơn vị THANG (nhân giá trị). Đi kèm các đơn vị này, token có ĐÚNG 3 chữ số sau
+// MỘT dấu tách ("2,555 triệu", "2.555 nghìn") là MƠ HỒ: đọc thập phân thì là
+// 2.555 đơn vị, đọc nhóm nghìn thì là 2.555.000 đơn vị — không được tự quy đổi.
+// Không kèm đơn vị thang (hoặc không đơn vị) thì giữ quy tắc nhóm nghìn như cũ:
+// "250.000đ" = 250.000đ, "2,500,000đ" = 2.500.000đ.
+const SCALING_UNITS = ['trieu', 'tr', 'cu', 'k', 'nghin'];
+export function isAmbiguousMoneyToken(raw: string, unit?: string): boolean {
+  if (!SCALING_UNITS.includes(fold(unit || ''))) return false;
+  return /^\d{1,3}[.,]\d{3}$/.test(String(raw).trim());
+}
+
 export function parseMoneyToken(raw: string, unit?: string): number | null {
   const s = String(raw).trim();
+  if (isAmbiguousMoneyToken(s, unit)) return null; // Mơ hồ -> không tự quy đổi
   let num: number;
   if (/^\d{1,3}([.,]\d{3})+$/.test(s)) {
     // Dạng phân cách nghìn kiểu Việt: 2.500.000 / 250.000
@@ -346,9 +362,15 @@ export function fallbackExtractCommunityPrices(text: string): ExtractedCommunity
     // trong tên Community ở đầu đoạn (vd "Sài Gòn 24H ... đăng bài 2.500.000đ").
     const m = f.slice(kwIdx).match(MONEY_RE);
     if (!m) continue;
+    if (dichVu.some((s) => fold(s.ten) === fold(kw.ten))) continue;
+    if (isAmbiguousMoneyToken(m[1], m[2])) {
+      // Giá mơ hồ: vẫn đưa dịch vụ vào màn duyệt với gia null + cờ cần kiểm tra,
+      // TUYỆT ĐỐI không tự quy đổi thành số (đặc biệt không thành 2.555.000.000đ).
+      dichVu.push({ ten: kw.ten, donVi: kw.donVi, gia: null, dieuKien: '', giaCanKiemTra: m[1] });
+      continue;
+    }
     const gia = parseMoneyToken(m[1], m[2]);
     if (gia == null) continue;
-    if (dichVu.some((s) => fold(s.ten) === fold(kw.ten))) continue;
     dichVu.push({ ten: kw.ten, donVi: kw.donVi, gia, dieuKien: '' });
   }
   if (!ten && dichVu.length === 0) return [];

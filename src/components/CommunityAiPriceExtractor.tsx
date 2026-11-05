@@ -209,6 +209,15 @@ export const CommunityAiPriceExtractor: React.FC<CommunityAiPriceExtractorProps>
     );
 
   const handleApply = async () => {
+    // Dịch vụ còn giá MƠ HỒ chưa kiểm tra: chặn lưu — người dùng phải tự sửa giá
+    // cho đúng hoặc xoá dịch vụ; không để giá mơ hồ trôi vào kho dưới bất kỳ dạng nào.
+    const ambiguousRows = rows.filter((r) => r.item.dichVu.some((s) => s.giaCanKiemTra));
+    if (ambiguousRows.length > 0) {
+      setErrorMessage(
+        `Dòng ${ambiguousRows.map((r) => `"${r.item.ten}"`).join(', ')} có giá dịch vụ mơ hồ chưa kiểm tra. Hãy sửa giá cho đúng (hoặc xoá dịch vụ đó) trước khi lưu.`,
+      );
+      return;
+    }
     // Dòng đã chọn Cập nhật nhưng chưa chỉ định hồ sơ: chặn lưu và nói rõ, không
     // bỏ qua im lặng và tuyệt đối không tự chọn hồ sơ thay người dùng.
     const updateMissingTarget = rows.filter((r) => r.userDecision === 'update' && !r.targetProfileId && r.item.ten.trim());
@@ -620,21 +629,28 @@ export const CommunityAiPriceExtractor: React.FC<CommunityAiPriceExtractorProps>
                   <div className="space-y-1.5">
                     <p className="text-[11px] font-semibold text-slate-500">Giá theo dịch vụ</p>
                     {row.item.dichVu.map((svc, sIdx) => (
-                      <div key={sIdx} className="grid grid-cols-[1fr_84px_130px_1fr_auto] gap-1.5 items-center max-lg:grid-cols-2">
-                        <input aria-label="Tên dịch vụ" value={svc.ten} onChange={(e) => updateService(idx, sIdx, { ten: e.target.value })} placeholder="Tên dịch vụ (vd: Đăng bài)" className={fieldCls} />
-                        <input aria-label="Đơn vị dịch vụ" value={svc.donVi} onChange={(e) => updateService(idx, sIdx, { donVi: e.target.value })} placeholder="Đơn vị" className={fieldCls} />
-                        <input
-                          aria-label="Giá dịch vụ"
-                          inputMode="numeric"
-                          value={formatMoneyInput(svc.gia ?? '')}
-                          onChange={(e) => { const v = parseMoneyInput(e.target.value); updateService(idx, sIdx, { gia: v === '' ? null : v }); }}
-                          placeholder="Giá (đ)"
-                          className={fieldCls}
-                        />
-                        <input aria-label="Điều kiện dịch vụ" value={svc.dieuKien} onChange={(e) => updateService(idx, sIdx, { dieuKien: e.target.value })} placeholder="Điều kiện (nếu có)" className={fieldCls} />
-                        <button type="button" title="Xoá dịch vụ này" onClick={() => updateRow(idx, { dichVu: row.item.dichVu.filter((_, j) => j !== sIdx) })} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                      <div key={sIdx} className="space-y-1">
+                        <div className="grid grid-cols-[1fr_84px_130px_1fr_auto] gap-1.5 items-center max-lg:grid-cols-2">
+                          <input aria-label="Tên dịch vụ" value={svc.ten} onChange={(e) => updateService(idx, sIdx, { ten: e.target.value })} placeholder="Tên dịch vụ (vd: Đăng bài)" className={fieldCls} />
+                          <input aria-label="Đơn vị dịch vụ" value={svc.donVi} onChange={(e) => updateService(idx, sIdx, { donVi: e.target.value })} placeholder="Đơn vị" className={fieldCls} />
+                          <input
+                            aria-label="Giá dịch vụ"
+                            inputMode="numeric"
+                            value={formatMoneyInput(svc.gia ?? '')}
+                            onChange={(e) => { const v = parseMoneyInput(e.target.value); updateService(idx, sIdx, { gia: v === '' ? null : v, giaCanKiemTra: undefined }); }}
+                            placeholder="Giá (đ)"
+                            className={svc.giaCanKiemTra ? `${fieldCls} border-amber-400 bg-amber-50` : fieldCls}
+                          />
+                          <input aria-label="Điều kiện dịch vụ" value={svc.dieuKien} onChange={(e) => updateService(idx, sIdx, { dieuKien: e.target.value })} placeholder="Điều kiện (nếu có)" className={fieldCls} />
+                          <button type="button" title="Xoá dịch vụ này" onClick={() => updateRow(idx, { dichVu: row.item.dichVu.filter((_, j) => j !== sIdx) })} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                        {svc.giaCanKiemTra && (
+                          <p className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
+                            ⚠️ Cần kiểm tra: số tiền gốc “{svc.giaCanKiemTra}” kèm đơn vị bị mơ hồ (hiểu được hai cách) nên chưa quy đổi — hãy nhập giá đúng vào ô giá, hoặc xoá dịch vụ này.
+                          </p>
+                        )}
                       </div>
                     ))}
                     <button
