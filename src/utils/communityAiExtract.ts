@@ -32,38 +32,179 @@ const fold = (s: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-// Khóa so trùng link Community: host + path viết thường, bỏ slash cuối và tham số theo dõi.
-export function communityLinkKey(raw: string): string {
+// Kiểm tra link có chứa định danh cộng đồng xác thực (tránh link mơ hồ/thiếu định danh dẫn đến tự gộp sai)
+export function isIdentifiableCommunityLink(raw: string): boolean {
   const s = (raw || '').trim();
-  if (!s) return '';
+  if (!s) return false;
   try {
     const u = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`);
-    const host = u.hostname.toLowerCase().replace(/^(www\.|m\.)/, '');
+    const host = u.hostname.toLowerCase().replace(/^(www\.|m\.|web\.|touch\.|l\.)/, '');
     const path = u.pathname.replace(/\/+$/, '').toLowerCase();
-    const id = u.searchParams.get('id');
-    return id && path.endsWith('profile.php') ? `${host}${path}?id=${id}` : `${host}${path}`;
+
+    if (!host || !host.includes('.')) return false;
+
+    // Các domain Facebook / Meta
+    if (host === 'facebook.com' || host === 'fb.com') {
+      if (!path || path === '/' || path === '') return false;
+      // Đường dẫn mơ hồ hoặc trang chủ
+      if (/^\/(groups|pages|home|watch|marketplace|share)$/.test(path)) return false;
+      // Link chia sẻ mơ hồ (/share/...) không chứa định danh ổn định để tự gộp
+      if (path.startsWith('/share/')) return false;
+      // profile.php bắt buộc có id cụ thể
+      if (path.endsWith('profile.php')) {
+        const id = u.searchParams.get('id');
+        return Boolean(id && id.trim().length > 0);
+      }
+      // /groups/ phải có group ID hoặc slug phía sau
+      if (path.startsWith('/groups/')) {
+        const groupPart = path.slice('/groups/'.length).replace(/\/.*$/, '');
+        return Boolean(groupPart && groupPart.trim().length > 0);
+      }
+      // Slug page hoặc người dùng: không được là từ khóa hệ thống
+      const slug = path.replace(/^\/+/, '').split('/')[0];
+      const reserved = ['groups', 'pages', 'share', 'profile.php', 'watch', 'marketplace', 'home', 'messages', 'events', 'photo', 'photos', 'video', 'videos', 'story', 'stories'];
+      if (!slug || reserved.includes(slug)) {
+        return false;
+      }
+      return true;
+    }
+
+    // Các nền tảng khác: yêu cầu có path khác '/'
+    return Boolean(path && path !== '/');
   } catch {
-    return fold(s).replace(/\/+$/, '');
+    return false;
   }
 }
 
-// Đối chiếu 1 kết quả bóc tách với kho sẵn có: khớp link trước, khớp tên đúng nguyên văn sau.
-// Chỉ 2 mức chắc chắn này mới đề xuất "cập nhật hồ sơ cũ"; còn lại là tạo mới để người duyệt quyết.
+// Khóa so trùng link Community: host + path viết thường, bỏ slash cuối và giữ profile.php?id (bỏ tracking query params).
+// Link thiếu định danh hoặc chia sẻ mơ hồ trả về chuỗi rỗng để không tự gộp.
+export function communityLinkKey(raw: string): string {
+  const s = (raw || '').trim();
+  if (!s || !isIdentifiableCommunityLink(s)) return '';
+  try {
+    const u = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`);
+    const host = u.hostname.toLowerCase().replace(/^(www\.|m\.|web\.|touch\.|l\.)/, '');
+    const path = u.pathname.replace(/\/+$/, '').toLowerCase();
+    const id = u.searchParams.get('id');
+    if (id && path.endsWith('profile.php')) {
+      return `${host}${path}?id=${id.trim()}`;
+    }
+    return `${host}${path}`;
+  } catch {
+    return '';
+  }
+}
+
+export type CommunityMatchStatus =
+  | 'exact_link_match'           // Link định danh khớp đúng 1 hồ sơ -> Đề xuất cập nhật
+  | 'multiple_link_matches'      // Khớp nhiều hồ sơ cùng link -> Chờ chọn, không lấy hồ sơ đầu
+  | 'same_name_different_link'   // Cùng tên nhưng link khác -> Mặc định tạo mới kèm cảnh báo
+  | 'same_name_missing_link'     // Trùng tên thiếu link -> Chờ xác nhận
+  | 'no_match';                  // Không ứng viên -> Tạo mới
+
+export interface CommunityMatchResult<T> {
+  status: CommunityMatchStatus;
+  suggestedAction: 'update' | 'create' | 'pending';
+  matchedProfile: T | null;       // Chỉ có khi status === 'exact_link_match'
+  candidates: T[];                // Danh sách ứng viên tiềm năng để người dùng duyệt/chọn
+  warning?: string;               // Cảnh báo hiển thị trên giao diện
+}
+
+// Đối chiếu 1 kết quả bóc tách với kho sẵn có theo đúng quy chuẩn nghiêm ngặt:
+// 1. Link định danh khớp đúng 1 hồ sơ -> đề xuất cập nhật.
+// 2. Khớp nhiều hồ sơ -> chờ chọn, KHÔNG lấy hồ sơ đầu.
+// 3. Cùng tên nhưng link khác -> mặc định tạo mới kèm cảnh báo.
+// 4. Trùng tên thiếu link -> chờ xác nhận.
+// 5. Không ứng viên -> tạo mới.
+// Tên chỉ tìm ứng viên/cảnh báo, TUYỆT ĐỐI không tự gộp.
+export function evaluateCommunityMatch<T extends { ten: string; link: string }>(
+  existing: T[],
+  item: ExtractedCommunity,
+): CommunityMatchResult<T> {
+  const itemKey = communityLinkKey(item.link);
+  const itemName = fold(item.ten);
+
+  // 1. Tìm các hồ sơ khớp link định danh
+  const linkMatches = itemKey
+    ? existing.filter((c) => communityLinkKey(c.link) === itemKey)
+    : [];
+
+  // Link khớp đúng một hồ sơ -> Đề xuất cập nhật
+  if (linkMatches.length === 1) {
+    const matchedProfile = linkMatches[0];
+    const nameMismatch = itemName && fold(matchedProfile.ten) !== itemName;
+    return {
+      status: 'exact_link_match',
+      suggestedAction: 'update',
+      matchedProfile,
+      candidates: [matchedProfile],
+      warning: nameMismatch
+        ? `Link trùng với hồ sơ "${matchedProfile.ten}" trong kho (tên bóc tách: "${item.ten}").`
+        : undefined,
+    };
+  }
+
+  // Khớp nhiều hồ sơ cùng link -> Chờ chọn, không lấy hồ sơ đầu
+  if (linkMatches.length > 1) {
+    return {
+      status: 'multiple_link_matches',
+      suggestedAction: 'pending',
+      matchedProfile: null,
+      candidates: linkMatches,
+      warning: `Link này trùng với ${linkMatches.length} hồ sơ trong kho. Vui lòng chọn hồ sơ cần cập nhật hoặc Tạo mới.`,
+    };
+  }
+
+  // Link không khớp hồ sơ nào: kiểm tra ứng viên trùng tên
+  const nameMatches = itemName
+    ? existing.filter((c) => fold(c.ten) === itemName)
+    : [];
+
+  if (nameMatches.length > 0) {
+    const itemHasLink = Boolean(itemKey);
+    const someExistingMissingLink = nameMatches.some((c) => !communityLinkKey(c.link));
+
+    // Trùng tên thiếu link: chờ xác nhận
+    if (!itemHasLink || someExistingMissingLink) {
+      return {
+        status: 'same_name_missing_link',
+        suggestedAction: 'pending',
+        matchedProfile: null,
+        candidates: nameMatches,
+        warning: `Trùng tên với hồ sơ "${nameMatches[0].ten}" trong kho nhưng thiếu link định danh để đối chiếu chắc chắn. Vui lòng xác nhận Cập nhật hay Tạo mới.`,
+      };
+    }
+
+    // Cùng tên nhưng link khác: mặc định tạo mới kèm cảnh báo
+    const existingLinksText = nameMatches
+      .map((c) => c.link || 'trống')
+      .join(', ');
+    return {
+      status: 'same_name_different_link',
+      suggestedAction: 'create',
+      matchedProfile: null,
+      candidates: nameMatches,
+      warning: `Trùng tên với ${nameMatches.length > 1 ? `${nameMatches.length} hồ sơ` : `hồ sơ "${nameMatches[0].ten}"`} trong kho nhưng link khác (${item.link || 'không rõ'} vs ${existingLinksText}). Mặc định tạo mới.`,
+    };
+  }
+
+  // Không ứng viên -> Tạo mới
+  return {
+    status: 'no_match',
+    suggestedAction: 'create',
+    matchedProfile: null,
+    candidates: [],
+    warning: undefined,
+  };
+}
+
+// Hàm đối chiếu trả về hồ sơ nếu khớp link chắc chắn 1-1; trả về null nếu không an toàn để tự cập nhật
 export function matchExtractedCommunity<T extends { ten: string; link: string }>(
   existing: T[],
   item: ExtractedCommunity,
 ): T | null {
-  const key = communityLinkKey(item.link);
-  if (key) {
-    const byLink = existing.find((c) => communityLinkKey(c.link) === key);
-    if (byLink) return byLink;
-  }
-  const name = fold(item.ten);
-  if (name) {
-    const byName = existing.find((c) => fold(c.ten) === name);
-    if (byName) return byName;
-  }
-  return null;
+  const result = evaluateCommunityMatch(existing, item);
+  return result.status === 'exact_link_match' ? result.matchedProfile : null;
 }
 
 const newServiceId = () => 'svc_' + Math.random().toString(36).slice(2, 10);
